@@ -109,17 +109,35 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "1BFDB4F74BC564B22B1A1CD8"
-            BuildableName = "AgentRuntime.framework"
-            BlueprintName = "AgentRuntime"
+            BlueprintIdentifier = "003A7B71BD4C1C8E4F3E980E"
+            BuildableName = "Lumina.app"
+            BlueprintName = "Lumina"
             ReferencedContainer = "container:Lumina.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
       <CommandLineArguments>
       </CommandLineArguments>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "LUMINA_EMBEDDING_MODEL"
+            value = "$(PROJECT_DIR)/Resources/Models/BGETextEmbedding.mlmodelc"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "LUMINA_EMBEDDING_TOKENIZER"
+            value = "$(PROJECT_DIR)/Resources/Models/BGETextEmbedding-tokenizer.json"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "LUMINA_GEMMA4_STATEFUL_MODEL"
+            value = "$(PROJECT_DIR)/Resources/Models/Gemma4Planner"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

@@ -28,8 +28,11 @@ LUMINA_STRICT_PERF=1 swift test --filter PerformanceTests
 Core ML model benchmarks are optional:
 
 ```bash
+./scripts/setup_models.sh
+
 LUMINA_EMBEDDING_MODEL=/abs/BGETextEmbedding.mlmodelc \
-LUMINA_GEMMA4_PLANNER_MODEL=/abs/Gemma4Planner.mlmodelc \
+LUMINA_EMBEDDING_TOKENIZER=/abs/BGETextEmbedding-tokenizer.json \
+LUMINA_GEMMA4_STATEFUL_MODEL=/abs/Gemma4Planner \
 LUMINA_RUN_MODEL_BENCHMARKS=1 \
 swift test --filter PerformanceTests
 ```

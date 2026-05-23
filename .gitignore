@@ -5,5 +5,9 @@ DerivedData/
 *.xcuserdata/
 .DS_Store
 *.mlmodelc/
+Resources/Models/BGETextEmbedding.mlmodelc
+Resources/Models/Downloaded/
+Resources/Models/BGETextEmbedding-tokenizer.json
+Resources/Models/Gemma4Planner
 *.xcresult
-
+Reports/*.png

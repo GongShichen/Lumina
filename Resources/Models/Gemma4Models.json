@@ -1,10 +1,13 @@
 {
   "planner": {
     "preferredBundleName": "Gemma4Planner.mlmodelc",
+    "statefulBundleDirectory": "Gemma4Planner",
+    "downloadedRepository": "mlboydaisuke/gemma-4-E2B-stateful-coreml",
     "fallbackBundleName": "LocalPlanner.mlmodelc",
     "inputName": "prompt",
     "outputName": "json",
-    "computeUnits": "all"
+    "computeUnits": "all",
+    "adapter": "CoreMLTextToJSONModel for prompt->json bundles; Gemma4 stateful chunks require a decoder engine adapter before they can be used as the ReAct planner"
   },
   "embedding": {
     "preferredBundleName": "BGETextEmbedding.mlmodelc",
@@ -12,9 +15,11 @@
       "Gemma4Embedding.mlmodelc",
       "LocalEmbedding.mlmodelc"
     ],
-    "inputName": "text",
-    "outputName": "embedding",
+    "tokenizerName": "BGETextEmbedding-tokenizer.json",
+    "inputNames": ["input_ids", "attention_mask"],
+    "outputName": "pooler_output",
     "dimension": 512,
+    "sequenceLength": 512,
     "modelFamily": "BAAI/bge-small-zh-v1.5",
     "computeUnits": "all",
     "normalizeOutput": true

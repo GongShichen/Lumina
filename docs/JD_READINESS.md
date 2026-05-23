@@ -11,8 +11,8 @@ Lumina is structured as a端侧 AI 基建 project rather than a demo-only app.
 ## SLM / Core ML 工程化
 
 - Planner models use the `LocalStructuredInferenceModel` / `LocalMultimodalStructuredInferenceModel` contracts.
-- Gemma4 can be loaded as `Gemma4Planner.mlmodelc`.
-- Embedding defaults to the lightweight BGE profile `BGETextEmbedding.mlmodelc` for Chinese personal memory retrieval.
+- Gemma4 E2B stateful Core ML assets are configured as the local SLM profile and covered by an optional chunk-load smoke test.
+- Embedding defaults to the lightweight BGE profile `BGETextEmbedding.mlmodelc` with a local WordPiece tokenizer for Chinese personal memory retrieval.
 - Missing models fall back to deterministic local implementations so CI remains stable.
 
 ## 性能与稳定性

@@ -77,9 +77,11 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
             throw XCTSkip("Set LUMINA_EMBEDDING_MODEL to a compiled BGETextEmbedding .mlmodelc.")
         }
         #if canImport(CoreML)
-        let provider = try CoreMLEmbeddingProvider(configuration: .init(
-            modelURL: URL(fileURLWithPath: path),
-            dimension: 512
+        let modelURL = URL(fileURLWithPath: path)
+        let tokenizerURL = try XCTUnwrap(Self.tokenizerURL(for: modelURL))
+        let provider = try BGECoreMLEmbeddingProvider(configuration: .init(
+            modelURL: modelURL,
+            tokenizerURL: tokenizerURL
         ))
         let start = ContinuousClock.now
         let embedding = try await provider.embed("本地端侧记忆检索")
@@ -91,6 +93,36 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         #else
         throw XCTSkip("CoreML is unavailable on this platform.")
         #endif
+    }
+
+    func testBGEWordPieceTokenizerContractWhenTokenizerIsAvailable() throws {
+        guard let path = ProcessInfo.processInfo.environment["LUMINA_EMBEDDING_TOKENIZER"], !path.isEmpty else {
+            throw XCTSkip("Set LUMINA_EMBEDDING_TOKENIZER to tokenizer.json.")
+        }
+        #if canImport(CoreML)
+        let tokenizer = try BGEWordPieceTokenizer(tokenizerURL: URL(fileURLWithPath: path))
+        let encoded = tokenizer.encode("本地端侧 memory", maxLength: 16)
+
+        XCTAssertEqual(encoded.inputIDs.count, 16)
+        XCTAssertEqual(encoded.attentionMask.count, 16)
+        XCTAssertEqual(encoded.inputIDs.first, 101)
+        XCTAssertTrue(encoded.attentionMask.prefix(4).allSatisfy { $0 == 1 })
+        XCTAssertTrue(encoded.attentionMask.suffix(2).allSatisfy { $0 == 0 })
+        #else
+        throw XCTSkip("CoreML is unavailable on this platform.")
+        #endif
+    }
+
+    private static func tokenizerURL(for modelURL: URL) -> URL? {
+        if let path = ProcessInfo.processInfo.environment["LUMINA_EMBEDDING_TOKENIZER"], !path.isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        let parent = modelURL.deletingLastPathComponent()
+        let candidates = [
+            parent.appendingPathComponent("tokenizer.json"),
+            parent.deletingLastPathComponent().appendingPathComponent("tokenizer.json")
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 }
 

@@ -1,6 +1,10 @@
 import XCTest
 @testable import AgentRuntime
 
+#if canImport(CoreML)
+import CoreML
+#endif
+
 final class ReActRuntimeTests: XCTestCase {
     func testRuntimeExecutesReActActionObservationFinal() async {
         let planner = ScriptedReActPlanner(steps: [
@@ -108,6 +112,36 @@ final class AgentRuntimePerformanceTests: XCTestCase {
 
         XCTAssertFalse(json.isEmpty)
         XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 2_000 : 10_000)
+        #else
+        throw XCTSkip("CoreML is unavailable on this platform.")
+        #endif
+    }
+
+    func testOptionalGemma4StatefulCoreMLAssetsLoad() throws {
+        guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
+            throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run Gemma4 asset smoke test.")
+        }
+        guard let path = ProcessInfo.processInfo.environment["LUMINA_GEMMA4_STATEFUL_MODEL"], !path.isEmpty else {
+            throw XCTSkip("Set LUMINA_GEMMA4_STATEFUL_MODEL to the downloaded Gemma4Planner directory.")
+        }
+        #if canImport(CoreML)
+        let root = URL(fileURLWithPath: path)
+        let chunks = [1, 2, 3].map { root.appendingPathComponent("chunk_\($0).mlmodelc") }
+        for chunk in chunks {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: chunk.path), "Missing \(chunk.lastPathComponent)")
+        }
+
+        let start = ContinuousClock.now
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .cpuAndNeuralEngine
+        for chunk in chunks {
+            _ = try MLModel(contentsOf: chunk, configuration: configuration)
+        }
+        let elapsed = TestClock.milliseconds(since: start)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("hf_model/tokenizer.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("model_config.json").path))
+        XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 30_000 : 120_000)
         #else
         throw XCTSkip("CoreML is unavailable on this platform.")
         #endif
