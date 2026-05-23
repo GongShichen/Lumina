@@ -1,0 +1,47 @@
+Test Suite 'Selected tests' started at 2026-05-23 23:24:52.823.
+Test Suite 'LocalAgentRuntimePackageTests.xctest' started at 2026-05-23 23:24:52.824.
+Test Suite 'AgentRuntimePerformanceTests' started at 2026-05-23 23:24:52.824.
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testCancellationLatencyForSlowPlanner]' started.
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testCancellationLatencyForSlowPlanner]' passed (0.054 seconds).
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testMockReActReadOnlyRunLatency]' started.
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testMockReActReadOnlyRunLatency]' passed (0.001 seconds).
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testOptionalCoreMLPlannerModelContract]' started.
+/Users/gsc/Documents/project/iOS-Agent-runtime/Tests/AgentRuntimeTests/ReActRuntimeTests.swift:96: -[AgentRuntimeTests.AgentRuntimePerformanceTests testOptionalCoreMLPlannerModelContract] : Test skipped - Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run Core ML planner benchmark.
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testOptionalCoreMLPlannerModelContract]' skipped (0.001 seconds).
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testRunStreamFirstEventLatency]' started.
+Test Case '-[AgentRuntimeTests.AgentRuntimePerformanceTests testRunStreamFirstEventLatency]' passed (0.000 seconds).
+Test Suite 'AgentRuntimePerformanceTests' passed at 2026-05-23 23:24:52.880.
+	 Executed 4 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.056 (0.056) seconds
+Test Suite 'LuminaAppCorePerformanceTests' started at 2026-05-23 23:24:52.880.
+Test Case '-[LuminaAppCoreTests.LuminaAppCorePerformanceTests testLocalSearchToolLatency]' started.
+Test Case '-[LuminaAppCoreTests.LuminaAppCorePerformanceTests testLocalSearchToolLatency]' passed (0.009 seconds).
+Test Suite 'LuminaAppCorePerformanceTests' passed at 2026-05-23 23:24:52.890.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+Test Suite 'LuminaMarkdownUIPerformanceTests' started at 2026-05-23 23:24:52.890.
+Test Case '-[LuminaMarkdownUITests.LuminaMarkdownUIPerformanceTests testLargeMarkdownParseLatency]' started.
+Test Case '-[LuminaMarkdownUITests.LuminaMarkdownUIPerformanceTests testLargeMarkdownParseLatency]' passed (0.042 seconds).
+Test Case '-[LuminaMarkdownUITests.LuminaMarkdownUIPerformanceTests testMarkdownCacheLatency]' started.
+Test Case '-[LuminaMarkdownUITests.LuminaMarkdownUIPerformanceTests testMarkdownCacheLatency]' passed (0.008 seconds).
+Test Suite 'LuminaMarkdownUIPerformanceTests' passed at 2026-05-23 23:24:52.940.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.050 (0.050) seconds
+Test Suite 'PersonalMemoryPerformanceTests' started at 2026-05-23 23:24:52.940.
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testHeavyFiftyThousandMetadataFilteredSearchWhenEnabled]' started.
+/Users/gsc/Documents/project/iOS-Agent-runtime/Tests/PersonalMemoryTests/PersonalMemoryPerformanceTests.swift:32: -[PersonalMemoryTests.PersonalMemoryPerformanceTests testHeavyFiftyThousandMetadataFilteredSearchWhenEnabled] : Test skipped - Set LUMINA_RUN_HEAVY_BENCHMARKS=1 to run 50k chunk benchmark.
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testHeavyFiftyThousandMetadataFilteredSearchWhenEnabled]' skipped (0.000 seconds).
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testIngestDoesNotWaitForEmbedding]' started.
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testIngestDoesNotWaitForEmbedding]' passed (0.003 seconds).
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testOptionalCoreMLEmbeddingModelContract]' started.
+/Users/gsc/Documents/project/iOS-Agent-runtime/Tests/PersonalMemoryTests/PersonalMemoryPerformanceTests.swift:74: -[PersonalMemoryTests.PersonalMemoryPerformanceTests testOptionalCoreMLEmbeddingModelContract] : Test skipped - Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run Core ML embedding benchmark.
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testOptionalCoreMLEmbeddingModelContract]' skipped (0.000 seconds).
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testSearchTenThousandChunksLatencyAndCacheHit]' started.
+Test Case '-[PersonalMemoryTests.PersonalMemoryPerformanceTests testSearchTenThousandChunksLatencyAndCacheHit]' passed (0.090 seconds).
+Test Suite 'PersonalMemoryPerformanceTests' passed at 2026-05-23 23:24:53.033.
+	 Executed 4 tests, with 2 tests skipped and 0 failures (0 unexpected) in 0.093 (0.093) seconds
+Test Suite 'LocalAgentRuntimePackageTests.xctest' passed at 2026-05-23 23:24:53.033.
+	 Executed 11 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.208 (0.209) seconds
+Test Suite 'Selected tests' passed at 2026-05-23 23:24:53.033.
+	 Executed 11 tests, with 3 tests skipped and 0 failures (0 unexpected) in 0.208 (0.210) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

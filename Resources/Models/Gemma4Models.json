@@ -1,0 +1,22 @@
+{
+  "planner": {
+    "preferredBundleName": "Gemma4Planner.mlmodelc",
+    "fallbackBundleName": "LocalPlanner.mlmodelc",
+    "inputName": "prompt",
+    "outputName": "json",
+    "computeUnits": "all"
+  },
+  "embedding": {
+    "preferredBundleName": "BGETextEmbedding.mlmodelc",
+    "compatibleBundleNames": [
+      "Gemma4Embedding.mlmodelc",
+      "LocalEmbedding.mlmodelc"
+    ],
+    "inputName": "text",
+    "outputName": "embedding",
+    "dimension": 512,
+    "modelFamily": "BAAI/bge-small-zh-v1.5",
+    "computeUnits": "all",
+    "normalizeOutput": true
+  }
+}

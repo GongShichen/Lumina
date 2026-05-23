@@ -1,0 +1,9 @@
+{
+  "startedAt": "2026-05-23T15:24:50Z",
+  "swiftVersion": "Apple Swift version 6.3.2 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)",
+  "system": "Darwin MacBook-Pro.local 25.4.0 Darwin Kernel Version 25.4.0: Thu Mar 19 19:33:43 PDT 2026; root:xnu-12377.101.15~1/RELEASE_ARM64_T8142 arm64",
+  "strict": "0",
+  "heavy": "0",
+  "model": "0",
+  "log": "Reports/benchmark-latest.log"
+}
