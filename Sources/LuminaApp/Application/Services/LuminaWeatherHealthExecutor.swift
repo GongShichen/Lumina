@@ -61,7 +61,9 @@ enum LuminaWeatherHealthExecutor {
         }
         let store = HKHealthStore()
         let types = healthReadTypes()
-        try await store.requestAuthorization(toShare: [], read: types)
+        try await LuminaPermissionTimingRecorder.shared.record {
+            try await store.requestAuthorization(toShare: [], read: types)
+        }
         let end = date(arguments.string("endDateISO")) ?? Date()
         let start = date(arguments.string("startDateISO")) ?? Calendar.current.date(byAdding: .day, value: -1, to: end) ?? end.addingTimeInterval(-86_400)
         var output: [String: LuminaJSONValue] = [
@@ -97,7 +99,9 @@ enum LuminaWeatherHealthExecutor {
         }
         let store = HKHealthStore()
         let types = healthReadTypes()
-        try await store.requestAuthorization(toShare: [], read: types)
+        try await LuminaPermissionTimingRecorder.shared.record {
+            try await store.requestAuthorization(toShare: [], read: types)
+        }
         let metric = arguments.string("metric") ?? "steps"
         let end = date(arguments.string("endDateISO")) ?? Date()
         let start = date(arguments.string("startDateISO")) ?? Calendar.current.date(byAdding: .day, value: -1, to: end) ?? end.addingTimeInterval(-86_400)

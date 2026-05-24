@@ -121,7 +121,6 @@ targets:
       path: Sources/LuminaApp/Info.plist
       properties:
         UILaunchStoryboardName: LaunchScreen
-        UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         NSCalendarsFullAccessUsageDescription: Lumina 需要访问日历，用于查询和创建你明确请求的日程。
@@ -150,7 +149,7 @@ targets:
         SWIFT_VERSION: "6.0"
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         SUPPORTS_MACCATALYST: YES
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,6"
         CODE_SIGN_ENTITLEMENTS: Sources/LuminaApp/Lumina.entitlements
 
   LuminaWidgets:

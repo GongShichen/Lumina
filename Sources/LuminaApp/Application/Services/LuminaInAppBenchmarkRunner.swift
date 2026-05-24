@@ -15,11 +15,11 @@ final class LuminaInAppBenchmarkRunner {
 
     func run(taskCount: Int = 200, progress: @escaping ProgressHandler) async -> LuminaBenchmarkReport {
         let tasks = LuminaBenchmarkSuite.makeTasks(count: taskCount)
-        await progress(LuminaBenchmarkSnapshot(state: .running, currentTask: "准备执行真实 App Benchmark", completed: 0, total: tasks.count))
+        progress(LuminaBenchmarkSnapshot(state: .running, currentTask: "准备执行真实 App Benchmark", completed: 0, total: tasks.count))
         var results: [LuminaBenchmarkTaskResult] = []
         for task in tasks {
             if Task.isCancelled { break }
-            await progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: task.expectedTools.last))
+            progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: task.expectedTools.last))
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
             let (result, observedTimings) = await runSingleTask(task)
@@ -36,11 +36,11 @@ final class LuminaInAppBenchmarkRunner {
                 modelMetrics: services.modelMetrics.metrics(after: metricsMark),
                 failureSummary: failure
             ))
-            await progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: actualTools.last ?? task.expectedTools.last))
+            progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: actualTools.last ?? task.expectedTools.last))
         }
         let reportURLs = writeReport(results: results)
         let report = LuminaBenchmarkReport.make(results: results, jsonReportURL: reportURLs.json, markdownReportURL: reportURLs.markdown)
-        await progress(LuminaBenchmarkSnapshot(state: Task.isCancelled ? .cancelled : .finished, currentTask: "Benchmark 完成", completed: results.count, total: tasks.count, report: report))
+        progress(LuminaBenchmarkSnapshot(state: Task.isCancelled ? .cancelled : .finished, currentTask: "Benchmark 完成", completed: results.count, total: tasks.count, report: report))
         return report
     }
 
@@ -48,7 +48,7 @@ final class LuminaInAppBenchmarkRunner {
         var finalResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
         observer.start()
-        for await event in services.runStream(content: [.text(task.text)]) {
+        for await event in services.runEvaluationStream(content: [.text(task.text)]) {
             if Task.isCancelled { break }
             observer.observe(event)
             if case let .finished(result) = event {
@@ -87,7 +87,7 @@ final class LuminaInAppBenchmarkRunner {
 
     private func markdown(_ report: LuminaBenchmarkReport) -> String {
         let rows = report.results.prefix(200).map { result in
-            "| \(result.taskID) | \(result.status) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
+            "| \(result.taskID) | \(result.status) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(Int(result.systemPermissionWaitMilliseconds))ms | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
         }.joined(separator: "\n")
         return """
         # Lumina In-App Benchmark Report
@@ -105,6 +105,7 @@ final class LuminaInAppBenchmarkRunner {
         - Active runtime p50/p95: \(Int(report.latencyP50Milliseconds))ms / \(Int(report.latencyP95Milliseconds))ms
         - Wall-clock p95: \(Int(report.wallClockP95Milliseconds))ms
         - Confirmation wait p95: \(Int(report.confirmationWaitP95Milliseconds))ms
+        - System permission wait p95: \(Int(report.systemPermissionWaitP95Milliseconds))ms
         - Planning p95: \(Int(report.planningP95Milliseconds))ms
         - Tool p95: \(Int(report.toolP95Milliseconds))ms
 
@@ -116,8 +117,8 @@ final class LuminaInAppBenchmarkRunner {
         - Output tokens p95: \(optionalNumber(report.modelOutputTokensP95))
 
         ## Tasks
-        | Task | Status | Tool F1 | Active latency | Wall clock | Actual tools | Model calls |
-        | --- | --- | ---: | ---: | ---: | --- | ---: |
+        | Task | Status | Tool F1 | Active latency | Wall clock | Permission wait | Actual tools | Model calls |
+        | --- | --- | ---: | ---: | ---: | ---: | --- | ---: |
         \(rows)
         """
     }

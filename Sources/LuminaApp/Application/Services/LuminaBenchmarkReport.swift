@@ -14,6 +14,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let latencyP95Milliseconds: Double
     let wallClockP95Milliseconds: Double
     let confirmationWaitP95Milliseconds: Double
+    let systemPermissionWaitP95Milliseconds: Double
     let planningP95Milliseconds: Double
     let toolP95Milliseconds: Double
     let modelInvocationCount: Int
@@ -62,6 +63,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             latencyP95Milliseconds: percentile(results.map(\.activeRuntimeMilliseconds), percentile: 0.95),
             wallClockP95Milliseconds: percentile(results.map(\.wallClockMilliseconds), percentile: 0.95),
             confirmationWaitP95Milliseconds: percentile(results.map(\.confirmationWaitMilliseconds), percentile: 0.95),
+            systemPermissionWaitP95Milliseconds: percentile(results.map(\.systemPermissionWaitMilliseconds), percentile: 0.95),
             planningP95Milliseconds: percentile(results.map(\.planningMilliseconds), percentile: 0.95),
             toolP95Milliseconds: percentile(results.map(\.toolMilliseconds), percentile: 0.95),
             modelInvocationCount: modelMetrics.count,

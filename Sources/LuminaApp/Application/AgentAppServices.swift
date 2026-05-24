@@ -19,7 +19,7 @@ final class AgentAppServices: ObservableObject {
     private let loadTask: Task<Void, Never>
 
     private(set) lazy var runtime: LuminaAgentRuntime = {
-        LuminaAgentRuntime(
+        makeRuntime(
             tools: AppToolFactory.makeTools(
                 memoryStore: memoryStore,
                 ledgerStore: ledgerStore,
@@ -27,13 +27,35 @@ final class AgentAppServices: ObservableObject {
                 messageDrafts: messageDrafts,
                 askUser: askUser
             ),
+            contextProvider: environment.contextProvider
+        )
+    }()
+
+    private(set) lazy var evaluationRuntime: LuminaAgentRuntime = {
+        let memoryReadTools: Set<String> = ["local.search", "memory.recent", "memory.stats", "memory.delete"]
+        let tools = AppToolFactory.makeTools(
+            memoryStore: memoryStore,
+            ledgerStore: ledgerStore,
+            subscriptionStore: subscriptionStore,
+            messageDrafts: messageDrafts,
+            askUser: askUser
+        ).filter { !memoryReadTools.contains($0.schema.name) }
+        return makeRuntime(tools: tools, contextProvider: LuminaEmptyRuntimeContextProvider())
+    }()
+
+    private func makeRuntime(
+        tools: [AnyLuminaAgentTool],
+        contextProvider: any LuminaRuntimeContextProvider
+    ) -> LuminaAgentRuntime {
+        LuminaAgentRuntime(
+            tools: tools,
             reactPlanner: environment.reactPlanner,
-            contextProvider: environment.contextProvider,
+            contextProvider: contextProvider,
             configuration: environment.runtimeConfiguration,
             confirmationCoordinator: confirmation,
             auditLogger: auditLogger
         )
-    }()
+    }
 
     init(environment: AppEnvironment = .live()) {
         self.environment = environment
@@ -77,6 +99,13 @@ final class AgentAppServices: ObservableObject {
 
     func runStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
         runtime.runStream(request: LuminaAgentRequest(content: content))
+    }
+
+    func runEvaluationStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
+        evaluationRuntime.runStream(request: LuminaAgentRequest(
+            content: content,
+            metadata: [LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true)]
+        ))
     }
 
     func makeBenchmarkRunner() -> LuminaInAppBenchmarkRunner {

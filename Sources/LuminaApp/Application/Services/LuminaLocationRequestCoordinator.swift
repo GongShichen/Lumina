@@ -37,9 +37,11 @@ final class LuminaLocationRequestCoordinator: NSObject, CLLocationManagerDelegat
     }
 
     private func requestAuthorization() async -> CLAuthorizationStatus {
-        await withCheckedContinuation { continuation in
-            authorizationContinuation = continuation
-            manager.requestWhenInUseAuthorization()
+        await LuminaPermissionTimingRecorder.shared.recordMainActorValue {
+            await withCheckedContinuation { continuation in
+                authorizationContinuation = continuation
+                manager.requestWhenInUseAuthorization()
+            }
         }
     }
 

@@ -5,18 +5,21 @@ struct LuminaObservedRunTimings: Codable, Hashable {
     var wallClockMilliseconds: Double
     var activeRuntimeMilliseconds: Double
     var confirmationWaitMilliseconds: Double
+    var systemPermissionWaitMilliseconds: Double
     var observedToolExecutionMilliseconds: Double
 
     static let empty = LuminaObservedRunTimings(
         wallClockMilliseconds: 0,
         activeRuntimeMilliseconds: 0,
         confirmationWaitMilliseconds: 0,
+        systemPermissionWaitMilliseconds: 0,
         observedToolExecutionMilliseconds: 0
     )
 }
 
 struct LuminaRunStreamObserver {
     private var startedAt: ContinuousClock.Instant?
+    private var permissionTimingMark = 0
     private var confirmationStartedAt: ContinuousClock.Instant?
     private var toolStarts: [UUID: ContinuousClock.Instant] = [:]
     private var confirmationWaitMilliseconds = Double(0)
@@ -24,6 +27,7 @@ struct LuminaRunStreamObserver {
 
     mutating func start() {
         startedAt = ContinuousClock.now
+        permissionTimingMark = LuminaPermissionTimingRecorder.shared.mark()
     }
 
     mutating func observe(_ event: LuminaAgentRunEvent) {
@@ -49,11 +53,14 @@ struct LuminaRunStreamObserver {
     func finish(result: LuminaAgentRunResult?) -> LuminaObservedRunTimings {
         let wallClock = startedAt.map(milliseconds(since:)) ?? 0
         let planning = result?.timing.planningMilliseconds ?? 0
-        let active = planning + observedToolExecutionMilliseconds
+        let permissionWait = LuminaPermissionTimingRecorder.shared.milliseconds(after: permissionTimingMark)
+        let measuredToolExecution = max(0, observedToolExecutionMilliseconds - permissionWait)
+        let active = planning + measuredToolExecution
         return LuminaObservedRunTimings(
             wallClockMilliseconds: wallClock,
             activeRuntimeMilliseconds: active,
             confirmationWaitMilliseconds: confirmationWaitMilliseconds,
+            systemPermissionWaitMilliseconds: permissionWait,
             observedToolExecutionMilliseconds: observedToolExecutionMilliseconds
         )
     }

@@ -80,7 +80,9 @@ enum LuminaContactMutationExecutor {
         case .authorized, .limited:
             return
         case .notDetermined:
-            guard try await store.requestAccess(for: .contacts) else {
+            guard try await LuminaPermissionTimingRecorder.shared.record({
+                try await store.requestAccess(for: .contacts)
+            }) else {
                 throw AppToolError.permissionDenied("通讯录权限未开启。请在系统设置中允许 Lumina 访问通讯录后重试。")
             }
         case .denied, .restricted:

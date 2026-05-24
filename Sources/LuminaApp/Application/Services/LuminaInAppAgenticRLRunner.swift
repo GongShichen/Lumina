@@ -16,14 +16,14 @@ final class LuminaInAppAgenticRLRunner {
 
     func run(taskCount: Int = 200, progress: @escaping ProgressHandler) async -> LuminaAgenticRLReport {
         let tasks = LuminaAgenticRLSuite.makeTasks(count: taskCount)
-        await progress(LuminaAgenticRLSnapshot(state: .running, currentTask: "准备生成 Agentic RL JSONL 轨迹", completed: 0, total: tasks.count))
+        progress(LuminaAgenticRLSnapshot(state: .running, currentTask: "准备生成 Agentic RL JSONL 轨迹", completed: 0, total: tasks.count))
         var records: [LuminaAgenticRLTrajectoryRecord] = []
         let outputURLs = makeOutputURLs()
         prepareJSONL(at: outputURLs.jsonl)
 
         for task in tasks {
             if Task.isCancelled { break }
-            await progress(LuminaAgenticRLSnapshot(state: .running, currentTask: task.instruction, completed: records.count, total: tasks.count, latestTool: task.expectedTools.last))
+            progress(LuminaAgenticRLSnapshot(state: .running, currentTask: task.instruction, completed: records.count, total: tasks.count, latestTool: task.expectedTools.last))
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
             let (result, observedTimings) = await runSingleTask(task)
@@ -31,12 +31,12 @@ final class LuminaInAppAgenticRLRunner {
             let record = makeRecord(task: task, result: result, observedTimings: observedTimings, modelMetrics: metrics)
             records.append(record)
             appendJSONL(record, to: outputURLs.jsonl)
-            await progress(LuminaAgenticRLSnapshot(state: .running, currentTask: task.instruction, completed: records.count, total: tasks.count, latestTool: record.actualTools.last ?? task.expectedTools.last))
+            progress(LuminaAgenticRLSnapshot(state: .running, currentTask: task.instruction, completed: records.count, total: tasks.count, latestTool: record.actualTools.last ?? task.expectedTools.last))
         }
 
         let report = LuminaAgenticRLReport.make(records: records, trajectoryJSONLURL: outputURLs.jsonl, summaryJSONURL: outputURLs.summary)
         writeSummary(report, records: records, to: outputURLs.summary)
-        await progress(LuminaAgenticRLSnapshot(state: Task.isCancelled ? .cancelled : .finished, currentTask: "Agentic RL 轨迹已导出", completed: records.count, total: tasks.count, report: report))
+        progress(LuminaAgenticRLSnapshot(state: Task.isCancelled ? .cancelled : .finished, currentTask: "Agentic RL 轨迹已导出", completed: records.count, total: tasks.count, report: report))
         return report
     }
 
@@ -44,7 +44,7 @@ final class LuminaInAppAgenticRLRunner {
         var finalResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
         observer.start()
-        for await event in services.runStream(content: [.text(task.instruction)]) {
+        for await event in services.runEvaluationStream(content: [.text(task.instruction)]) {
             if Task.isCancelled { break }
             observer.observe(event)
             if case let .finished(result) = event {
@@ -108,6 +108,7 @@ final class LuminaInAppAgenticRLRunner {
                 activeRuntimeMilliseconds: observedTimings.activeRuntimeMilliseconds,
                 wallClockMilliseconds: observedTimings.wallClockMilliseconds,
                 confirmationWaitMilliseconds: observedTimings.confirmationWaitMilliseconds,
+                systemPermissionWaitMilliseconds: observedTimings.systemPermissionWaitMilliseconds,
                 totalMilliseconds: result.timing.totalMilliseconds,
                 planningMilliseconds: result.timing.planningMilliseconds,
                 toolMilliseconds: observedTimings.observedToolExecutionMilliseconds,

@@ -3,11 +3,16 @@ import Foundation
 import PersonalMemory
 
 struct LuminaAppContextProvider: LuminaRuntimeContextProvider {
+    static let disableMemoryContextMetadataKey = "lumina.disable_memory_context"
+
     let memoryStore: LuminaMemoryStore
     var maximumSnippets: Int = 4
 
     func loadContext(_ request: LuminaRuntimeContextRequest) async throws -> LuminaRuntimeContext {
         try Task.checkCancellation()
+        if request.request.metadata.bool(Self.disableMemoryContextMetadataKey) == true {
+            return .empty
+        }
         let query = request.request.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard shouldLoadMemory(for: query, trace: request.trace) else {
             return .empty

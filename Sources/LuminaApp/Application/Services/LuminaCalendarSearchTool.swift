@@ -3,7 +3,7 @@ import AgentRuntime
 import Foundation
 import PersonalMemory
 
-struct LuminaCalendarSearchTool: LuminaAgentTool {
+final class LuminaCalendarSearchTool: LuminaAgentTool, @unchecked Sendable {
     private let eventStore = EKEventStore()
 
     var schema: LuminaToolSchema {
@@ -54,7 +54,9 @@ struct LuminaCalendarSearchTool: LuminaAgentTool {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await eventStore.requestFullAccessToEvents()
+            let granted = try await LuminaPermissionTimingRecorder.shared.record {
+                try await eventStore.requestFullAccessToEvents()
+            }
             if granted {
                 return
             }

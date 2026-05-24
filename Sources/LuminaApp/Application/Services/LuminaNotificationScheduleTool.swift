@@ -54,7 +54,9 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
         case .authorized, .ephemeral, .provisional:
             return
         case .notDetermined:
-            let granted = try await center.requestAuthorization(options: [.alert, .sound])
+            let granted = try await LuminaPermissionTimingRecorder.shared.record {
+                try await center.requestAuthorization(options: [.alert, .sound])
+            }
             if !granted {
                 throw AppToolError.permissionDenied("通知权限未开启。请在系统设置中允许 Lumina 发送通知后重试。")
             }

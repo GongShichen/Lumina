@@ -9,6 +9,7 @@ struct LuminaAgenticRLOutcome: Codable, Hashable {
     let activeRuntimeMilliseconds: Double
     let wallClockMilliseconds: Double
     let confirmationWaitMilliseconds: Double
+    let systemPermissionWaitMilliseconds: Double
     let totalMilliseconds: Double
     let planningMilliseconds: Double
     let toolMilliseconds: Double

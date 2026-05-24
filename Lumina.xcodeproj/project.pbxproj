@@ -35,6 +35,7 @@
 		1006791A42322E1CE8F7869C /* LuminaToolCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ACCCB227F1A4F8FCCFD751F /* LuminaToolCall.swift */; };
 		10741061F60C3D3F6724A17F /* LuminaAgentActivitySnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 333BC0EDDD2AFCFC61AB96C6 /* LuminaAgentActivitySnapshot.swift */; };
 		11874B70601E611EE374B76F /* ReActStepDTO.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDE3DE2530978E53CF10BE6 /* ReActStepDTO.swift */; };
+		11966066DE3206FED04281A9 /* LuminaPermissionTimingRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35F74D569FE8726FCC043808 /* LuminaPermissionTimingRecorder.swift */; };
 		1209B997D8728C26A84BBF71 /* LuminaAskUserChoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D905F524225FD4388DA0CE /* LuminaAskUserChoice.swift */; };
 		12AFCEA02D86250DC078F820 /* LuminaRuntimeContextSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3DC730607EF72CF4EB6E9F /* LuminaRuntimeContextSection.swift */; };
 		12C39E21E6CC34BC9D8CA058 /* LuminaLocalMultimodalStructuredInferenceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C36E586E91C01156202D8C6 /* LuminaLocalMultimodalStructuredInferenceModel.swift */; };
@@ -520,6 +521,7 @@
 		33F941810BEF4ED3E5D061E9 /* LuminaNotificationScheduleTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaNotificationScheduleTool.swift; sourceTree = "<group>"; };
 		344CD3EC638B03BF43DD02A2 /* LuminaBenchmarkReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaBenchmarkReport.swift; sourceTree = "<group>"; };
 		34FEE581B9080201C1B1AC46 /* LuminaAgenticRLReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgenticRLReport.swift; sourceTree = "<group>"; };
+		35F74D569FE8726FCC043808 /* LuminaPermissionTimingRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaPermissionTimingRecorder.swift; sourceTree = "<group>"; };
 		3677741A0B92FD670A78DA3D /* LuminaAgentTool+Defaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LuminaAgentTool+Defaults.swift"; sourceTree = "<group>"; };
 		36D801FA16CF3B9ADD945B4A /* LuminaConfiguredTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaConfiguredTool.swift; sourceTree = "<group>"; };
 		3715568E666FF3A08C6B5951 /* LuminaSubscriptionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaSubscriptionStore.swift; sourceTree = "<group>"; };
@@ -1240,6 +1242,7 @@
 				028F7D9B24ED34B88B3C5DBB /* LuminaModelReadinessStore.swift */,
 				83265B0187D0F5302106F41B /* LuminaNotificationScheduleTool.swift */,
 				177D586B14973BF02208D324 /* LuminaObservedRunTimings.swift */,
+				35F74D569FE8726FCC043808 /* LuminaPermissionTimingRecorder.swift */,
 				4B2A84EAB4E98B0D19F6A850 /* LuminaReminderCreateTool.swift */,
 				158AC28BE43173FAC62A51B3 /* LuminaShareExecutor.swift */,
 				BEDBAADFCC8F190383B5EC24 /* LuminaSubscriptionAddTool.swift */,
@@ -2037,6 +2040,7 @@
 				C20A62BD34090B8425781FB8 /* LuminaNotificationScheduleTool.swift in Sources */,
 				260D0C4159E413F1A3FBFDD5 /* LuminaObservedRunTimings.swift in Sources */,
 				A0AD28C8BB84314E2A89DD0F /* LuminaPanel.swift in Sources */,
+				11966066DE3206FED04281A9 /* LuminaPermissionTimingRecorder.swift in Sources */,
 				22F70D6D77D3016B2A01E2C4 /* LuminaReminderCreateTool.swift in Sources */,
 				B0F5BB6A8DBD683D14CA6174 /* LuminaSectionHeader.swift in Sources */,
 				2CCC7DAC9B9305A48091D94B /* LuminaShareExecutor.swift in Sources */,
@@ -2212,7 +2216,7 @@
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,6";
 			};
 			name = Debug;
 		};
@@ -2567,7 +2571,7 @@
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = YES;
 				SWIFT_VERSION = 6.0;
-				TARGETED_DEVICE_FAMILY = 1;
+				TARGETED_DEVICE_FAMILY = "1,6";
 			};
 			name = Release;
 		};

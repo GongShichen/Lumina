@@ -3,7 +3,7 @@ import AgentRuntime
 import Foundation
 import PersonalMemory
 
-struct LuminaReminderCreateTool: LuminaAgentTool {
+final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
     private let eventStore = EKEventStore()
 
     var schema: LuminaToolSchema {
@@ -61,7 +61,9 @@ struct LuminaReminderCreateTool: LuminaAgentTool {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await eventStore.requestFullAccessToReminders()
+            let granted = try await LuminaPermissionTimingRecorder.shared.record {
+                try await eventStore.requestFullAccessToReminders()
+            }
             if granted {
                 return
             }
