@@ -89,10 +89,10 @@ enum LuminaBenchmarkSuite {
         Template(text: "看看当前电量和低电量模式", tools: ["device.power_status"], category: "system"),
         Template(text: "现在网络是不是受限或低数据模式", tools: ["network.status"], category: "system"),
         Template(text: "Lumina 还有多少可用存储空间", tools: ["storage.status"], category: "system"),
-        Template(text: "现在天气怎么样，会下雨吗", tools: ["weather.current"], category: "weather"),
-        Template(text: "看一下未来三天天气预报", tools: ["weather.forecast"], category: "weather"),
-        Template(text: "总结我今天的步数和活动能量", tools: ["health.summary"], category: "health"),
-        Template(text: "查询最近一次心率样本", tools: ["health.query_samples"], category: "health"),
+        Template(text: "查看当前设备电量、热状态和低电量模式", tools: ["device.power_status"], category: "system"),
+        Template(text: "查看当前网络状态和可用存储，并整理成一句摘要", tools: ["network.status", "storage.status", "text.transform"], category: "system"),
+        Template(text: "列出本地 Markdown 笔记并整理成一句摘要", tools: ["file.list_notes", "text.transform"], category: "file"),
+        Template(text: "查看当前时间、电量和网络状态，判断是否适合继续本地处理", tools: ["device.current_time", "device.power_status", "network.status"], category: "system"),
         Template(text: "帮我安排明天的工作，但先问我偏好", tools: ["ask_user"], category: "interaction")
     ]
 }

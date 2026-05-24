@@ -5,17 +5,17 @@ import Foundation
 import CoreLocation
 #endif
 
-#if canImport(WeatherKit)
+#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(WeatherKit)
 import WeatherKit
 #endif
 
-#if canImport(HealthKit)
+#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(HealthKit)
 import HealthKit
 #endif
 
 enum LuminaWeatherHealthExecutor {
     static func currentWeather(arguments: [String: LuminaJSONValue]) async throws -> LuminaToolResult {
-        #if canImport(WeatherKit) && canImport(CoreLocation)
+        #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(WeatherKit) && canImport(CoreLocation)
         let location = CLLocation(
             latitude: arguments.number("latitude") ?? 37.3349,
             longitude: arguments.number("longitude") ?? -122.0090
@@ -34,7 +34,7 @@ enum LuminaWeatherHealthExecutor {
     }
 
     static func forecastWeather(arguments: [String: LuminaJSONValue]) async throws -> LuminaToolResult {
-        #if canImport(WeatherKit) && canImport(CoreLocation)
+        #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(WeatherKit) && canImport(CoreLocation)
         let location = CLLocation(
             latitude: arguments.number("latitude") ?? 37.3349,
             longitude: arguments.number("longitude") ?? -122.0090
@@ -55,7 +55,7 @@ enum LuminaWeatherHealthExecutor {
     }
 
     static func healthSummary(arguments: [String: LuminaJSONValue]) async throws -> LuminaToolResult {
-        #if canImport(HealthKit)
+        #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(HealthKit)
         guard HKHealthStore.isHealthDataAvailable() else {
             return result("health.summary", status: .failed, message: "当前设备不支持 HealthKit。", output: ["unavailable": .bool(true)])
         }
@@ -93,7 +93,7 @@ enum LuminaWeatherHealthExecutor {
     }
 
     static func healthSamples(arguments: [String: LuminaJSONValue]) async throws -> LuminaToolResult {
-        #if canImport(HealthKit)
+        #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(HealthKit)
         guard HKHealthStore.isHealthDataAvailable() else {
             return result("health.query_samples", status: .failed, message: "当前设备不支持 HealthKit。", output: ["unavailable": .bool(true)])
         }
@@ -146,7 +146,7 @@ enum LuminaWeatherHealthExecutor {
     }
 }
 
-#if canImport(HealthKit)
+#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(HealthKit)
 private func healthReadTypes() -> Set<HKObjectType> {
     [
         HKObjectType.quantityType(forIdentifier: .stepCount),

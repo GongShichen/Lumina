@@ -58,6 +58,7 @@ enum AppToolFactory {
             LuminaLedgerSearchTool(store: ledgerStore).eraseToAnyTool(),
             LuminaSubscriptionAddTool(store: subscriptionStore, memoryStore: memoryStore).eraseToAnyTool()
         ]
+        let platformWeatherHealth = Self.weatherHealthExecutors()
         let extendedTools = LuminaExtendedToolCatalog.makeTools(
             memoryStore: memoryStore,
             ledgerStore: ledgerStore,
@@ -65,10 +66,10 @@ enum AppToolFactory {
             calendarStore: LuminaVolatileCalendarStore(),
             documentsDirectory: documentsDirectory,
             openURL: Self.openURL,
-            currentWeather: LuminaWeatherHealthExecutor.currentWeather,
-            forecastWeather: LuminaWeatherHealthExecutor.forecastWeather,
-            healthSummary: LuminaWeatherHealthExecutor.healthSummary,
-            healthSamples: LuminaWeatherHealthExecutor.healthSamples,
+            currentWeather: platformWeatherHealth.currentWeather,
+            forecastWeather: platformWeatherHealth.forecastWeather,
+            healthSummary: platformWeatherHealth.healthSummary,
+            healthSamples: platformWeatherHealth.healthSamples,
             contactsCreate: LuminaContactMutationExecutor.createContact,
             contactsUpdate: LuminaContactMutationExecutor.updateContact,
             contactsOpen: LuminaContactMutationExecutor.openContact,
@@ -76,7 +77,35 @@ enum AppToolFactory {
             clipboardWrite: LuminaClipboardWriteExecutor.writeClipboard,
             includePIMTools: false
         )
-        return baseTools + LuminaEventKitManagementToolFactory.makeTools() + extendedTools
+        return baseTools + LuminaEventKitManagementToolFactory.makeTools() + Self.platformFilteredTools(extendedTools)
+    }
+
+    private static func weatherHealthExecutors() -> (
+        currentWeather: LuminaExtendedToolCatalog.CurrentWeather?,
+        forecastWeather: LuminaExtendedToolCatalog.ForecastWeather?,
+        healthSummary: LuminaExtendedToolCatalog.HealthSummary?,
+        healthSamples: LuminaExtendedToolCatalog.HealthSamples?
+    ) {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        return (
+            LuminaWeatherHealthExecutor.currentWeather,
+            LuminaWeatherHealthExecutor.forecastWeather,
+            LuminaWeatherHealthExecutor.healthSummary,
+            LuminaWeatherHealthExecutor.healthSamples
+        )
+        #else
+        return (nil, nil, nil, nil)
+        #endif
+    }
+
+    private static func platformFilteredTools(_ tools: [AnyLuminaAgentTool]) -> [AnyLuminaAgentTool] {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        return tools
+        #else
+        return tools.filter { tool in
+            !tool.schema.name.hasPrefix("weather.") && !tool.schema.name.hasPrefix("health.")
+        }
+        #endif
     }
 
     @MainActor

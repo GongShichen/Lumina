@@ -150,7 +150,9 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: YES
         SUPPORTS_MACCATALYST: YES
         TARGETED_DEVICE_FAMILY: "1,6"
-        CODE_SIGN_ENTITLEMENTS: Sources/LuminaApp/Lumina.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Sources/LuminaApp/Lumina.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Sources/LuminaApp/Lumina.entitlements
+        CODE_SIGN_ENTITLEMENTS[sdk=macosx*]: Sources/LuminaApp/LuminaMacCatalyst.entitlements
 
   LuminaWidgets:
     type: app-extension

@@ -607,6 +607,7 @@
 		71474142A2C15ED7EE11A1A1 /* LuminaAgentRuntimeHookContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRuntimeHookContext.swift; sourceTree = "<group>"; };
 		71D888325DA0B2239EB7BFA5 /* LuminaMediaImportTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMediaImportTool.swift; sourceTree = "<group>"; };
 		72BBD1DE5971069179F72003 /* MarkdownTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTable.swift; sourceTree = "<group>"; };
+		72F1109411C931422EDD2D77 /* LuminaMacCatalyst.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LuminaMacCatalyst.entitlements; sourceTree = "<group>"; };
 		735F510B8039CE5B6FAB9C54 /* LuminaEmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaEmbeddingProvider.swift; sourceTree = "<group>"; };
 		73905C596CBB4537701FAB52 /* LuminaToolRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaToolRouter.swift; sourceTree = "<group>"; };
 		74046F6890A90003545664C4 /* Gemma4StatefulEngine+Sendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Gemma4StatefulEngine+Sendable.swift"; sourceTree = "<group>"; };
@@ -1082,6 +1083,7 @@
 				6ED0F9249290A2A699BE84B2 /* IntegrationNotes.md */,
 				A6B807C0C60ABA8C2E0C8AA1 /* LaunchScreen.storyboard */,
 				7BE6C53CCDB88705691A0B8B /* Lumina.entitlements */,
+				72F1109411C931422EDD2D77 /* LuminaMacCatalyst.entitlements */,
 				2B0435E167DE1DD9D1C1BFF5 /* Application */,
 				D640B76A022755296F7E9B51 /* DesignSystem */,
 				07ACA3036907038FD5F84EB2 /* Features */,
@@ -2240,7 +2242,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/LuminaApp/LuminaMacCatalyst.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Z6N4X8M8TZ;
@@ -2595,7 +2599,9 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Sources/LuminaApp/Lumina.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = Sources/LuminaApp/LuminaMacCatalyst.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Z6N4X8M8TZ;

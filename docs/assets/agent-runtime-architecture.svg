@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="920" viewBox="0 0 1440 920" role="img" aria-labelledby="title desc">
+  <title id="title">AgentRuntime 架构</title>
+  <desc id="desc">LuminaAgentRuntime 的纯 runtime 组件、ReAct 循环、hook 生命周期和注入边界。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#26231f"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1d1a15" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg { fill: #fffaf0; }
+      .panel { fill: #fffdf7; stroke: #e7dfcb; stroke-width: 2; filter: url(#shadow); }
+      .subpanel { fill: #f6fbf2; stroke: #dbe8d4; stroke-width: 2; }
+      .runtime { fill: #fff6d8; stroke: #ffc247; stroke-width: 3; filter: url(#shadow); }
+      .box { fill: #ffffff; stroke: #dfd8c9; stroke-width: 2; }
+      .blue { fill: #effbff; stroke: #86dff0; }
+      .green { fill: #eefbf4; stroke: #7adfa6; }
+      .red { fill: #fff0f1; stroke: #ff9aa7; }
+      .dark { fill: #26231f; }
+      .text { font: 500 22px -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; fill: #26231f; }
+      .small { font: 500 17px -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; fill: #5e5a52; }
+      .tiny { font: 500 14px -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; fill: #716d65; }
+      .title { font: 800 36px -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; fill: #171512; }
+      .section { font: 800 24px -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; fill: #171512; }
+      .mono { font: 700 18px "SF Mono", Menlo, Consolas, monospace; fill: #26231f; }
+      .line { stroke: #26231f; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .softline { stroke: #9e9788; stroke-width: 2; fill: none; stroke-dasharray: 8 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1440" height="920"/>
+  <text x="64" y="70" class="title">AgentRuntime：纯 ReAct 执行内核</text>
+  <text x="64" y="106" class="small">只负责通用生命周期、工具路由、权限、确认、审计、rollback、streaming 与 hook；业务策略全部由宿主注入。</text>
+
+  <rect x="56" y="150" width="235" height="154" rx="28" class="panel"/>
+  <text x="84" y="194" class="section">输入</text>
+  <text x="84" y="232" class="small">LuminaAgentRequest</text>
+  <text x="84" y="260" class="tiny">文本 / 图片 / 文件 / 音频附件</text>
+  <text x="84" y="286" class="tiny">metadata / cancellation</text>
+
+  <rect x="56" y="380" width="235" height="154" rx="28" class="panel"/>
+  <text x="84" y="424" class="section">注入能力</text>
+  <text x="84" y="462" class="small">Context Provider</text>
+  <text x="84" y="490" class="small">Planner / Tools</text>
+  <text x="84" y="518" class="small">Policy / Logger / Hooks</text>
+
+  <rect x="350" y="138" width="730" height="626" rx="34" class="runtime"/>
+  <text x="386" y="186" class="section">LuminaAgentRuntime</text>
+  <text x="386" y="216" class="small">run(request:) / runStream(request:) 管理一次独立 session</text>
+
+  <rect x="386" y="250" width="210" height="92" rx="22" class="box blue"/>
+  <text x="414" y="286" class="text">Context Load</text>
+  <text x="414" y="316" class="tiny">渐进式上下文 / 预算估算</text>
+
+  <rect x="632" y="250" width="210" height="92" rx="22" class="box blue"/>
+  <text x="660" y="286" class="text">Hook Chain</text>
+  <text x="660" y="316" class="tiny">append context / annotation</text>
+
+  <rect x="386" y="382" width="210" height="96" rx="22" class="box"/>
+  <text x="414" y="418" class="text">ReAct Planner</text>
+  <text x="414" y="448" class="mono">tool_use / final</text>
+
+  <rect x="632" y="382" width="210" height="96" rx="22" class="box green"/>
+  <text x="660" y="418" class="text">Tool Router</text>
+  <text x="660" y="448" class="tiny">registry + executor</text>
+
+  <rect x="866" y="382" width="176" height="96" rx="22" class="box green"/>
+  <text x="894" y="418" class="text">Observation</text>
+  <text x="894" y="448" class="tiny">压缩工具结果</text>
+
+  <rect x="386" y="520" width="210" height="98" rx="22" class="box red"/>
+  <text x="414" y="556" class="text">Permission</text>
+  <text x="414" y="586" class="tiny">gate / sensitivity</text>
+
+  <rect x="632" y="520" width="210" height="98" rx="22" class="box red"/>
+  <text x="660" y="556" class="text">Confirmation</text>
+  <text x="660" y="586" class="tiny">human approval</text>
+
+  <rect x="866" y="520" width="176" height="98" rx="22" class="box red"/>
+  <text x="894" y="556" class="text">Audit</text>
+  <text x="894" y="586" class="tiny">redaction / JSONL</text>
+
+  <rect x="386" y="656" width="286" height="72" rx="22" class="box"/>
+  <text x="414" y="700" class="text">Rollback Handler</text>
+
+  <rect x="716" y="656" width="326" height="72" rx="22" class="box"/>
+  <text x="744" y="700" class="text">Stream Events / Run Result</text>
+
+  <path class="line" d="M 291 226 C 318 226 323 296 386 296"/>
+  <path class="line" d="M 291 457 C 325 457 320 296 386 296"/>
+  <path class="line" d="M 596 296 L 632 296"/>
+  <path class="line" d="M 737 342 C 737 360 491 360 491 382"/>
+  <path class="line" d="M 596 430 L 632 430"/>
+  <path class="line" d="M 737 478 C 737 502 491 492 491 520"/>
+  <path class="line" d="M 596 570 L 632 570"/>
+  <path class="line" d="M 842 570 L 866 570"/>
+  <path class="line" d="M 842 430 L 866 430"/>
+  <path class="line" d="M 954 478 C 954 622 530 512 530 382"/>
+  <path class="line" d="M 954 618 C 954 644 554 632 530 656"/>
+  <path class="line" d="M 672 692 L 716 692"/>
+
+  <rect x="1140" y="150" width="240" height="154" rx="28" class="panel"/>
+  <text x="1168" y="194" class="section">宿主实现</text>
+  <text x="1168" y="232" class="small">模型 adapter</text>
+  <text x="1168" y="260" class="small">真实工具 executor</text>
+  <text x="1168" y="288" class="small">App policy</text>
+
+  <rect x="1140" y="380" width="240" height="154" rx="28" class="panel"/>
+  <text x="1168" y="424" class="section">明确不包含</text>
+  <text x="1168" y="462" class="small">App 业务逻辑</text>
+  <text x="1168" y="490" class="small">Memory 策略</text>
+  <text x="1168" y="518" class="small">System Prompt</text>
+
+  <rect x="1140" y="610" width="240" height="154" rx="28" class="panel"/>
+  <text x="1168" y="654" class="section">Hook 生命周期</text>
+  <text x="1168" y="692" class="tiny">run / context / planner</text>
+  <text x="1168" y="718" class="tiny">step / tool / observation</text>
+  <text x="1168" y="744" class="tiny">final / error / cancelled</text>
+
+  <path class="softline" d="M 1140 226 C 1102 226 1108 296 842 296"/>
+  <path class="softline" d="M 1140 457 C 1110 457 1100 430 1042 430"/>
+  <path class="softline" d="M 1140 687 C 1100 687 1108 296 842 296"/>
+
+  <rect x="64" y="806" width="1316" height="64" rx="24" class="subpanel"/>
+  <text x="92" y="846" class="small">ReAct 标准输出：模型每轮选择 Thought + tool_use 或 final_answer；Runtime 不强制业务动作，只执行模型选择的结构化工具调用。</text>
+</svg>
