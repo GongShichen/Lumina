@@ -22,7 +22,7 @@ final class LuminaInAppBenchmarkRunner {
             await progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: task.expectedTools.last))
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
-            let result = await runSingleTask(task)
+            let (result, observedTimings) = await runSingleTask(task)
             let actualTools = result.toolResults.map(\.toolName)
             let failure = result.status == .succeeded ? nil : result.plan.summary
             results.append(LuminaBenchmarkTaskResult(
@@ -30,6 +30,7 @@ final class LuminaInAppBenchmarkRunner {
                 actualTools: actualTools,
                 status: result.status.rawValue,
                 totalMilliseconds: result.timing.totalMilliseconds,
+                observedTimings: observedTimings,
                 planningMilliseconds: result.timing.planningMilliseconds,
                 toolMilliseconds: result.timing.toolExecutionMilliseconds,
                 modelMetrics: services.modelMetrics.metrics(after: metricsMark),
@@ -43,23 +44,27 @@ final class LuminaInAppBenchmarkRunner {
         return report
     }
 
-    private func runSingleTask(_ task: LuminaBenchmarkTask) async -> LuminaAgentRunResult {
+    private func runSingleTask(_ task: LuminaBenchmarkTask) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
         var finalResult: LuminaAgentRunResult?
+        var observer = LuminaRunStreamObserver()
+        observer.start()
         for await event in services.runStream(content: [.text(task.text)]) {
             if Task.isCancelled { break }
+            observer.observe(event)
             if case let .finished(result) = event {
                 finalResult = result
             }
         }
         if let finalResult {
-            return finalResult
+            return (finalResult, observer.finish(result: finalResult))
         }
-        return LuminaAgentRunResult(
+        let cancelled = LuminaAgentRunResult(
             requestID: UUID(),
             plan: LuminaAgentPlan(summary: "Benchmark task cancelled before runtime finished.", toolCalls: []),
             toolResults: [],
             status: .cancelled
         )
+        return (cancelled, observer.finish(result: cancelled))
     }
 
     private func writeReport(results: [LuminaBenchmarkTaskResult]) -> (json: URL?, markdown: URL?) {
@@ -82,7 +87,7 @@ final class LuminaInAppBenchmarkRunner {
 
     private func markdown(_ report: LuminaBenchmarkReport) -> String {
         let rows = report.results.prefix(200).map { result in
-            "| \(result.taskID) | \(result.status) | \(format(result.f1)) | \(Int(result.totalMilliseconds))ms | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
+            "| \(result.taskID) | \(result.status) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
         }.joined(separator: "\n")
         return """
         # Lumina In-App Benchmark Report
@@ -97,7 +102,9 @@ final class LuminaInAppBenchmarkRunner {
         - Micro precision: \(format(report.microPrecision))
         - Micro recall: \(format(report.microRecall))
         - Micro F1: \(format(report.microF1))
-        - Runtime p50/p95: \(Int(report.latencyP50Milliseconds))ms / \(Int(report.latencyP95Milliseconds))ms
+        - Active runtime p50/p95: \(Int(report.latencyP50Milliseconds))ms / \(Int(report.latencyP95Milliseconds))ms
+        - Wall-clock p95: \(Int(report.wallClockP95Milliseconds))ms
+        - Confirmation wait p95: \(Int(report.confirmationWaitP95Milliseconds))ms
         - Planning p95: \(Int(report.planningP95Milliseconds))ms
         - Tool p95: \(Int(report.toolP95Milliseconds))ms
 
@@ -109,8 +116,8 @@ final class LuminaInAppBenchmarkRunner {
         - Output tokens p95: \(optionalNumber(report.modelOutputTokensP95))
 
         ## Tasks
-        | Task | Status | Tool F1 | Latency | Actual tools | Model calls |
-        | --- | --- | ---: | ---: | --- | ---: |
+        | Task | Status | Tool F1 | Active latency | Wall clock | Actual tools | Model calls |
+        | --- | --- | ---: | ---: | ---: | --- | ---: |
         \(rows)
         """
     }

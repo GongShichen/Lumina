@@ -5,8 +5,11 @@ struct RuntimeStatusScreen: View {
     let stats: LuminaMemoryIndexStats
     let modelReadiness: LuminaModelReadinessSnapshot
     let benchmarkSnapshot: LuminaBenchmarkSnapshot
+    let agenticRLSnapshot: LuminaAgenticRLSnapshot
     let runBenchmark: () -> Void
     let cancelBenchmark: () -> Void
+    let runAgenticRL: () -> Void
+    let cancelAgenticRL: () -> Void
 
     var body: some View {
         ZStack {
@@ -26,6 +29,7 @@ struct RuntimeStatusScreen: View {
                         }
                     }
                     benchmarkPanel
+                    agenticRLPanel
                 }
                 .padding(16)
             }
@@ -108,6 +112,80 @@ struct RuntimeStatusScreen: View {
         }
     }
 
+    private var agenticRLPanel: some View {
+        LuminaPanel {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(LuminaTheme.deepInk)
+                        .frame(width: 42, height: 42)
+                        .background(LuminaTheme.mint.opacity(0.28), in: Circle())
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agentic RL 轨迹")
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(LuminaTheme.ink)
+                        Text("200 条复杂多步任务会串行进入同一条用户执行链路，结果导出为 JSONL，每行一条 ReAct trajectory。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                ProgressView(value: agenticRLSnapshot.progress)
+                    .tint(LuminaTheme.mint)
+
+                HStack {
+                    LuminaStatusPill(
+                        title: "Progress",
+                        value: "\(agenticRLSnapshot.completed)/\(agenticRLSnapshot.total)",
+                        systemImage: "list.bullet.clipboard",
+                        tint: LuminaTheme.mint
+                    )
+                    LuminaStatusPill(
+                        title: "Tool",
+                        value: agenticRLSnapshot.latestTool ?? "waiting",
+                        systemImage: "wrench.and.screwdriver.fill",
+                        tint: LuminaTheme.aqua
+                    )
+                }
+
+                if !agenticRLSnapshot.currentTask.isEmpty {
+                    Text(agenticRLSnapshot.currentTask)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(LuminaTheme.ink)
+                        .lineLimit(4)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.54), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                if let report = agenticRLSnapshot.report {
+                    agenticRLReportSummary(report)
+                }
+
+                Button {
+                    agenticRLSnapshot.isRunning ? cancelAgenticRL() : runAgenticRL()
+                } label: {
+                    HStack {
+                        Image(systemName: agenticRLSnapshot.isRunning ? "stop.fill" : "play.fill")
+                        Text(agenticRLSnapshot.isRunning ? "停止轨迹生成" : "生成 200 条 Agentic RL JSONL")
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Text("JSONL")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(agenticRLSnapshot.isRunning ? LuminaTheme.rose : LuminaTheme.deepInk)
+            }
+        }
+    }
+
     private func benchmarkReportSummary(_ report: LuminaBenchmarkReport) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("最近报告")
@@ -123,6 +201,28 @@ struct RuntimeStatusScreen: View {
             }
             if let url = report.markdownReportURL ?? report.jsonReportURL {
                 Text("已导出：\(url.lastPathComponent)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func agenticRLReportSummary(_ report: LuminaAgenticRLReport) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("最近轨迹文件")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(LuminaTheme.ink)
+            HStack(spacing: 10) {
+                LuminaMetricTile(title: "Reward", value: percent(report.averageReward), caption: "heuristic reward", tint: LuminaTheme.mint)
+                LuminaMetricTile(title: "F1", value: percent(report.microF1), caption: "tool micro F1", tint: LuminaTheme.aqua)
+            }
+            if let url = report.trajectoryJSONLURL {
+                Text("JSONL：\(url.lastPathComponent)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            if let url = report.summaryJSONURL {
+                Text("Summary：\(url.lastPathComponent)")
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
             }

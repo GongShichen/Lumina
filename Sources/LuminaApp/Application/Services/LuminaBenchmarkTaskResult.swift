@@ -13,6 +13,9 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let precision: Double
     let f1: Double
     let totalMilliseconds: Double
+    let activeRuntimeMilliseconds: Double
+    let wallClockMilliseconds: Double
+    let confirmationWaitMilliseconds: Double
     let planningMilliseconds: Double
     let toolMilliseconds: Double
     let modelMetrics: [LuminaModelInferenceMetrics]
@@ -23,6 +26,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         actualTools: [String],
         status: String,
         totalMilliseconds: Double,
+        observedTimings: LuminaObservedRunTimings,
         planningMilliseconds: Double,
         toolMilliseconds: Double,
         modelMetrics: [LuminaModelInferenceMetrics],
@@ -44,6 +48,9 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
         self.totalMilliseconds = totalMilliseconds
+        self.activeRuntimeMilliseconds = observedTimings.activeRuntimeMilliseconds
+        self.wallClockMilliseconds = observedTimings.wallClockMilliseconds
+        self.confirmationWaitMilliseconds = observedTimings.confirmationWaitMilliseconds
         self.planningMilliseconds = planningMilliseconds
         self.toolMilliseconds = toolMilliseconds
         self.modelMetrics = modelMetrics

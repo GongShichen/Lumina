@@ -33,6 +33,7 @@ final class AgentHomeViewModel: ObservableObject {
     @Published private(set) var voiceState: VoiceInputState = .idle
     @Published private(set) var voiceTranscript = ""
     @Published private(set) var benchmarkSnapshot = LuminaBenchmarkSnapshot()
+    @Published private(set) var agenticRLSnapshot = LuminaAgenticRLSnapshot()
 
     let memoryViewModel = PersonalMemoryViewModel()
     private let voiceInput: VoiceInputController
@@ -40,6 +41,7 @@ final class AgentHomeViewModel: ObservableObject {
     private var services: AgentAppServices?
     private var runTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
+    private var agenticRLTask: Task<Void, Never>?
     private var messageDraftTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
@@ -70,6 +72,8 @@ final class AgentHomeViewModel: ObservableObject {
         runTask = nil
         benchmarkTask?.cancel()
         benchmarkTask = nil
+        agenticRLTask?.cancel()
+        agenticRLTask = nil
         messageDraftTask?.cancel()
         messageDraftTask = nil
     }
@@ -113,6 +117,27 @@ final class AgentHomeViewModel: ObservableObject {
         benchmarkTask?.cancel()
         benchmarkTask = nil
         benchmarkSnapshot.state = .cancelled
+    }
+
+    func runAgenticRLTrajectories() {
+        guard let services, !agenticRLSnapshot.isRunning else { return }
+        agenticRLSnapshot = LuminaAgenticRLSnapshot(state: .running, currentTask: "准备 200 条复杂轨迹任务", completed: 0, total: 200)
+        agenticRLTask = Task { [weak self] in
+            guard let self else { return }
+            await services.waitUntilLoaded()
+            let runner = services.makeAgenticRLRunner()
+            _ = await runner.run(taskCount: 200) { snapshot in
+                self.agenticRLSnapshot = snapshot
+            }
+            await self.refreshStats()
+            await self.refreshAuditRecords()
+        }
+    }
+
+    func cancelAgenticRLTrajectories() {
+        agenticRLTask?.cancel()
+        agenticRLTask = nil
+        agenticRLSnapshot.state = .cancelled
     }
 
     func toggleVoiceInput() {

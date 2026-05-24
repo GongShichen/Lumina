@@ -86,6 +86,13 @@ final class AgentAppServices: ObservableObject {
         return LuminaInAppBenchmarkRunner(services: self, reportDirectory: reports)
     }
 
+    func makeAgenticRLRunner() -> LuminaInAppAgenticRLRunner {
+        let reports = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("TrajectoryReports", isDirectory: true)
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("TrajectoryReports", isDirectory: true)
+        return LuminaInAppAgenticRLRunner(services: self, reportDirectory: reports)
+    }
+
     func recentAuditRecords(limit: Int = 20) async -> [LuminaAuditRecord] {
         guard let auditLogReader else { return [] }
         return await auditLogReader.recentRecords(limit: limit)
