@@ -52,8 +52,38 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertTrue(schemas.contains { $0.name == "file.save_note" && $0.sideEffect == .appLocalWrite })
         XCTAssertTrue(schemas.contains { $0.name == "url.open" && $0.sideEffect == .externalCommunication })
         XCTAssertTrue(schemas.contains { $0.name == "memory.ingest_text" && $0.sideEffect == .appLocalWrite })
+        let memorySchema = schemas.first { $0.name == "memory.ingest_text" }
+        XCTAssertTrue(memorySchema?.parameters.contains { $0.name == "reason" } == true)
+        XCTAssertTrue(memorySchema?.parameters.contains { $0.name == "memoryType" } == true)
+        XCTAssertTrue(memorySchema?.parameters.contains { $0.name == "retentionHint" } == true)
         XCTAssertTrue(schemas.contains { $0.name == "ledger.search" && $0.sideEffect == .readOnly })
         XCTAssertTrue(schemas.contains { $0.name == "ask_user" && $0.sideEffect == .readOnly })
+    }
+
+    func testMemoryPermissionGateOnlyConfirmsSensitiveMemoryWrites() async {
+        let gate = LuminaAppMemoryPermissionGate()
+        let schema = LuminaToolSchema(name: "memory.ingest_text", description: "Memory", parameters: [], sideEffect: .appLocalWrite, sensitivity: .sensitive)
+        let request = LuminaAgentRequest(text: "remember")
+
+        let normal = await gate.decision(
+            for: LuminaToolCall(toolName: "memory.ingest_text", arguments: ["sensitivity": .string("normal")]),
+            schema: schema,
+            request: request
+        )
+        let sensitive = await gate.decision(
+            for: LuminaToolCall(toolName: "memory.ingest_text", arguments: ["sensitivity": .string("sensitive")]),
+            schema: schema,
+            request: request
+        )
+        let elevated = await gate.decision(
+            for: LuminaToolCall(toolName: "memory.ingest_text", arguments: ["sensitivity": .string("normal"), "source": .string("health.summary")]),
+            schema: schema,
+            request: request
+        )
+
+        XCTAssertEqual(normal, .allowed)
+        XCTAssertFalse(sensitive.isAllowedWithoutConfirmation)
+        XCTAssertFalse(elevated.isAllowedWithoutConfirmation)
     }
 
     func testFactoryIncludesExtendedAssistantToolsButNotAppRuntimeCapabilities() async {

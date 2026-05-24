@@ -23,6 +23,20 @@ enum AgentRunEventPresenter {
             return AgentRunTimelineItem(title: "观察结果：\(observation.toolName)", detail: observation.summary, systemImage: "eye", status: status(for: observation.status))
         case .finalGenerated:
             return nil
+        case let .hookAnnotated(key, value):
+            return AgentRunTimelineItem(
+                title: "运行标注：\(key)",
+                detail: value.stringValue ?? String(describing: value),
+                systemImage: "tag",
+                status: .info
+            )
+        case let .contextUpdated(context):
+            return AgentRunTimelineItem(
+                title: "上下文已更新",
+                detail: "\(context.sections.count) 个上下文片段",
+                systemImage: "rectangle.stack.badge.plus",
+                status: .info
+            )
         case let .permissionChecked(call, decision):
             return AgentRunTimelineItem(
                 title: "权限检查：\(call.toolName)",

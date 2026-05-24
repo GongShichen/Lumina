@@ -28,7 +28,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
         - Never claim success before an observation confirms it.
         - Keep final_answer concise and do not repeat observations.
 
-        \(profileInstructions(for: profile))
+        \(profileInstructions(for: profile, metadata: context.request.metadata))
 
         Request: \(context.request.text)
 
@@ -67,15 +67,22 @@ struct LuminaAppReActPromptBuilder: Sendable {
         }
     }
 
-    private func profileInstructions(for profile: LuminaAppPromptProfile) -> String {
+    private func profileInstructions(for profile: LuminaAppPromptProfile, metadata: [String: LuminaJSONValue]) -> String {
         switch profile {
         case .taskExecution:
+            let memoryPolicy = memoryAccessDisabled(in: metadata) ? """
+            - Persistent memory is disabled for this run. Do not try to read or write memory; use non-memory tools only.
+            """ : """
+            - You may save durable memory only by choosing memory.ingest_text yourself. Save only stable preferences, reusable facts, durable plans, or explicit "remember this" requests; do not save transient task state or raw sensitive content.
+            - When saving memory, provide reason, memoryType, retentionHint, source, sensitivity, title, and body. Mark contact, health, location, communication, clipboard, and document-body content as sensitive or privateData.
+            """
             return """
             Task policy:
             - Decide each step yourself with ReAct.
             - Use device.current_time for relative dates before calendar/reminder/notification actions.
-            - Use read tools for memory, calendar, contacts, ledger, clipboard, location, or files when needed.
+            - Use registered read tools for calendar, contacts, ledger, clipboard, location, files, and memory when memory is enabled.
             - Use ask_user for missing title, time, contact, message body, or planning preference.
+            \(memoryPolicy)
             - After a side-effect observation, final_answer states the confirmed result or recovery step.
             """
         case .homePersonalization:
@@ -86,6 +93,11 @@ struct LuminaAppReActPromptBuilder: Sendable {
             - Suggestion format, max 3 lines: SUGGESTION|title|query|SF Symbol
             """
         }
+    }
+
+    private func memoryAccessDisabled(in metadata: [String: LuminaJSONValue]) -> Bool {
+        metadata.bool(LuminaAppContextProvider.disableMemoryContextMetadataKey) == true ||
+            metadata.bool("lumina.evaluation.memory_access_disabled") == true
     }
 
     private func compactToolContext(for schemas: [LuminaToolSchema]) -> String {

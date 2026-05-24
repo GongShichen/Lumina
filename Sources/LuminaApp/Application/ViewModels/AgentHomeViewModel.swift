@@ -494,6 +494,10 @@ final class AgentHomeViewModel: ObservableObject {
             snapshot = runningSnapshot(title: "读取执行结果", detail: observation.summary, toolName: observation.toolName, progress: baseProgress)
         case .finalGenerated:
             snapshot = runningSnapshot(title: "正在整理回复", detail: "生成可读 Markdown 结果", progress: 0.94)
+        case let .hookAnnotated(key, _):
+            snapshot = runningSnapshot(title: "运行标注", detail: key, progress: baseProgress)
+        case let .contextUpdated(context):
+            snapshot = runningSnapshot(title: "上下文已更新", detail: "\(context.sections.count) 个片段", progress: baseProgress)
         case let .permissionChecked(call, decision):
             snapshot = runningSnapshot(title: "权限检查", detail: "\(call.toolName) \(decision)", toolName: call.toolName, progress: baseProgress)
         case let .confirmationRequired(call):

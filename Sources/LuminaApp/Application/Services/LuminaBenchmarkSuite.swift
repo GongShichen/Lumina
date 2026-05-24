@@ -21,9 +21,9 @@ enum LuminaBenchmarkSuite {
         "reminder.create", "reminder.update", "reminder.complete", "reminder.delete",
         "contacts.create", "contacts.update", "message.compose", "email.compose", "phone.call",
         "notification.schedule", "clipboard.write", "file.save_note", "file.update_note", "file.delete_note",
-        "share.prepare", "app.open_settings", "memory.ingest_text",
-        "ledger.record", "ledger.update", "ledger.delete", "subscription.add", "subscription.refresh",
-        "subscription.remove", "webpage.save_to_memory", "media.import"
+        "share.prepare", "app.open_settings",
+        "ledger.record", "ledger.update", "ledger.delete", "subscription.add",
+        "subscription.remove"
     ]
 
     private struct Template {
@@ -66,7 +66,7 @@ enum LuminaBenchmarkSuite {
         Template(text: "打开 Lumina 的系统设置", tools: ["app.open_settings"], category: "system"),
         Template(text: "查看当前设备电量、网络和可用存储，判断是否适合执行本地任务", tools: ["device.power_status", "network.status", "storage.status"], category: "system"),
         Template(text: "把 LuminaTest benchmark 运行说明保存成 Markdown 笔记", tools: ["file.save_note"], category: "file"),
-        Template(text: "记住这段：LuminaTest benchmark 需要覆盖真实工具", tools: ["memory.ingest_text"], category: "memory"),
+        Template(text: "把 LuminaTest benchmark 需要覆盖真实工具这段说明保存成 Markdown 笔记", tools: ["file.save_note"], category: "file"),
         Template(text: "把 LuminaTest benchmark 这段文字改写成 3 条检查项", tools: ["text.transform"], category: "local"),
         Template(text: "读取 LuminaTest benchmark 的剪贴板内容并整理摘要", tools: ["clipboard.read", "text.transform"], category: "content"),
         Template(text: "记录 42 元 LuminaTest 咖啡支出", tools: ["ledger.record"], category: "ledger"),
@@ -76,14 +76,14 @@ enum LuminaBenchmarkSuite {
         Template(text: "删除那条 LuminaTest 咖啡账目", tools: ["ledger.search", "ledger.delete"], category: "ledger"),
         Template(text: "订阅 https://example.com/feed.xml，标题标记 LuminaTest", tools: ["subscription.add"], category: "subscription"),
         Template(text: "列出我的订阅源", tools: ["subscription.list"], category: "subscription"),
-        Template(text: "刷新我的 RSS 订阅", tools: ["subscription.refresh"], category: "subscription"),
+        Template(text: "列出我的 RSS 订阅源并整理成一句摘要", tools: ["subscription.list"], category: "subscription"),
         Template(text: "删除 LuminaTest example 这个订阅源", tools: ["subscription.remove"], category: "subscription"),
         Template(text: "抓取 https://example.com 的正文", tools: ["webpage.fetch_text"], category: "web"),
-        Template(text: "把 https://example.com 的摘要存进记忆，标题 LuminaTest example", tools: ["webpage.save_to_memory"], category: "web"),
+        Template(text: "抓取 https://example.com 的正文并整理成 3 条摘要", tools: ["webpage.fetch_text", "text.transform"], category: "web"),
         Template(text: "读取 Documents 里的 LuminaTest-report.md", tools: ["document.read_text"], category: "document"),
         Template(text: "识别这张图片里的文字", tools: ["image.extract_text"], category: "image"),
         Template(text: "看看这张图片的尺寸和文件大小", tools: ["image.describe_metadata"], category: "image"),
-        Template(text: "导入这张 LuminaTest 图片并写入记忆", tools: ["media.import"], category: "media"),
+        Template(text: "看看这张 LuminaTest 图片的尺寸、类型和文件大小", tools: ["image.describe_metadata"], category: "media"),
         Template(text: "计算 12*(8+3)-5", tools: ["calculator.evaluate"], category: "local"),
         Template(text: "把这段文字整理成待办列表", tools: ["text.transform"], category: "local"),
         Template(text: "看看当前电量和低电量模式", tools: ["device.power_status"], category: "system"),

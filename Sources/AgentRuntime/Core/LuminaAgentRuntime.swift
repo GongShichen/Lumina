@@ -6,6 +6,7 @@ public actor LuminaAgentRuntime {
     private let configuration: LuminaAgentRuntimeConfiguration
     private let contextProvider: any LuminaRuntimeContextProvider
     private let contextCompactor: any LuminaReActContextCompactor
+    private let hooks: [any LuminaAgentRuntimeHook]
 
     public init(
         tools: [AnyLuminaAgentTool],
@@ -15,12 +16,14 @@ public actor LuminaAgentRuntime {
         configuration: LuminaAgentRuntimeConfiguration = LuminaAgentRuntimeConfiguration(),
         permissionGate: any LuminaPermissionGate = LuminaDefaultPermissionGate(),
         confirmationCoordinator: any LuminaConfirmationCoordinator = LuminaAlwaysConfirmCoordinator(),
-        auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger()
+        auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
+        hooks: [any LuminaAgentRuntimeHook] = []
     ) {
         self.reactPlanner = reactPlanner
         self.contextProvider = contextProvider
         self.contextCompactor = contextCompactor
         self.configuration = configuration
+        self.hooks = hooks
         self.router = LuminaToolRouter(
             tools: tools,
             permissionGate: permissionGate,
@@ -47,41 +50,107 @@ public actor LuminaAgentRuntime {
         var trace = LuminaReActTrace()
         var results: [LuminaToolResult] = []
         var finalMarkdown: String?
+        var activeRequest = request
+        var schemas: [LuminaToolSchema] = []
 
         do {
             try Task.checkCancellation()
             eventSink?(.planningStarted(request.id))
-            let schemas = await router.schemas()
+            schemas = await router.schemas()
+            var emptyContext = LuminaRuntimeContext.empty
+            if let termination = try await applyHookDirectives(
+                event: .runStarted,
+                context: hookContext(request: activeRequest, schemas: schemas, trace: trace),
+                request: &activeRequest,
+                loadedContext: &emptyContext,
+                trace: &trace,
+                eventSink: eventSink
+            ) {
+                finalMarkdown = termination.markdown
+                trace.terminationReason = termination.reason
+            }
 
-            reactLoop: while trace.steps.count < configuration.maximumReActIterations {
+            reactLoop: while finalMarkdown == nil && trace.steps.count < configuration.maximumReActIterations {
                 try Task.checkCancellation()
-                let loadedContext = try await contextProvider.loadContext(LuminaRuntimeContextRequest(
-                    request: request,
+                var loadedContext = try await contextProvider.loadContext(LuminaRuntimeContextRequest(
+                    request: activeRequest,
                     availableTools: schemas,
                     trace: trace,
                     iteration: trace.steps.count,
                     remainingToolCalls: max(0, configuration.maximumToolCalls - trace.actionCount),
                     maximumCharacters: configuration.maximumObservationCharacters
                 ))
+                if let termination = try await applyHookDirectives(
+                    event: .contextLoaded,
+                    context: hookContext(request: activeRequest, schemas: schemas, trace: trace, loadedContext: loadedContext),
+                    request: &activeRequest,
+                    loadedContext: &loadedContext,
+                    trace: &trace,
+                    eventSink: eventSink
+                ) {
+                    finalMarkdown = termination.markdown
+                    trace.terminationReason = termination.reason
+                    break reactLoop
+                }
                 trace = try await compactTraceIfNeeded(
-                    request: request,
+                    request: activeRequest,
                     schemas: schemas,
                     trace: trace,
                     loadedContext: loadedContext
                 )
-                let planningStart = ContinuousClock.now
-                var step = try await reactPlanner.nextStep(context: LuminaReActPlannerContext(
-                    request: request,
+                var plannerContext = LuminaReActPlannerContext(
+                    request: activeRequest,
                     availableTools: schemas,
                     trace: trace,
                     loadedContext: loadedContext,
                     iteration: trace.steps.count,
                     remainingToolCalls: max(0, configuration.maximumToolCalls - trace.actionCount),
                     maximumObservationCharacters: configuration.maximumObservationCharacters
-                ))
+                )
+                if let termination = try await applyHookDirectives(
+                    event: .plannerContextReady,
+                    context: hookContext(
+                        request: activeRequest,
+                        schemas: schemas,
+                        trace: trace,
+                        loadedContext: loadedContext,
+                        plannerContext: plannerContext
+                    ),
+                    request: &activeRequest,
+                    loadedContext: &loadedContext,
+                    trace: &trace,
+                    eventSink: eventSink
+                ) {
+                    finalMarkdown = termination.markdown
+                    trace.terminationReason = termination.reason
+                    break reactLoop
+                }
+                plannerContext.request = activeRequest
+                plannerContext.loadedContext = loadedContext
+                let planningStart = ContinuousClock.now
+                var step = try await reactPlanner.nextStep(context: plannerContext)
                 let stepMilliseconds = LuminaRuntimeClock.milliseconds(since: planningStart)
                 step.elapsedMilliseconds = stepMilliseconds
                 planningMilliseconds += stepMilliseconds
+                if let termination = try await applyHookDirectives(
+                    event: .stepProduced,
+                    context: hookContext(
+                        request: activeRequest,
+                        schemas: schemas,
+                        trace: trace,
+                        loadedContext: loadedContext,
+                        plannerContext: plannerContext,
+                        step: step
+                    ),
+                    request: &activeRequest,
+                    loadedContext: &loadedContext,
+                    trace: &trace,
+                    eventSink: eventSink
+                ) {
+                    finalMarkdown = termination.markdown
+                    trace.terminationReason = termination.reason
+                    break reactLoop
+                }
 
                 switch step.kind {
                 case .thought:
@@ -109,10 +178,51 @@ public actor LuminaAgentRuntime {
                         toolCalls: trace.steps.compactMap(\.action)
                     )))
 
+                    if let termination = try await applyHookDirectives(
+                        event: .toolWillExecute,
+                        context: hookContext(
+                            request: activeRequest,
+                            schemas: schemas,
+                            trace: trace,
+                            loadedContext: loadedContext,
+                            plannerContext: plannerContext,
+                            step: step,
+                            call: call
+                        ),
+                        request: &activeRequest,
+                        loadedContext: &loadedContext,
+                        trace: &trace,
+                        eventSink: eventSink
+                    ) {
+                        finalMarkdown = termination.markdown
+                        trace.terminationReason = termination.reason
+                        break reactLoop
+                    }
                     let toolStart = ContinuousClock.now
-                    let (result, _, _) = await router.execute(call: call, request: request, eventSink: eventSink)
+                    let (result, _, _) = await router.execute(call: call, request: activeRequest, eventSink: eventSink)
                     toolExecutionMilliseconds += LuminaRuntimeClock.milliseconds(since: toolStart)
                     results.append(result)
+                    if let termination = try await applyHookDirectives(
+                        event: .toolDidExecute,
+                        context: hookContext(
+                            request: activeRequest,
+                            schemas: schemas,
+                            trace: trace,
+                            loadedContext: loadedContext,
+                            plannerContext: plannerContext,
+                            step: step,
+                            call: call,
+                            result: result
+                        ),
+                        request: &activeRequest,
+                        loadedContext: &loadedContext,
+                        trace: &trace,
+                        eventSink: eventSink
+                    ) {
+                        finalMarkdown = termination.markdown
+                        trace.terminationReason = termination.reason
+                        break reactLoop
+                    }
 
                     if configuration.rollbackFailedSideEffects, result.status == .failed, result.rollbackToken != nil {
                         eventSink?(.rollbackStarted(call))
@@ -126,6 +236,28 @@ public actor LuminaAgentRuntime {
                     )
                     trace.steps.append(.observation(observation))
                     eventSink?(.observationCreated(observation))
+                    if let termination = try await applyHookDirectives(
+                        event: .observationCreated,
+                        context: hookContext(
+                            request: activeRequest,
+                            schemas: schemas,
+                            trace: trace,
+                            loadedContext: loadedContext,
+                            plannerContext: plannerContext,
+                            step: step,
+                            call: call,
+                            result: result,
+                            observation: observation
+                        ),
+                        request: &activeRequest,
+                        loadedContext: &loadedContext,
+                        trace: &trace,
+                        eventSink: eventSink
+                    ) {
+                        finalMarkdown = termination.markdown
+                        trace.terminationReason = termination.reason
+                        break reactLoop
+                    }
 
                     if configuration.stopOnToolFailure, result.status != .succeeded {
                         finalMarkdown = "### 执行中止\n\n\(observation.summary)"
@@ -140,8 +272,27 @@ public actor LuminaAgentRuntime {
                 case .final:
                     trace.steps.append(step)
                     finalMarkdown = step.finalMarkdown
-                    eventSink?(.finalGenerated(step.finalMarkdown ?? ""))
-                    trace.terminationReason = "final"
+                    if let termination = try await applyHookDirectives(
+                        event: .finalGenerated,
+                        context: hookContext(
+                            request: activeRequest,
+                            schemas: schemas,
+                            trace: trace,
+                            loadedContext: loadedContext,
+                            plannerContext: plannerContext,
+                            step: step,
+                            finalMarkdown: finalMarkdown
+                        ),
+                        request: &activeRequest,
+                        loadedContext: &loadedContext,
+                        trace: &trace,
+                        eventSink: eventSink
+                    ) {
+                        finalMarkdown = termination.markdown
+                        trace.terminationReason = termination.reason
+                    }
+                    eventSink?(.finalGenerated(finalMarkdown ?? ""))
+                    trace.terminationReason = trace.terminationReason ?? "final"
                     break reactLoop
                 }
             }
@@ -158,7 +309,7 @@ public actor LuminaAgentRuntime {
                 toolCalls: trace.steps.compactMap(\.action)
             )
             let result = LuminaAgentRunResult(
-                requestID: request.id,
+                requestID: activeRequest.id,
                 plan: plan,
                 toolResults: results,
                 status: status(for: results),
@@ -169,12 +320,37 @@ public actor LuminaAgentRuntime {
                 ),
                 reactTrace: trace
             )
+            var runEndedContext = LuminaRuntimeContext.empty
+            _ = try await applyHookDirectives(
+                event: .runEnded,
+                context: hookContext(
+                    request: activeRequest,
+                    schemas: schemas,
+                    trace: trace,
+                    loadedContext: runEndedContext,
+                    finalMarkdown: finalMarkdown,
+                    timing: result.timing
+                ),
+                request: &activeRequest,
+                loadedContext: &runEndedContext,
+                trace: &trace,
+                eventSink: eventSink
+            )
             eventSink?(.finished(result))
             return result
         } catch is CancellationError {
             trace.terminationReason = "cancelled"
+            var terminalContext = LuminaRuntimeContext.empty
+            _ = try? await applyHookDirectives(
+                event: .cancelled,
+                context: hookContext(request: activeRequest, schemas: schemas, trace: trace, loadedContext: terminalContext),
+                request: &activeRequest,
+                loadedContext: &terminalContext,
+                trace: &trace,
+                eventSink: eventSink
+            )
             let result = LuminaAgentRunResult(
-                requestID: request.id,
+                requestID: activeRequest.id,
                 plan: LuminaAgentPlan(summary: "Cancelled before ReAct loop completed.", toolCalls: trace.steps.compactMap(\.action)),
                 toolResults: results,
                 status: .cancelled,
@@ -191,8 +367,23 @@ public actor LuminaAgentRuntime {
             trace.terminationReason = "planning-failed"
             let errorMessage = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             debugLog("Planning failed: \(errorMessage)")
+            var terminalContext = LuminaRuntimeContext.empty
+            _ = try? await applyHookDirectives(
+                event: .failed,
+                context: hookContext(
+                    request: activeRequest,
+                    schemas: schemas,
+                    trace: trace,
+                    loadedContext: terminalContext,
+                    errorMessage: errorMessage
+                ),
+                request: &activeRequest,
+                loadedContext: &terminalContext,
+                trace: &trace,
+                eventSink: eventSink
+            )
             let result = LuminaAgentRunResult(
-                requestID: request.id,
+                requestID: activeRequest.id,
                 plan: LuminaAgentPlan(summary: "ReAct planning failed: \(errorMessage)", toolCalls: trace.steps.compactMap(\.action)),
                 toolResults: results,
                 status: .failed,
@@ -208,6 +399,71 @@ public actor LuminaAgentRuntime {
         #if DEBUG
         print("[Lumina][AgentRuntime] \(message)")
         #endif
+    }
+
+    private struct HookTermination: Sendable {
+        var markdown: String
+        var reason: String
+    }
+
+    private func applyHookDirectives(
+        event: LuminaAgentRuntimeHookEvent,
+        context: LuminaAgentRuntimeHookContext,
+        request: inout LuminaAgentRequest,
+        loadedContext: inout LuminaRuntimeContext,
+        trace: inout LuminaReActTrace,
+        eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
+    ) async throws -> HookTermination? {
+        guard !hooks.isEmpty else { return nil }
+        var termination: HookTermination?
+        for hook in hooks {
+            let directives = try await hook.handle(event: event, context: context)
+            for directive in directives {
+                switch directive {
+                case let .appendContextSection(section):
+                    guard !loadedContext.sections.contains(where: { $0.id == section.id }) else { continue }
+                    loadedContext.sections.append(section)
+                    eventSink?(.contextUpdated(loadedContext))
+                case let .mergeRequestMetadata(metadata):
+                    request.metadata.merge(metadata) { _, new in new }
+                case let .terminate(markdown, reason):
+                    termination = HookTermination(markdown: markdown, reason: reason)
+                case let .annotate(key, value):
+                    eventSink?(.hookAnnotated(key, value))
+                }
+            }
+        }
+        return termination
+    }
+
+    private func hookContext(
+        request: LuminaAgentRequest,
+        schemas: [LuminaToolSchema],
+        trace: LuminaReActTrace,
+        loadedContext: LuminaRuntimeContext = .empty,
+        plannerContext: LuminaReActPlannerContext? = nil,
+        step: LuminaReActStep? = nil,
+        call: LuminaToolCall? = nil,
+        result: LuminaToolResult? = nil,
+        observation: LuminaReActObservation? = nil,
+        finalMarkdown: String? = nil,
+        timing: LuminaRuntimeTiming? = nil,
+        errorMessage: String? = nil
+    ) -> LuminaAgentRuntimeHookContext {
+        LuminaAgentRuntimeHookContext(
+            request: request,
+            availableTools: schemas,
+            trace: trace,
+            loadedContext: loadedContext,
+            plannerContext: plannerContext,
+            step: step,
+            toolCall: call,
+            toolResult: result,
+            observation: observation,
+            finalMarkdown: finalMarkdown,
+            timing: timing,
+            errorMessage: errorMessage
+        )
     }
 
     private func compactTraceIfNeeded(

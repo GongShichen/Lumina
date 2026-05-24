@@ -3,6 +3,8 @@ import AgentRuntime
 import Foundation
 import LuminaAppCore
 
+extension EKEventStore: @unchecked @retroactive Sendable {}
+
 enum LuminaEventKitManagementToolFactory {
     static func makeTools() -> [AnyLuminaAgentTool] {
         let store = EKEventStore()

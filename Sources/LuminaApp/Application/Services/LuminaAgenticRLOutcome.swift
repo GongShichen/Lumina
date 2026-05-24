@@ -13,5 +13,6 @@ struct LuminaAgenticRLOutcome: Codable, Hashable {
     let totalMilliseconds: Double
     let planningMilliseconds: Double
     let toolMilliseconds: Double
+    let memoryAccessDisabled: Bool
     let failureSummary: String?
 }

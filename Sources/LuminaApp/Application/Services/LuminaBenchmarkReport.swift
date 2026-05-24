@@ -24,6 +24,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let modelTokensPerSecondP95: Double?
     let modelPromptTokensP95: Double?
     let modelOutputTokensP95: Double?
+    let memoryAccessDisabled: Bool
     let results: [LuminaBenchmarkTaskResult]
     let jsonReportURL: URL?
     let markdownReportURL: URL?
@@ -73,6 +74,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             modelTokensPerSecondP95: optionalPercentile(modelMetrics.map(\.tokensPerSecond), percentile: 0.95),
             modelPromptTokensP95: optionalPercentile(modelMetrics.map { Double($0.promptTokens) }, percentile: 0.95),
             modelOutputTokensP95: optionalPercentile(modelMetrics.map { Double($0.outputTokens) }, percentile: 0.95),
+            memoryAccessDisabled: true,
             results: results,
             jsonReportURL: jsonReportURL,
             markdownReportURL: markdownReportURL

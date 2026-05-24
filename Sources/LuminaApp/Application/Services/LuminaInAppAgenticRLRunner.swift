@@ -112,6 +112,7 @@ final class LuminaInAppAgenticRLRunner {
                 totalMilliseconds: result.timing.totalMilliseconds,
                 planningMilliseconds: result.timing.planningMilliseconds,
                 toolMilliseconds: observedTimings.observedToolExecutionMilliseconds,
+                memoryAccessDisabled: true,
                 failureSummary: result.status == .succeeded ? nil : result.plan.summary
             ),
             modelMetrics: modelMetrics

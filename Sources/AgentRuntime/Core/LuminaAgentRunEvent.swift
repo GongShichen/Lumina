@@ -7,6 +7,8 @@ public enum LuminaAgentRunEvent: Sendable {
     case actionProposed(LuminaToolCall)
     case observationCreated(LuminaReActObservation)
     case finalGenerated(String)
+    case hookAnnotated(String, LuminaJSONValue)
+    case contextUpdated(LuminaRuntimeContext)
     case permissionChecked(LuminaToolCall, LuminaPermissionDecision)
     case confirmationRequired(LuminaToolCall)
     case confirmationResolved(LuminaToolCall, Bool)

@@ -42,6 +42,7 @@
 		13052A539C2DAFE5CDA6AFE6 /* LuminaRuntimeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06D6915158E9529A8115FEAC /* LuminaRuntimeContext.swift */; };
 		13807EA6066D915503D6EDC5 /* LuminaReminderItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1DA4B7544C8E4BA1EF5F10 /* LuminaReminderItem.swift */; };
 		140C1233FC4132D7AAD2AB21 /* LuminaEmptyRuntimeContextProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92D8588210D768083AFABA7A /* LuminaEmptyRuntimeContextProvider.swift */; };
+		14148E41172917CE8B062013 /* LuminaAgentRuntimeHookEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA57ACB55AEE151E06C7B09A /* LuminaAgentRuntimeHookEvent.swift */; };
 		14E9EE7E487B2DE017579F2E /* LuminaGemma4StatefulPlannerModelError.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD406F3EB8C59001AF089938 /* LuminaGemma4StatefulPlannerModelError.swift */; };
 		189943D8D4F102626E1E9511 /* LuminaContactsSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4948CAB2B679D01A3BDB6CB /* LuminaContactsSearchTool.swift */; };
 		1980504EBAE8AC2E15EA4E68 /* LuminaMemorySearchRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7300C13538D60DD298223C0 /* LuminaMemorySearchRanker.swift */; };
@@ -151,12 +152,15 @@
 		65EA75DEFFFD3A39DEA211E9 /* LuminaAgentRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E48F9C7D96FA2019A18AA6C1 /* LuminaAgentRequest.swift */; };
 		6653B377AA35A756B5DF1B3F /* LuminaToolParameterSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BE980D07BE4394B7566F8AC /* LuminaToolParameterSchema.swift */; };
 		6821B4BE6B50EB90DCEB9507 /* LuminaMemoryMatchKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62FE8CE227462216ADF4B08D /* LuminaMemoryMatchKind.swift */; };
+		68D8DEE4BA43C78FA106FEA1 /* LuminaAgentRuntimeHookContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71474142A2C15ED7EE11A1A1 /* LuminaAgentRuntimeHookContext.swift */; };
 		690EB4405419912B04CA84B3 /* LuminaLedgerSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A45928C7D8BE01DD157A3DC7 /* LuminaLedgerSearchTool.swift */; };
 		6A2BC6C065C8C070C20F3CE5 /* SchemaRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B324398E5265A46B8A3022 /* SchemaRow.swift */; };
+		6C037D1A14E2553587F335BC /* LuminaAppRuntimePermissionGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9197BA6F874FD64B69E74274 /* LuminaAppRuntimePermissionGate.swift */; };
 		6D751AF11899E96F0B7DB345 /* LuminaJSONMemoryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77E5ECB55964358B945BE9D6 /* LuminaJSONMemoryRepository.swift */; };
 		6E07E10835BD9BF432D5E402 /* LuminaCurrentTimeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A1776898AA3CF885B64306 /* LuminaCurrentTimeTool.swift */; };
 		7077E7B55914008EDFFADDD2 /* PersonalMemoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 238E1BDFE2C4E0447A953B0A /* PersonalMemoryViewModel.swift */; };
 		713EA5A18D617C8B0D51A795 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE6F6E82B418A6848A77C78A /* AppEnvironment.swift */; };
+		71708069DEBF4FB3329F4742 /* LuminaAgentRuntimeHook.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6023EA95BDCC338D17B92190 /* LuminaAgentRuntimeHook.swift */; };
 		7230C1B2AC7EA3FD57C08DE8 /* LuminaReActPlannerContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0FCDFE2204F2F2C13FF9BEF /* LuminaReActPlannerContext.swift */; };
 		728D5307AB204B58CFFDA020 /* LuminaToolSensitivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45CB99F4C82B17E0DCC279DD /* LuminaToolSensitivity.swift */; };
 		73CF0A3623AAC31BDB414412 /* IntegrationNotes.md in Resources */ = {isa = PBXBuildFile; fileRef = 6ED0F9249290A2A699BE84B2 /* IntegrationNotes.md */; };
@@ -192,7 +196,9 @@
 		8B20CBA7E63738C1D384071C /* AskUserOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 091B8B22BFA973AE326D690E /* AskUserOverlay.swift */; };
 		8B438EF86D7E1B64E0A1B12B /* LuminaAppBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2AF085666C0336D25423A /* LuminaAppBackground.swift */; };
 		8B8D393E5E78147D6EDD02E9 /* LuminaAuditRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = F46EF521544270D3AA5B571D /* LuminaAuditRecord.swift */; };
+		8BE110C8B89F75DA3D86D121 /* LuminaNoOpAgentRuntimeHook.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB0A4DACCDCCE831CC13C50B /* LuminaNoOpAgentRuntimeHook.swift */; };
 		8CFEC3CE5008971B6138DA34 /* AgentRunTimelineItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3DDD4C990088525C1E5772 /* AgentRunTimelineItem.swift */; };
+		8EA984B2EA4B7C5672904207 /* LuminaAppMemoryPolicyRuntimeHook.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDCBA71E36C42680D9FF38C9 /* LuminaAppMemoryPolicyRuntimeHook.swift */; };
 		90BDE382A1EC7F54967B8F3A /* AgentRuntime.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 62371BAD0AD44F72E93AF0AA /* AgentRuntime.framework */; };
 		90CC20D8A0024C34384B51D1 /* LuminaScheduledNotification.swift in Sources */ = {isa = PBXBuildFile; fileRef = 588DD5A8A289932BC29FDB62 /* LuminaScheduledNotification.swift */; };
 		912DE0FA3CAB717F5E3DAB21 /* LuminaMemoryChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CB225BC8361194B92E01B7 /* LuminaMemoryChunker.swift */; };
@@ -278,6 +284,7 @@
 		CECEB131B7FAE2AE0DEC9B48 /* AgentRuntime.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 62371BAD0AD44F72E93AF0AA /* AgentRuntime.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CEE4D2C4AE87E034FFCC22E4 /* LuminaBenchmarkTaskResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D10FE093EA3AC9B4EF7C70B /* LuminaBenchmarkTaskResult.swift */; };
 		CF21679EE09682290D2C72F4 /* LuminaEmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 735F510B8039CE5B6FAB9C54 /* LuminaEmbeddingProvider.swift */; };
+		CFC152C71710240FD7A64F3D /* LuminaAppMemoryPermissionGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C5F670F065DB54A3EB64851 /* LuminaAppMemoryPermissionGate.swift */; };
 		D02A85C736EE42A13A05CF64 /* PersonalMemory.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FCC367EAAC1E92530769DB4 /* PersonalMemory.framework */; };
 		D2445BBFE9D57BAC227434FA /* AgentRuntime.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 62371BAD0AD44F72E93AF0AA /* AgentRuntime.framework */; };
 		D2D7377C356296E7064724BC /* LuminaBenchmarkSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF5CFB0693D6C6DC06A7A35 /* LuminaBenchmarkSnapshot.swift */; };
@@ -289,6 +296,7 @@
 		D6C30201E90F6A08BBD000C8 /* LuminaAuditRedactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C11506036B11F8E38C7AC80 /* LuminaAuditRedactor.swift */; };
 		D79048FC14C31347E99E8924 /* LuminaAskUserRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043943AE9DD81AACDD83881F /* LuminaAskUserRequest.swift */; };
 		D8E7591761E7AF6BD5A05842 /* LuminaTemporalParseResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1054216556B75956059A5171 /* LuminaTemporalParseResult.swift */; };
+		DB3A73CFCC096449CD829F18 /* LuminaAgentRuntimeHookDirective.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0516FBDA8EC41CA49F69B016 /* LuminaAgentRuntimeHookDirective.swift */; };
 		DC2EA3C44C983A8826BD0052 /* LuminaAppCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0EF4CCE470064194DE9344CA /* LuminaAppCore.framework */; };
 		DD69D70856B5B8FEEBFD38E2 /* AppToolFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44C4A77986B8673390CCE94 /* AppToolFactory.swift */; };
 		DDC616A7925ECADEC24F8FF2 /* LuminaLocationRequestCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D471FA38DE4B023E8A904A64 /* LuminaLocationRequestCoordinator.swift */; };
@@ -453,6 +461,7 @@
 		03B324398E5265A46B8A3022 /* SchemaRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaRow.swift; sourceTree = "<group>"; };
 		043943AE9DD81AACDD83881F /* LuminaAskUserRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAskUserRequest.swift; sourceTree = "<group>"; };
 		04AD9450714B24EE0D9E25BE /* LuminaAskUserAnswer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAskUserAnswer.swift; sourceTree = "<group>"; };
+		0516FBDA8EC41CA49F69B016 /* LuminaAgentRuntimeHookDirective.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRuntimeHookDirective.swift; sourceTree = "<group>"; };
 		063B7F172A339DEE92A3FE17 /* LuminaAgentMediaAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentMediaAsset.swift; sourceTree = "<group>"; };
 		06A44A7FA608B69E0A656992 /* LuminaCalendarSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaCalendarSearchTool.swift; sourceTree = "<group>"; };
 		06D6915158E9529A8115FEAC /* LuminaRuntimeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaRuntimeContext.swift; sourceTree = "<group>"; };
@@ -510,6 +519,7 @@
 		2A646E8B9CCCD394F8774273 /* MarkdownListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownListView.swift; sourceTree = "<group>"; };
 		2AB05FDA27B3096A9D4C00B9 /* LuminaSummarizingReActContextCompactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaSummarizingReActContextCompactor.swift; sourceTree = "<group>"; };
 		2BA220AB2858E81C6FF8FB51 /* MarkdownBlockQuoteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockQuoteView.swift; sourceTree = "<group>"; };
+		2C5F670F065DB54A3EB64851 /* LuminaAppMemoryPermissionGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAppMemoryPermissionGate.swift; sourceTree = "<group>"; };
 		2DE608A0332A9E5BF72BC5BD /* LuminaInAppAgenticRLRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaInAppAgenticRLRunner.swift; sourceTree = "<group>"; };
 		2EA4F0897E96AA986A0A5AF1 /* LuminaCurrentTimeTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaCurrentTimeTool.swift; sourceTree = "<group>"; };
 		2F05023E263020EBBCD2617E /* LuminaAgentContentPart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentContentPart.swift; sourceTree = "<group>"; };
@@ -576,6 +586,7 @@
 		5BF5CFB0693D6C6DC06A7A35 /* LuminaBenchmarkSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaBenchmarkSnapshot.swift; sourceTree = "<group>"; };
 		5E5AE84B7F109FE085678094 /* AgentHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentHomeViewModel.swift; sourceTree = "<group>"; };
 		5E886E504FBD33F8B45309A4 /* MarkdownFallbackBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFallbackBlockView.swift; sourceTree = "<group>"; };
+		6023EA95BDCC338D17B92190 /* LuminaAgentRuntimeHook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRuntimeHook.swift; sourceTree = "<group>"; };
 		60C7BB635A0C56DCECA0FC97 /* AgentAppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAppServices.swift; sourceTree = "<group>"; };
 		62371BAD0AD44F72E93AF0AA /* AgentRuntime.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AgentRuntime.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		62FE8CE227462216ADF4B08D /* LuminaMemoryMatchKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMemoryMatchKind.swift; sourceTree = "<group>"; };
@@ -593,6 +604,7 @@
 		6E8AA3863420196C8F66FA2A /* LuminaClipboardReadTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaClipboardReadTool.swift; sourceTree = "<group>"; };
 		6ED0F9249290A2A699BE84B2 /* IntegrationNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = IntegrationNotes.md; sourceTree = "<group>"; };
 		6F1EB941EC8706CA0AE5C1DC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		71474142A2C15ED7EE11A1A1 /* LuminaAgentRuntimeHookContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRuntimeHookContext.swift; sourceTree = "<group>"; };
 		71D888325DA0B2239EB7BFA5 /* LuminaMediaImportTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMediaImportTool.swift; sourceTree = "<group>"; };
 		72BBD1DE5971069179F72003 /* MarkdownTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTable.swift; sourceTree = "<group>"; };
 		735F510B8039CE5B6FAB9C54 /* LuminaEmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaEmbeddingProvider.swift; sourceTree = "<group>"; };
@@ -636,6 +648,7 @@
 		901AC23428F2F02637994FA6 /* LuminaLiveActivityLockScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaLiveActivityLockScreenView.swift; sourceTree = "<group>"; };
 		90EF048DF10EF299073FC2F5 /* LuminaAgentRunSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRunSummary.swift; sourceTree = "<group>"; };
 		90F77A10010B3486BD4258C0 /* LuminaPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaPanel.swift; sourceTree = "<group>"; };
+		9197BA6F874FD64B69E74274 /* LuminaAppRuntimePermissionGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAppRuntimePermissionGate.swift; sourceTree = "<group>"; };
 		92D8588210D768083AFABA7A /* LuminaEmptyRuntimeContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaEmptyRuntimeContextProvider.swift; sourceTree = "<group>"; };
 		930497E2A6703FB3EB29E0C5 /* LuminaCancellationToken.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaCancellationToken.swift; sourceTree = "<group>"; };
 		93BF2D99ED663AD4344A607D /* LuminaToolResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaToolResult.swift; sourceTree = "<group>"; };
@@ -700,7 +713,9 @@
 		C8591C8EDA8ACDB7BBFF0360 /* MarkdownCodeBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCodeBlockView.swift; sourceTree = "<group>"; };
 		C8856ADBCFFE28CA5EE2107A /* DirectiveArgumentText+SourceText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DirectiveArgumentText+SourceText.swift"; sourceTree = "<group>"; };
 		C9BA7C2BD76DABE6FAF3167E /* LuminaMemoryStoreConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMemoryStoreConfiguration.swift; sourceTree = "<group>"; };
+		CA57ACB55AEE151E06C7B09A /* LuminaAgentRuntimeHookEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentRuntimeHookEvent.swift; sourceTree = "<group>"; };
 		CA7E18AB8BACAA21EEB54EEA /* MarkdownParagraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParagraphView.swift; sourceTree = "<group>"; };
+		CB0A4DACCDCCE831CC13C50B /* LuminaNoOpAgentRuntimeHook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaNoOpAgentRuntimeHook.swift; sourceTree = "<group>"; };
 		CB51E9338B42C6496D8A677D /* LuminaVectorMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaVectorMath.swift; sourceTree = "<group>"; };
 		CC22FDB87602BFA846E5EE6B /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		CCC82F42E9F69AE1ED3DBA97 /* LuminaConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaConfirmationCoordinator.swift; sourceTree = "<group>"; };
@@ -767,6 +782,7 @@
 		FC41C6306793EDB345DBE8B9 /* LuminaRuntimeContextRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaRuntimeContextRequest.swift; sourceTree = "<group>"; };
 		FC76FDE56311A39CD9F3C9F0 /* LuminaMessageDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMessageDraft.swift; sourceTree = "<group>"; };
 		FD3DDD4C990088525C1E5772 /* AgentRunTimelineItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunTimelineItem.swift; sourceTree = "<group>"; };
+		FDCBA71E36C42680D9FF38C9 /* LuminaAppMemoryPolicyRuntimeHook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAppMemoryPolicyRuntimeHook.swift; sourceTree = "<group>"; };
 		FE5A125FF6F9143D58FBDCC2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		FE6F6E82B418A6848A77C78A /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		FEE1449946AF7D40588F7C94 /* LuminaMemoryIngestTextTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaMemoryIngestTextTool.swift; sourceTree = "<group>"; };
@@ -896,6 +912,7 @@
 			children = (
 				B3639DFD18D3FEFC2F3D8A96 /* Info.plist */,
 				DFD8C34B4C8EFE8B217247B9 /* Core */,
+				4472A695F212409F2ADB95D0 /* Hooks */,
 				F99ACDD9E87C1264BA3E6956 /* Models */,
 				32538CCEA0BAF2F8E6DB0CDF /* ReAct */,
 				D23608D2E400C57AA190214A /* Security */,
@@ -960,6 +977,18 @@
 				7E1B750A7927ACBF90354979 /* MessageComposeSheet.swift */,
 			);
 			path = MessageCompose;
+			sourceTree = "<group>";
+		};
+		4472A695F212409F2ADB95D0 /* Hooks */ = {
+			isa = PBXGroup;
+			children = (
+				6023EA95BDCC338D17B92190 /* LuminaAgentRuntimeHook.swift */,
+				71474142A2C15ED7EE11A1A1 /* LuminaAgentRuntimeHookContext.swift */,
+				0516FBDA8EC41CA49F69B016 /* LuminaAgentRuntimeHookDirective.swift */,
+				CA57ACB55AEE151E06C7B09A /* LuminaAgentRuntimeHookEvent.swift */,
+				CB0A4DACCDCCE831CC13C50B /* LuminaNoOpAgentRuntimeHook.swift */,
+			);
+			path = Hooks;
 			sourceTree = "<group>";
 		};
 		463083206E6F3BD093827132 /* Products */ = {
@@ -1203,8 +1232,10 @@
 				90EF048DF10EF299073FC2F5 /* LuminaAgentRunSummary.swift */,
 				0A02FF351E1F891F343E5326 /* LuminaAgentTool+EraseToAnyTool.swift */,
 				86E97C4287E40FA66DAE0F01 /* LuminaAppContextProvider.swift */,
+				FDCBA71E36C42680D9FF38C9 /* LuminaAppMemoryPolicyRuntimeHook.swift */,
 				29AC69FF6A6A3611DD031297 /* LuminaAppPromptProfile.swift */,
 				104EE802CC184AE297D62115 /* LuminaAppReActPromptBuilder.swift */,
+				9197BA6F874FD64B69E74274 /* LuminaAppRuntimePermissionGate.swift */,
 				344CD3EC638B03BF43DD02A2 /* LuminaBenchmarkReport.swift */,
 				5BF5CFB0693D6C6DC06A7A35 /* LuminaBenchmarkSnapshot.swift */,
 				133DE85D856DEC3A59BF39E6 /* LuminaBenchmarkSuite.swift */,
@@ -1312,6 +1343,7 @@
 			children = (
 				14184E875EDE58C8F6AF46A7 /* LuminaAgentTool+EraseToAnyTool.swift */,
 				FF6A39AA1102455AA801E081 /* LuminaAppCoreToolFactory.swift */,
+				2C5F670F065DB54A3EB64851 /* LuminaAppMemoryPermissionGate.swift */,
 				04AD9450714B24EE0D9E25BE /* LuminaAskUserAnswer.swift */,
 				59D905F524225FD4388DA0CE /* LuminaAskUserChoice.swift */,
 				A7AB09CD19134BC45337BEA9 /* LuminaAskUserQuestion.swift */,
@@ -1785,6 +1817,10 @@
 				1A5447D15C5DB37DAA73D1D4 /* LuminaAgentRunStatus.swift in Sources */,
 				A44E3897F7CED8AAA54C3F7D /* LuminaAgentRuntime.swift in Sources */,
 				A474FE60F7FF946DEC9E0B2E /* LuminaAgentRuntimeConfiguration.swift in Sources */,
+				71708069DEBF4FB3329F4742 /* LuminaAgentRuntimeHook.swift in Sources */,
+				68D8DEE4BA43C78FA106FEA1 /* LuminaAgentRuntimeHookContext.swift in Sources */,
+				DB3A73CFCC096449CD829F18 /* LuminaAgentRuntimeHookDirective.swift in Sources */,
+				14148E41172917CE8B062013 /* LuminaAgentRuntimeHookEvent.swift in Sources */,
 				D447DD1EA07440F79FF08D09 /* LuminaAgentTool+Defaults.swift in Sources */,
 				84FD93347F0C81AA3F2CEC9F /* LuminaAgentTool.swift in Sources */,
 				AE38AC0D80B623E263B44EC1 /* LuminaAlwaysConfirmCoordinator.swift in Sources */,
@@ -1803,6 +1839,7 @@
 				12C39E21E6CC34BC9D8CA058 /* LuminaLocalMultimodalStructuredInferenceModel.swift in Sources */,
 				36AD03703E8B6FEFE6BACC0D /* LuminaLocalStructuredInferenceModel.swift in Sources */,
 				253B2F56A1E92F0CB77DA19E /* LuminaNoAvailableReActPlannerError.swift in Sources */,
+				8BE110C8B89F75DA3D86D121 /* LuminaNoOpAgentRuntimeHook.swift in Sources */,
 				F4F5E643BCF9AD0F9DBAD368 /* LuminaNoOpReActContextCompactor.swift in Sources */,
 				DF155B2F058289279D33F212 /* LuminaNoOpReActPlanner.swift in Sources */,
 				B18B42D5CD709A60FDCEB138 /* LuminaPermissionDecision.swift in Sources */,
@@ -1884,6 +1921,7 @@
 				9D276E81B0B2A7DC07836063 /* LuminaAgentLiveActivityAttributes.swift in Sources */,
 				3F79A6FD6DA61FA32D16BDA4 /* LuminaAgentTool+EraseToAnyTool.swift in Sources */,
 				950DFDD085D70FC6D514B258 /* LuminaAppCoreToolFactory.swift in Sources */,
+				CFC152C71710240FD7A64F3D /* LuminaAppMemoryPermissionGate.swift in Sources */,
 				1BF38A3B71D87D41F9E106D0 /* LuminaAskUserAnswer.swift in Sources */,
 				1209B997D8728C26A84BBF71 /* LuminaAskUserChoice.swift in Sources */,
 				25BFF93AC3EF728B8EE7C9B7 /* LuminaAskUserQuestion.swift in Sources */,
@@ -1998,8 +2036,10 @@
 				FA7C2E088CF1E06C5A3A2D2B /* LuminaApp.swift in Sources */,
 				8B438EF86D7E1B64E0A1B12B /* LuminaAppBackground.swift in Sources */,
 				56B467CBEA7FAF166AA88630 /* LuminaAppContextProvider.swift in Sources */,
+				8EA984B2EA4B7C5672904207 /* LuminaAppMemoryPolicyRuntimeHook.swift in Sources */,
 				B4F5074591006923D5EB617E /* LuminaAppPromptProfile.swift in Sources */,
 				288631E91CDBF98D87637678 /* LuminaAppReActPromptBuilder.swift in Sources */,
+				6C037D1A14E2553587F335BC /* LuminaAppRuntimePermissionGate.swift in Sources */,
 				C7144FBDCE9F663A0F039E69 /* LuminaBenchmarkReport.swift in Sources */,
 				D2D7377C356296E7064724BC /* LuminaBenchmarkSnapshot.swift in Sources */,
 				5C3BC8087E666BB800B63795 /* LuminaBenchmarkSuite.swift in Sources */,

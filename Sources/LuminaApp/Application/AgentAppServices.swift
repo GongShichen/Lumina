@@ -32,14 +32,17 @@ final class AgentAppServices: ObservableObject {
     }()
 
     private(set) lazy var evaluationRuntime: LuminaAgentRuntime = {
-        let memoryReadTools: Set<String> = ["local.search", "memory.recent", "memory.stats", "memory.delete"]
+        let memoryTools: Set<String> = [
+            "local.search", "memory.recent", "memory.stats", "memory.delete", "memory.ingest_text",
+            "webpage.save_to_memory", "media.import", "subscription.refresh"
+        ]
         let tools = AppToolFactory.makeTools(
             memoryStore: memoryStore,
             ledgerStore: ledgerStore,
             subscriptionStore: subscriptionStore,
             messageDrafts: messageDrafts,
             askUser: askUser
-        ).filter { !memoryReadTools.contains($0.schema.name) }
+        ).filter { !memoryTools.contains($0.schema.name) }
         return makeRuntime(tools: tools, contextProvider: LuminaEmptyRuntimeContextProvider())
     }()
 
@@ -52,8 +55,10 @@ final class AgentAppServices: ObservableObject {
             reactPlanner: environment.reactPlanner,
             contextProvider: contextProvider,
             configuration: environment.runtimeConfiguration,
+            permissionGate: LuminaAppRuntimePermissionGate(),
             confirmationCoordinator: confirmation,
-            auditLogger: auditLogger
+            auditLogger: auditLogger,
+            hooks: [LuminaAppMemoryPolicyRuntimeHook()]
         )
     }
 
@@ -104,7 +109,10 @@ final class AgentAppServices: ObservableObject {
     func runEvaluationStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
         evaluationRuntime.runStream(request: LuminaAgentRequest(
             content: content,
-            metadata: [LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true)]
+            metadata: [
+                LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true),
+                "lumina.evaluation.memory_access_disabled": .bool(true)
+            ]
         ))
     }
 

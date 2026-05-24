@@ -108,6 +108,7 @@ final class LuminaInAppBenchmarkRunner {
         - System permission wait p95: \(Int(report.systemPermissionWaitP95Milliseconds))ms
         - Planning p95: \(Int(report.planningP95Milliseconds))ms
         - Tool p95: \(Int(report.toolP95Milliseconds))ms
+        - Memory access disabled: \(report.memoryAccessDisabled)
 
         ## Model Inference
         - Model invocations: \(report.modelInvocationCount)

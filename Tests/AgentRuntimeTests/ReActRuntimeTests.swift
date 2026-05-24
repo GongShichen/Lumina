@@ -41,6 +41,65 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue(result.plan.summary.contains("真实记忆摘要"))
     }
 
+    func testRuntimeHookOrderIsObservable() async {
+        let hook = RecordingRuntimeHook()
+        let runtime = LuminaAgentRuntime(
+            tools: [],
+            reactPlanner: ScriptedReActPlanner(steps: [.final("done")]),
+            hooks: [hook]
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "hello"))
+        let events = await hook.events
+
+        XCTAssertEqual(result.status, .succeeded)
+        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .plannerContextReady, .stepProduced, .finalGenerated]))
+        XCTAssertEqual(events.last, .runEnded)
+    }
+
+    func testRuntimeHookCanAppendContextBeforePlanner() async {
+        let runtime = LuminaAgentRuntime(
+            tools: [],
+            reactPlanner: ContextAwareReActPlanner(),
+            hooks: [AppendingContextHook()]
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "use hook context"))
+
+        XCTAssertTrue(result.plan.summary.contains("hook supplied context"))
+    }
+
+    func testRuntimeHookFailureFailsRun() async {
+        let runtime = LuminaAgentRuntime(
+            tools: [],
+            reactPlanner: ScriptedReActPlanner(steps: [.final("done")]),
+            hooks: [FailingRuntimeHook()]
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "hello"))
+
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertTrue(result.plan.summary.contains("hook failed"))
+    }
+
+    func testAgentRuntimeTargetDoesNotReferencePersonalMemoryOrMemoryToolNames() throws {
+        let runtimeRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Sources/AgentRuntime")
+        let enumerator = FileManager.default.enumerator(at: runtimeRoot, includingPropertiesForKeys: nil)
+        var swiftFiles: [URL] = []
+        while let url = enumerator?.nextObject() as? URL {
+            if url.pathExtension == "swift" {
+                swiftFiles.append(url)
+            }
+        }
+
+        for file in swiftFiles {
+            let contents = try String(contentsOf: file, encoding: .utf8)
+            XCTAssertFalse(contents.contains("import PersonalMemory"), "\(file.path) imports PersonalMemory")
+            XCTAssertFalse(contents.contains("memory.ingest_text"), "\(file.path) contains an app memory tool name")
+        }
+    }
+
     func testRuntimeAutoCompactsTraceNearContextBudgetAndPreservesToolBudget() async {
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(
@@ -377,6 +436,48 @@ private actor CountingContextProvider: LuminaRuntimeContextProvider {
 private struct ContextAwareReActPlanner: LuminaReActPlanner {
     func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
         LuminaReActStep(kind: .final, finalMarkdown: context.loadedContext.sections.first?.summary ?? "missing context")
+    }
+}
+
+private actor RecordingRuntimeHook: LuminaAgentRuntimeHook {
+    private(set) var events: [LuminaAgentRuntimeHookEvent] = []
+
+    func handle(
+        event: LuminaAgentRuntimeHookEvent,
+        context: LuminaAgentRuntimeHookContext
+    ) async throws -> [LuminaAgentRuntimeHookDirective] {
+        events.append(event)
+        return []
+    }
+}
+
+private struct AppendingContextHook: LuminaAgentRuntimeHook {
+    func handle(
+        event: LuminaAgentRuntimeHookEvent,
+        context: LuminaAgentRuntimeHookContext
+    ) async throws -> [LuminaAgentRuntimeHookDirective] {
+        guard event == .plannerContextReady else { return [] }
+        return [
+            .appendContextSection(LuminaRuntimeContextSection(
+                id: "hook.context",
+                title: "Hook Context",
+                summary: "hook supplied context",
+                content: "hook supplied context",
+                source: "hook/test"
+            ))
+        ]
+    }
+}
+
+private struct FailingRuntimeHook: LuminaAgentRuntimeHook {
+    func handle(
+        event: LuminaAgentRuntimeHookEvent,
+        context: LuminaAgentRuntimeHookContext
+    ) async throws -> [LuminaAgentRuntimeHookDirective] {
+        if event == .runStarted {
+            throw NSError(domain: "hook failed", code: 1)
+        }
+        return []
     }
 }
 

@@ -22,21 +22,37 @@ struct LuminaSubscriptionAddTool: LuminaAgentTool {
     }
 
     func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
+        try await addSubscription(arguments: arguments, requestMetadata: [:], cancellation: cancellation)
+    }
+
+    func call(context: LuminaToolExecutionContext, cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
+        try await addSubscription(arguments: context.call.arguments, requestMetadata: context.request.metadata, cancellation: cancellation)
+    }
+
+    private func addSubscription(
+        arguments: [String: LuminaJSONValue],
+        requestMetadata: [String: LuminaJSONValue],
+        cancellation: LuminaCancellationToken
+    ) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
         let source = arguments.string("source") ?? ""
         let subscription = LuminaContentSubscription(source: source)
         let id = await store.add(subscription)
-        await memoryStore.ingest(LuminaMemoryDocument(
-            source: LuminaMemorySource(kind: .subscription, identifier: id),
-            title: "Subscription",
-            body: source,
-            sensitivity: .normal
-        ))
+        let memoryDisabled = requestMetadata.bool(LuminaAppContextProvider.disableMemoryContextMetadataKey) == true ||
+            requestMetadata.bool("lumina.evaluation.memory_access_disabled") == true
+        if !memoryDisabled {
+            await memoryStore.ingest(LuminaMemoryDocument(
+                source: LuminaMemorySource(kind: .subscription, identifier: id),
+                title: "Subscription",
+                body: source,
+                sensitivity: .normal
+            ))
+        }
         return LuminaToolResult(
             callID: UUID(),
             toolName: schema.name,
             status: .succeeded,
-            output: ["identifier": .string(id)],
+            output: ["identifier": .string(id), "memoryWriteSkipped": .bool(memoryDisabled)],
             content: [.text("订阅已添加：\(source)")],
             rollbackToken: id
         )
