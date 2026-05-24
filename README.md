@@ -46,7 +46,7 @@ App 的输入层支持文本、附件和语音转写；ViewModel 把请求交给
 克隆后进入工程根目录：
 
 ```bash
-cd /Users/gsc/Documents/project/iOS-Agent-runtime
+cd Lumina
 ```
 
 安装或刷新模型资产：
