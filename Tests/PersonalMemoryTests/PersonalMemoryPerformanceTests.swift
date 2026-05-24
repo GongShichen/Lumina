@@ -1,9 +1,10 @@
 import XCTest
 @testable import PersonalMemory
+import LuminaModelRuntime
 
 final class PersonalMemoryPerformanceTests: XCTestCase {
     func testSearchTenThousandChunksLatencyAndCacheHit() async throws {
-        let store = MemoryStore(configuration: MemoryStoreConfiguration(
+        let store = LuminaMemoryStore(configuration: LuminaMemoryStoreConfiguration(
             maximumVectorCandidates: 500,
             scheduleBackgroundEmbedding: false,
             persistAfterIngest: false
@@ -13,11 +14,11 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         }
 
         let coldStart = ContinuousClock.now
-        let coldReport = try await store.searchWithReport(MemorySearchQuery(text: "coffee-7", limit: 5))
+        let coldReport = try await store.searchWithReport(LuminaMemorySearchQuery(text: "coffee-7", limit: 5))
         let coldMilliseconds = TestClock.milliseconds(since: coldStart)
 
         let warmStart = ContinuousClock.now
-        let warmReport = try await store.searchWithReport(MemorySearchQuery(text: "coffee-7", limit: 5))
+        let warmReport = try await store.searchWithReport(LuminaMemorySearchQuery(text: "coffee-7", limit: 5))
         let warmMilliseconds = TestClock.milliseconds(since: warmStart)
 
         XCTAssertFalse(coldReport.results.isEmpty)
@@ -31,7 +32,7 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["LUMINA_RUN_HEAVY_BENCHMARKS"] == "1" else {
             throw XCTSkip("Set LUMINA_RUN_HEAVY_BENCHMARKS=1 to run 50k chunk benchmark.")
         }
-        let store = MemoryStore(configuration: MemoryStoreConfiguration(
+        let store = LuminaMemoryStore(configuration: LuminaMemoryStoreConfiguration(
             maximumVectorCandidates: 500,
             scheduleBackgroundEmbedding: false,
             persistAfterIngest: false
@@ -41,7 +42,7 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         }
 
         let start = ContinuousClock.now
-        let report = try await store.searchWithReport(MemorySearchQuery(text: "coffee-7", limit: 5, sourceKinds: [.ledger]))
+        let report = try await store.searchWithReport(LuminaMemorySearchQuery(text: "coffee-7", limit: 5, sourceKinds: [.ledger]))
         let elapsed = TestClock.milliseconds(since: start)
 
         XCTAssertLessThan(report.candidateCount, 50_000)
@@ -49,9 +50,9 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
     }
 
     func testIngestDoesNotWaitForEmbedding() async {
-        let store = MemoryStore(
+        let store = LuminaMemoryStore(
             embeddingProvider: SlowEmbeddingProvider(),
-            configuration: MemoryStoreConfiguration(
+            configuration: LuminaMemoryStoreConfiguration(
                 embedImmediately: false,
                 scheduleBackgroundEmbedding: false,
                 persistAfterIngest: false
@@ -79,7 +80,7 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         #if canImport(CoreML)
         let modelURL = URL(fileURLWithPath: path)
         let tokenizerURL = try XCTUnwrap(Self.tokenizerURL(for: modelURL))
-        let provider = try BGECoreMLEmbeddingProvider(configuration: .init(
+        let provider = try LuminaBGECoreMLEmbeddingProvider(configuration: .init(
             modelURL: modelURL,
             tokenizerURL: tokenizerURL
         ))
@@ -88,7 +89,7 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
         let elapsed = TestClock.milliseconds(since: start)
 
         XCTAssertEqual(embedding.count, 512)
-        XCTAssertGreaterThan(VectorMath.cosine(embedding, embedding), 0.99)
+        XCTAssertGreaterThan(LuminaVectorMath.cosine(embedding, embedding), 0.99)
         XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 500 : 5_000)
         #else
         throw XCTSkip("CoreML is unavailable on this platform.")
@@ -100,7 +101,7 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
             throw XCTSkip("Set LUMINA_EMBEDDING_TOKENIZER to tokenizer.json.")
         }
         #if canImport(CoreML)
-        let tokenizer = try BGEWordPieceTokenizer(tokenizerURL: URL(fileURLWithPath: path))
+        let tokenizer = try LuminaBGEWordPieceTokenizer(tokenizerURL: URL(fileURLWithPath: path))
         let encoded = tokenizer.encode("本地端侧 memory", maxLength: 16)
 
         XCTAssertEqual(encoded.inputIDs.count, 16)
@@ -127,10 +128,10 @@ final class PersonalMemoryPerformanceTests: XCTestCase {
 }
 
 enum MemoryDataset {
-    static func documents(count: Int) -> [MemoryDocument] {
+    static func documents(count: Int) -> [LuminaMemoryDocument] {
         (0..<count).map { index in
-            MemoryDocument(
-                source: MemorySource(kind: index.isMultiple(of: 4) ? .ledger : .appNote, identifier: "doc-\(index)"),
+            LuminaMemoryDocument(
+                source: LuminaMemorySource(kind: index.isMultiple(of: 4) ? .ledger : .appNote, identifier: "doc-\(index)"),
                 title: "Note \(index)",
                 body: "这是第 \(index) 条本地记忆，用于端侧检索 benchmark。关键词 coffee-\(index % 10)。",
                 sensitivity: .normal
@@ -139,7 +140,7 @@ enum MemoryDataset {
     }
 }
 
-private struct SlowEmbeddingProvider: EmbeddingProvider {
+private struct SlowEmbeddingProvider: LuminaEmbeddingProvider {
     let dimension = 8
 
     func embed(_ text: String) async throws -> [Float] {

@@ -1,0 +1,3 @@
+import LuminaAppCore
+
+typealias LuminaSubscriptionStore = LuminaAppCore.LuminaSubscriptionStore

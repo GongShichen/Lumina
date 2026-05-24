@@ -1,0 +1,3 @@
+import LuminaAppCore
+
+typealias LuminaContentSubscription = LuminaAppCore.LuminaContentSubscription

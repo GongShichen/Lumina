@@ -1,0 +1,3 @@
+import LuminaAppCore
+
+typealias LuminaLedgerTransaction = LuminaAppCore.LuminaLedgerTransaction

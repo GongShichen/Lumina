@@ -1,0 +1,3 @@
+import LuminaAppCore
+
+typealias LuminaMessageDraftCenter = LuminaAppCore.LuminaMessageDraftCenter

@@ -6,16 +6,19 @@ let package = Package(
     name: "LocalAgentRuntime",
     platforms: [
         .iOS(.v26),
-        .macOS(.v14)
+        .macOS(.v15)
     ],
     products: [
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
         .library(name: "PersonalMemory", targets: ["PersonalMemory"]),
+        .library(name: "LuminaModelRuntime", targets: ["LuminaModelRuntime"]),
         .library(name: "LuminaMarkdownUI", targets: ["LuminaMarkdownUI"]),
         .library(name: "LuminaAppCore", targets: ["LuminaAppCore"])
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0")
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
+        .package(url: "https://github.com/john-rocky/CoreML-LLM.git", branch: "main")
     ],
     targets: [
         .target(
@@ -24,6 +27,16 @@ let package = Package(
         ),
         .target(
             name: "PersonalMemory",
+            exclude: ["Info.plist"]
+        ),
+        .target(
+            name: "LuminaModelRuntime",
+            dependencies: [
+                "AgentRuntime",
+                "PersonalMemory",
+                .product(name: "CoreMLLLM", package: "CoreML-LLM"),
+                .product(name: "Tokenizers", package: "swift-transformers")
+            ],
             exclude: ["Info.plist"]
         ),
         .target(
@@ -40,7 +53,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentRuntimeTests",
-            dependencies: ["AgentRuntime"]
+            dependencies: ["AgentRuntime", "LuminaModelRuntime"]
         ),
         .testTarget(
             name: "LuminaMarkdownUITests",
@@ -48,11 +61,11 @@ let package = Package(
         ),
         .testTarget(
             name: "PersonalMemoryTests",
-            dependencies: ["PersonalMemory"]
+            dependencies: ["PersonalMemory", "LuminaModelRuntime"]
         ),
         .testTarget(
             name: "LuminaAppCoreTests",
-            dependencies: ["LuminaAppCore", "AgentRuntime", "PersonalMemory"]
+            dependencies: ["LuminaAppCore", "AgentRuntime", "PersonalMemory", "LuminaModelRuntime"]
         )
     ]
 )

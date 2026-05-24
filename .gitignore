@@ -3,11 +3,14 @@
 DerivedData/
 *.xcuserstate
 *.xcuserdata/
+xcuserdata/
 .DS_Store
 *.mlmodelc/
 Resources/Models/BGETextEmbedding.mlmodelc
 Resources/Models/Downloaded/
+Resources/Models/.staging/
 Resources/Models/BGETextEmbedding-tokenizer.json
 Resources/Models/Gemma4Planner
+Resources/Models/Gemma4Planner/
 *.xcresult
-Reports/*.png
+Reports/

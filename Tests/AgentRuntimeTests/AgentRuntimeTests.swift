@@ -1,13 +1,14 @@
 import XCTest
 @testable import AgentRuntime
+import LuminaModelRuntime
 
 final class AgentRuntimeTests: XCTestCase {
     func testToolSchemaRoundTrip() throws {
-        let schema = ToolSchema(
+        let schema = LuminaToolSchema(
             name: "message.compose",
             description: "Compose a message.",
             parameters: [
-                ToolParameterSchema(name: "body", type: .string, description: "Body", sensitive: true)
+                LuminaToolParameterSchema(name: "body", type: .string, description: "Body", sensitive: true)
             ],
             sideEffect: .externalCommunication,
             sensitivity: .privateData,
@@ -16,12 +17,12 @@ final class AgentRuntimeTests: XCTestCase {
         )
 
         let data = try JSONEncoder().encode(schema)
-        let decoded = try JSONDecoder().decode(ToolSchema.self, from: data)
+        let decoded = try JSONDecoder().decode(LuminaToolSchema.self, from: data)
         XCTAssertEqual(decoded, schema)
     }
 
     func testAgentRequestSupportsMultimodalContent() throws {
-        let image = AgentMediaAsset(
+        let image = LuminaAgentMediaAsset(
             location: .fileURL("/tmp/receipt.jpg"),
             mimeType: "image/jpeg",
             filename: "receipt.jpg",
@@ -29,7 +30,7 @@ final class AgentRuntimeTests: XCTestCase {
             height: 768,
             summary: "coffee receipt"
         )
-        let request = AgentRequest(content: [
+        let request = LuminaAgentRequest(content: [
             .text("帮我记账"),
             .image(image),
             .json(.object(["source": .string("camera")]))
@@ -40,7 +41,7 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(request.content.modalities, [.text, .image, .structuredData])
 
         let data = try JSONEncoder().encode(request)
-        let decoded = try JSONDecoder().decode(AgentRequest.self, from: data)
+        let decoded = try JSONDecoder().decode(LuminaAgentRequest.self, from: data)
         XCTAssertEqual(decoded.content.count, 3)
     }
 
@@ -55,27 +56,27 @@ final class AgentRuntimeTests: XCTestCase {
         | --- | --- |
         | Calendar | high |
         """
-        let part = AgentContentPart.markdown(markdown)
+        let part = LuminaAgentContentPart.markdown(markdown)
 
         XCTAssertEqual(part.modality, .text)
         XCTAssertEqual(part.textForPlanning, markdown)
 
         let data = try JSONEncoder().encode(part)
-        let decoded = try JSONDecoder().decode(AgentContentPart.self, from: data)
+        let decoded = try JSONDecoder().decode(LuminaAgentContentPart.self, from: data)
 
         XCTAssertEqual(decoded, part)
     }
 
     func testPermissionGateRequiresConfirmationForWrites() async {
-        let gate = DefaultPermissionGate()
-        let schema = ToolSchema(
+        let gate = LuminaDefaultPermissionGate()
+        let schema = LuminaToolSchema(
             name: "reminder.create",
             description: "Create reminder",
             parameters: [],
             sideEffect: .systemWrite
         )
-        let call = ToolCall(toolName: schema.name, arguments: [:])
-        let decision = await gate.decision(for: call, schema: schema, request: AgentRequest(text: "提醒我"))
+        let call = LuminaToolCall(toolName: schema.name, arguments: [:])
+        let decision = await gate.decision(for: call, schema: schema, request: LuminaAgentRequest(text: "提醒我"))
 
         guard case .requiresConfirmation = decision else {
             XCTFail("Expected confirmation decision")
@@ -84,32 +85,66 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testAuditRedactsSensitiveArguments() {
-        let schema = ToolSchema(
+        let schema = LuminaToolSchema(
             name: "message.compose",
             description: "Compose message",
             parameters: [
-                ToolParameterSchema(name: "body", type: .string, description: "Body", sensitive: true)
+                LuminaToolParameterSchema(name: "body", type: .string, description: "Body", sensitive: true)
             ],
             sideEffect: .externalCommunication
         )
 
-        let redacted = AuditRedactor.redact(arguments: ["body": .string("secret"), "topic": .string("lunch")], schema: schema)
+        let redacted = LuminaAuditRedactor.redact(arguments: ["body": .string("secret"), "topic": .string("lunch")], schema: schema)
         XCTAssertEqual(redacted["body"], .string("<redacted>"))
         XCTAssertEqual(redacted["topic"], .string("lunch"))
     }
 
+    func testJSONLAuditLoggerReadsRecentRecords() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumina-audit-\(UUID().uuidString)", isDirectory: true)
+        let logger = LuminaJSONLAuditLogger(url: directory.appendingPathComponent("audit.jsonl"))
+        let requestID = UUID()
+
+        await logger.append(LuminaAuditRecord(
+            requestID: requestID,
+            toolName: "local.search",
+            schemaVersion: 1,
+            arguments: ["query": .string("memory")],
+            permission: "allowed",
+            confirmed: false,
+            resultStatus: .succeeded,
+            outputSummary: "first"
+        ))
+        await logger.append(LuminaAuditRecord(
+            requestID: requestID,
+            toolName: "ledger.record",
+            schemaVersion: 1,
+            arguments: ["memo": .string("<redacted>")],
+            permission: "confirmed",
+            confirmed: true,
+            resultStatus: .succeeded,
+            outputSummary: "second"
+        ))
+
+        let recent = await logger.recentRecords(limit: 1)
+
+        XCTAssertEqual(recent.count, 1)
+        XCTAssertEqual(recent.first?.toolName, "ledger.record")
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     func testRuntimeRunsReadOnlyTool() async {
-        let tool = AnyAgentTool(
-            schema: ToolSchema(
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
                 name: "local.search",
                 description: "Search",
-                parameters: [ToolParameterSchema(name: "query", type: .string, description: "Query")],
+                parameters: [LuminaToolParameterSchema(name: "query", type: .string, description: "Query")],
                 sideEffect: .readOnly,
                 outputModalities: [.text, .structuredData]
             )
         ) { arguments, cancellation in
             try cancellation.checkCancellation()
-            return ToolResult(
+            return LuminaToolResult(
                 callID: UUID(),
                 toolName: "local.search",
                 status: .succeeded,
@@ -118,8 +153,13 @@ final class AgentRuntimeTests: XCTestCase {
             )
         }
 
-        let runtime = AgentRuntime(tools: [tool], planner: RuleBasedPlanner())
-        let result = await runtime.run(request: AgentRequest(text: "查本地数据"))
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            reactPlanner: FixedReActPlanner(calls: [
+                LuminaToolCall(toolName: "local.search", arguments: ["query": .string("查本地数据")])
+            ])
+        )
+        let result = await runtime.run(request: LuminaAgentRequest(text: "查本地数据"))
 
         XCTAssertEqual(result.status, .succeeded)
         XCTAssertEqual(result.toolResults.count, 1)
@@ -128,60 +168,71 @@ final class AgentRuntimeTests: XCTestCase {
     }
 
     func testRuntimeDeniesWhenConfirmationRejected() async {
-        let tool = AnyAgentTool(
-            schema: ToolSchema(
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
                 name: "ledger.record",
                 description: "Ledger",
-                parameters: [ToolParameterSchema(name: "memo", type: .string, description: "Memo")],
+                parameters: [LuminaToolParameterSchema(name: "memo", type: .string, description: "Memo")],
                 sideEffect: .appLocalWrite
             )
         ) { _, _ in
-            ToolResult(callID: UUID(), toolName: "ledger.record", status: .succeeded)
+            LuminaToolResult(callID: UUID(), toolName: "ledger.record", status: .succeeded)
         }
 
-        let runtime = AgentRuntime(
+        let runtime = LuminaAgentRuntime(
             tools: [tool],
-            planner: RuleBasedPlanner(),
-            confirmationCoordinator: DenyAllConfirmationCoordinator()
+            reactPlanner: FixedReActPlanner(calls: [
+                LuminaToolCall(toolName: "ledger.record", arguments: ["memo": .string("咖啡 42 元")], requiresConfirmation: true)
+            ]),
+            confirmationCoordinator: LuminaDenyAllConfirmationCoordinator()
         )
-        let result = await runtime.run(request: AgentRequest(text: "记账 咖啡 42 元"))
+        let result = await runtime.run(request: LuminaAgentRequest(text: "记账 咖啡 42 元"))
 
         XCTAssertEqual(result.status, .failed)
         XCTAssertEqual(result.toolResults.first?.status, .denied)
     }
 
-    func testModelBackedPlannerParsesGenericJSONPlan() async throws {
+    func testModelBackedReActPlannerParsesActionStep() async throws {
         let model = MockStructuredInferenceModel(json: """
         {
-          "summary": "Search first",
-          "toolCalls": [
-            {
-              "toolName": "local.search",
-              "arguments": {"query": "coffee", "limit": 3},
-              "requiresConfirmation": false
-            }
-          ]
+          "type": "tool_use",
+          "thought": "Search first",
+          "tool_name": "local.search",
+          "parameters": {"query": "coffee", "limit": 3},
+          "requires_confirmation": false
         }
         """)
-        let planner = ModelBackedPlanner(model: model)
-        let schema = ToolSchema(
+        let planner = LuminaModelBackedReActPlanner(model: model) { context in
+            context.request.text
+        }
+        let schema = LuminaToolSchema(
             name: "local.search",
             description: "Search",
             parameters: [],
             sideEffect: .readOnly
         )
 
-        let plan = try await planner.makePlan(for: AgentRequest(text: "coffee"), availableTools: [schema])
+        let step = try await planner.nextStep(context: LuminaReActPlannerContext(
+            request: LuminaAgentRequest(text: "coffee"),
+            availableTools: [schema],
+            trace: LuminaReActTrace(),
+            iteration: 0,
+            remainingToolCalls: 6,
+            maximumObservationCharacters: 2_000
+        ))
 
-        XCTAssertEqual(plan.summary, "Search first")
-        XCTAssertEqual(plan.toolCalls.first?.toolName, "local.search")
-        XCTAssertEqual(plan.toolCalls.first?.arguments["query"], .string("coffee"))
+        XCTAssertEqual(step.kind, .action)
+        XCTAssertEqual(step.thought, "Search first")
+        XCTAssertEqual(step.action?.toolName, "local.search")
+        XCTAssertEqual(step.action?.arguments["query"], .string("coffee"))
     }
 
-    func testModelBackedPlannerPassesMultimodalContentToModel() async throws {
+    func testModelBackedReActPlannerPassesMultimodalContentToModel() async throws {
         let model = CapturingMultimodalModel()
-        let planner = ModelBackedPlanner(multimodalModel: model)
-        let schema = ToolSchema(
+        let planner = LuminaModelBackedReActPlanner(multimodalModel: model) { context in
+            context.request.text
+        }
+        let schema = LuminaToolSchema(
             name: "receipt.scan",
             description: "Scan receipt",
             parameters: [],
@@ -189,35 +240,45 @@ final class AgentRuntimeTests: XCTestCase {
             acceptedInputModalities: [.image],
             outputModalities: [.structuredData]
         )
-        let request = AgentRequest(content: [
+        let request = LuminaAgentRequest(content: [
             .text("识别小票"),
-            .image(AgentMediaAsset(location: .fileURL("/tmp/receipt.jpg"), mimeType: "image/jpeg", summary: "receipt"))
+            .image(LuminaAgentMediaAsset(location: .fileURL("/tmp/receipt.jpg"), mimeType: "image/jpeg", summary: "receipt"))
         ])
 
-        _ = try await planner.makePlan(for: request, availableTools: [schema])
+        _ = try await planner.nextStep(context: LuminaReActPlannerContext(
+            request: request,
+            availableTools: [schema],
+            trace: LuminaReActTrace(),
+            iteration: 0,
+            remainingToolCalls: 6,
+            maximumObservationCharacters: 2_000
+        ))
         let captured = await model.capturedModalities()
 
         XCTAssertEqual(captured, [.text, .image])
     }
 
     func testRuntimeStreamEmitsEventsDuringExecution() async {
-        let tool = AnyAgentTool(
-            schema: ToolSchema(
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
                 name: "local.search",
                 description: "Search",
                 parameters: [],
                 sideEffect: .readOnly
             )
         ) { _, _ in
-            ToolResult(callID: UUID(), toolName: "local.search", status: .succeeded)
+            LuminaToolResult(callID: UUID(), toolName: "local.search", status: .succeeded)
         }
 
-        let runtime = AgentRuntime(tools: [tool], planner: RuleBasedPlanner())
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            reactPlanner: FixedReActPlanner(calls: [LuminaToolCall(toolName: "local.search", arguments: [:])])
+        )
         var sawPlan = false
         var sawToolStart = false
         var sawFinished = false
 
-        for await event in runtime.runStream(request: AgentRequest(text: "查 coffee")) {
+        for await event in runtime.runStream(request: LuminaAgentRequest(text: "查 coffee")) {
             switch event {
             case .planCreated:
                 sawPlan = true
@@ -236,7 +297,7 @@ final class AgentRuntimeTests: XCTestCase {
     }
 }
 
-private struct MockStructuredInferenceModel: LocalStructuredInferenceModel {
+private struct MockStructuredInferenceModel: LuminaLocalStructuredInferenceModel {
     var json: String
 
     func generateJSON(prompt: String) async throws -> String {
@@ -244,26 +305,33 @@ private struct MockStructuredInferenceModel: LocalStructuredInferenceModel {
     }
 }
 
-private actor CapturingMultimodalModel: LocalMultimodalStructuredInferenceModel {
-    private var modalities: Set<AgentModality> = []
+private struct FixedReActPlanner: LuminaReActPlanner {
+    var calls: [LuminaToolCall]
 
-    func generateJSON(input: StructuredPlannerModelInput) async throws -> String {
+    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+        let index = context.trace.actionCount
+        guard index < calls.count else { return .final("done") }
+        return .action(thought: "Fixed ReAct test step", call: calls[index])
+    }
+}
+
+private actor CapturingMultimodalModel: LuminaLocalMultimodalStructuredInferenceModel {
+    private var modalities: Set<LuminaAgentModality> = []
+
+    func generateJSON(input: LuminaStructuredPlannerModelInput) async throws -> String {
         modalities = input.content.modalities
         return """
         {
-          "summary": "Scan receipt",
-          "toolCalls": [
-            {
-              "toolName": "receipt.scan",
-              "arguments": {},
-              "requiresConfirmation": false
-            }
-          ]
+          "type": "tool_use",
+          "thought": "Scan receipt",
+          "tool_name": "receipt.scan",
+          "parameters": {},
+          "requires_confirmation": false
         }
         """
     }
 
-    func capturedModalities() -> Set<AgentModality> {
+    func capturedModalities() -> Set<LuminaAgentModality> {
         modalities
     }
 }
