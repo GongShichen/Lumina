@@ -129,12 +129,14 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         }
         const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
         if (trim(stepJson).empty()) {
+            callbacks_.emitEvent("model_generation_failed", "{\"reason\":\"empty-or-invalid-step\"}");
             session.failWithFinal("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
             break;
         }
 
         std::string error;
         if (!validateReActStepObject(stepJson, true, error)) {
+            callbacks_.emitEvent("model_generation_failed", "{\"reason\":\"invalid-step\",\"error\":" + jsonString(error) + "}");
             session.failWithFinal("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
             break;
         }
@@ -153,6 +155,18 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             break;
         }
         if (type == "reasoning") {
+            if (boolField(fields, "needs_more_context", false) && callbacks_.hasContext()) {
+                ContextManager contextManager(session);
+                std::string additionalContext = callbacks_.loadContext(contextManager.followUpRequestJson(request, stepJson));
+                if (!trim(additionalContext).empty() && trim(additionalContext) != "null") {
+                    contextJson = contextManager.compactIfNeeded(contextManager.mergeContextJson(contextJson, additionalContext));
+                    session.setContextJson(contextJson);
+                    callbacks_.emitEvent("context_updated", contextJson);
+                    if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_updated", contextJson))) {
+                        break;
+                    }
+                }
+            }
             if (session.consecutiveReasoningCount() >= maximumConsecutiveReasoningSteps_) {
                 session.failWithFinal("reasoning-budget", "### 无法继续\n\n模型连续输出 reasoning，已达到空转保护上限。");
                 break;
@@ -192,6 +206,14 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
 
     if (cancelled_) {
         session.cancel();
+    }
+
+    if (session.isPaused()) {
+        const std::string snapshot = session.snapshotJson();
+        callbacks_.emitEvent("run_paused", snapshot);
+        callbacks_.audit("run_paused", snapshot);
+        HookDispatcher(callbacks_).dispatch("run_paused", snapshot);
+        return snapshot;
     }
 
     const std::string finished = Responder().finalize(session);

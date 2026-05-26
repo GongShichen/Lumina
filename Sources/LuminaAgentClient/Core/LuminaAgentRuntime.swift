@@ -3,7 +3,7 @@ import LuminaAgentRuntime
 
 public final class LuminaAgentRuntime: @unchecked Sendable {
     private let box: LuminaAgentRuntimeClientBox
-    private var handle: OpaquePointer?
+    private let runtimeHandle: LuminaAgentRuntimeHandle?
 
     public init(
         tools: [AnyLuminaAgentTool],
@@ -27,14 +27,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             auditLogger: auditLogger,
             hooks: hooks
         )
-        self.handle = LuminaAgentRuntimeCreate(configuration.runtimeJSON)
+        self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
         configureRuntime()
-    }
-
-    deinit {
-        if let handle {
-            LuminaAgentRuntimeDestroy(handle)
-        }
     }
 
     public func availableToolSchemas() async -> [LuminaToolSchema] {
@@ -65,7 +59,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         request: LuminaAgentRequest,
         eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     ) async -> LuminaAgentRunResult {
-        guard let handle else {
+        guard let runtimeHandle else {
             return LuminaAgentRunResult(
                 requestID: request.id,
                 plan: LuminaAgentPlan(summary: "Runtime unavailable.", toolCalls: []),
@@ -81,11 +75,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.hookContextSections = []
         box.timingStartedAt = ContinuousClock.now
         let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
-        let resultPointer = requestJSON.withCString { LuminaAgentRuntimeRun(handle, $0) }
-        let resultJSON = resultPointer.map { String(cString: $0) } ?? "{}"
-        if let resultPointer {
-            LuminaAgentRuntimeReleaseString(resultPointer)
-        }
+        let resultJSON = runtimeHandle.run(requestJSON: requestJSON)
         let result = box.makeRunResult(fromRuntimeResultJSON: resultJSON, request: request)
         box.currentEventSink = nil
         box.resetCancellation()
@@ -94,35 +84,20 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
 
     private nonisolated func cancelCurrentRun() {
         box.requestCancellation()
-        if let handle {
-            LuminaAgentRuntimeCancel(handle, nil)
-        }
+        runtimeHandle?.cancelCurrentRun()
     }
 
     private func configureRuntime() {
-        guard let handle else { return }
+        guard let runtimeHandle else { return }
         let context = Unmanaged.passUnretained(box).toOpaque()
-        LuminaAgentRuntimeSetModelCallback(handle, luminaAgentClientModelCallback, context)
-        LuminaAgentRuntimeSetStreamingModelCallback(handle, luminaAgentClientStreamingModelCallback, context)
-        LuminaAgentRuntimeSetToolCallback(handle, luminaAgentClientToolCallback, context)
-        LuminaAgentRuntimeSetContextCallback(handle, luminaAgentClientContextCallback, context)
-        LuminaAgentRuntimeSetPermissionCallback(handle, luminaAgentClientPermissionCallback, context)
-        LuminaAgentRuntimeSetConfirmationCallback(handle, luminaAgentClientConfirmationCallback, context)
-        LuminaAgentRuntimeSetAuditCallback(handle, luminaAgentClientAuditCallback, context)
-        LuminaAgentRuntimeSetRollbackCallback(handle, luminaAgentClientRollbackCallback, context)
-        LuminaAgentRuntimeSetEventCallback(handle, luminaAgentClientEventCallback, context)
-        LuminaAgentRuntimeSetHookCallback(handle, luminaAgentClientHookCallback, context)
+        runtimeHandle.installCallbacks(context: context)
 
         for tool in box.tools {
             guard let schemaJSON = try? String(data: JSONEncoder().encode(tool.schema), encoding: .utf8) else { continue }
-            let statusPointer = schemaJSON.withCString { LuminaAgentRuntimeRegisterToolSchema(handle, $0) }
-            if let statusPointer {
-                LuminaAgentRuntimeReleaseString(statusPointer)
-            }
+            _ = runtimeHandle.registerToolSchema(schemaJSON)
         }
     }
 }
-
 
 private func box(from context: UnsafeMutableRawPointer?) -> LuminaAgentRuntimeClientBox? {
     guard let context else { return nil }
@@ -132,8 +107,6 @@ private func box(from context: UnsafeMutableRawPointer?) -> LuminaAgentRuntimeCl
 private func retainedCString(_ string: String) -> UnsafeMutablePointer<CChar>? {
     strdup(string)
 }
-
-
 
 private func blockOn<T: Sendable>(
     isCancelled: @escaping @Sendable () -> Bool = { false },
@@ -155,7 +128,7 @@ private func blockOn<T: Sendable>(
     return holder.value as! T
 }
 
-private let luminaAgentClientModelCallback: LuminaAgentModelCallback = { plannerInput, context in
+let luminaAgentClientModelCallback: LuminaAgentModelCallback = { plannerInput, context in
     guard let box = box(from: context), let plannerInput else {
         return retainedCString(#"{"type":"cannot_complete","reason":"missing model callback context"}"#)
     }
@@ -169,7 +142,7 @@ private let luminaAgentClientModelCallback: LuminaAgentModelCallback = { planner
     return retainedCString(response)
 }
 
-private let luminaAgentClientStreamingModelCallback: LuminaAgentStreamingModelCallback = { plannerInput, emit, emitContext, context in
+let luminaAgentClientStreamingModelCallback: LuminaAgentStreamingModelCallback = { plannerInput, emit, emitContext, context in
     guard let box = box(from: context), let plannerInput else {
         return retainedCString(#"{"type":"cannot_complete","thought":"missing model callback context","reason":"missing model callback context"}"#)
     }
@@ -188,7 +161,7 @@ private let luminaAgentClientStreamingModelCallback: LuminaAgentStreamingModelCa
     return retainedCString(response)
 }
 
-private let luminaAgentClientToolCallback: LuminaAgentToolCallback = { toolCall, context in
+let luminaAgentClientToolCallback: LuminaAgentToolCallback = { toolCall, context in
     guard let box = box(from: context), let toolCall else {
         return retainedCString(#"{"status":"failed","content":"","errorMessage":"missing tool callback context"}"#)
     }
@@ -202,7 +175,7 @@ private let luminaAgentClientToolCallback: LuminaAgentToolCallback = { toolCall,
     return retainedCString(response)
 }
 
-private let luminaAgentClientContextCallback: LuminaAgentContextCallback = { requestJSON, context in
+let luminaAgentClientContextCallback: LuminaAgentContextCallback = { requestJSON, context in
     guard let box = box(from: context), let requestJSON else {
         return retainedCString("null")
     }
@@ -213,7 +186,7 @@ private let luminaAgentClientContextCallback: LuminaAgentContextCallback = { req
     return retainedCString(response)
 }
 
-private let luminaAgentClientPermissionCallback: LuminaAgentPermissionCallback = { permissionJSON, context in
+let luminaAgentClientPermissionCallback: LuminaAgentPermissionCallback = { permissionJSON, context in
     guard let box = box(from: context), let permissionJSON else {
         return retainedCString(#"{"decision":"denied","reason":"missing permission callback context"}"#)
     }
@@ -224,7 +197,7 @@ private let luminaAgentClientPermissionCallback: LuminaAgentPermissionCallback =
     return retainedCString(response)
 }
 
-private let luminaAgentClientConfirmationCallback: LuminaAgentConfirmationCallback = { confirmationJSON, context in
+let luminaAgentClientConfirmationCallback: LuminaAgentConfirmationCallback = { confirmationJSON, context in
     guard let box = box(from: context), let confirmationJSON else {
         return retainedCString(#"{"confirmed":false,"reason":"missing confirmation callback context"}"#)
     }
@@ -235,22 +208,22 @@ private let luminaAgentClientConfirmationCallback: LuminaAgentConfirmationCallba
     return retainedCString(response)
 }
 
-private let luminaAgentClientAuditCallback: LuminaAgentAuditCallback = { auditJSON, context in
+let luminaAgentClientAuditCallback: LuminaAgentAuditCallback = { auditJSON, context in
     guard let box = box(from: context), let auditJSON else { return }
     let input = String(cString: auditJSON)
     Task { await box.writeAudit(auditJSON: input) }
 }
 
-private let luminaAgentClientRollbackCallback: LuminaAgentRollbackCallback = { _, _ in
+let luminaAgentClientRollbackCallback: LuminaAgentRollbackCallback = { _, _ in
     retainedCString(#"{"status":"unavailable"}"#)
 }
 
-private let luminaAgentClientEventCallback: LuminaAgentEventCallback = { eventJSON, context in
+let luminaAgentClientEventCallback: LuminaAgentEventCallback = { eventJSON, context in
     guard let box = box(from: context), let eventJSON else { return }
     box.consumeRuntimeEvent(eventJSON: String(cString: eventJSON))
 }
 
-private let luminaAgentClientHookCallback: LuminaAgentHookCallback = { hookJSON, context in
+let luminaAgentClientHookCallback: LuminaAgentHookCallback = { hookJSON, context in
     guard let box = box(from: context), let hookJSON else {
         return retainedCString("{}")
     }

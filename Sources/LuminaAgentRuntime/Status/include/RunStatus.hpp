@@ -10,6 +10,7 @@ enum class RunStatus {
     cancelled
 };
 
+// Converts a runtime status enum into the stable JSON wire value.
 const char *runStatusName(RunStatus status);
 
 } // namespace LuminaAgent

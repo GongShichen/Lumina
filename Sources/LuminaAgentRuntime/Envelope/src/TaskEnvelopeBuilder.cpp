@@ -31,7 +31,8 @@ std::string TaskEnvelopeBuilder::build(
            << "\"available_tools\":{"
            << "\"mode\":\"progressive_disclosure\","
            << "\"capabilities\":" << tools_.capabilityListJson() << ","
-           << "\"focused_schemas\":" << tools_.modelFacingSchemasJson()
+           << "\"focused_schemas\":" << (tools_.toolCount() <= 24 ? tools_.modelFacingSchemasJson() : "[]") << ","
+           << "\"discovery_hint\":\"Use capability names first. Request or use a specific tool only when its parameters are clear from parameter_names or focused_schemas.\""
            << "},"
            << "\"context\":{"
            << "\"loaded_sections\":" << contextSectionsJson(contextJson)
@@ -108,7 +109,8 @@ std::string TaskEnvelopeBuilder::attachmentsSummaryJson(const std::string &conte
     const std::vector<std::string> parts = extractObjectArrayItems(contentJson);
     std::ostringstream output;
     output << "[";
-    bool wrote = false;
+bool wrote = false;
+    int attachmentIndex = 0;
     for (const std::string &part : parts) {
         std::map<std::string, JsonField> fields;
         parseFieldsOrEmpty(part, fields);
@@ -120,7 +122,7 @@ std::string TaskEnvelopeBuilder::attachmentsSummaryJson(const std::string &conte
             output << ",";
         }
         wrote = true;
-        output << inputPartJson(part, static_cast<int>(wrote ? 1 : 0));
+        output << inputPartJson(part, attachmentIndex++);
     }
     output << "]";
     return output.str();

@@ -53,6 +53,10 @@ bool ToolRegistry::isReadOnly(const std::string &toolName) const {
     return it != readOnly_.end() && it->second;
 }
 
+size_t ToolRegistry::toolCount() const {
+    return records_.size();
+}
+
 std::string ToolRegistry::schemasJson() const {
     std::ostringstream output;
     output << "[";

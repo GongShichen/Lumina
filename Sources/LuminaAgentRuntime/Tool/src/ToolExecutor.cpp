@@ -91,11 +91,17 @@ std::string ToolExecutor::runToolCall(
     if (trim(result).empty()) {
         result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool returned an empty result\"}";
     }
+
+    std::map<std::string, JsonField> resultFields;
+    bool parsed = parseFieldsOrEmpty(result, resultFields);
+    if (!parsed || resultFields.find("status") == resultFields.end()) {
+        result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool result must be a JSON object with status\"}";
+        resultFields.clear();
+        parsed = parseFieldsOrEmpty(result, resultFields);
+    }
     callbacks_.audit("tool_did_execute", "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}");
     HookDispatcher(callbacks_).dispatch("tool_did_execute", "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}");
 
-    std::map<std::string, JsonField> resultFields;
-    const bool parsed = parseFieldsOrEmpty(result, resultFields);
     const std::string status = parsed ? stringField(resultFields, "status", "succeeded") : "succeeded";
     const std::string content = parsed ? stringField(resultFields, "content", result) : result;
     const std::string error = parsed ? stringField(resultFields, "errorMessage", "") : "";
@@ -115,7 +121,9 @@ std::string ToolExecutor::runToolCall(
 std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::string &toolCallsJson) const {
     const std::vector<std::string> calls = extractObjectArrayItems(toolCallsJson);
     if (calls.empty()) {
-        return "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contained no tool calls\"}";
+        const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contained no tool calls\"}";
+        session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contained no tool calls", false, false);
+        return result;
     }
 
     std::ostringstream observations;
@@ -123,15 +131,21 @@ std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::s
     for (size_t index = 0; index < calls.size(); index++) {
         std::map<std::string, JsonField> fields;
         if (!parseFieldsOrEmpty(calls[index], fields)) {
-            return "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an invalid tool call object\"}";
+            const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an invalid tool call object\"}";
+            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an invalid tool call object", false, false);
+            return result;
         }
         const std::string toolName = stringField(fields, "tool_name");
         const std::string parameters = rawField(fields, "parameters", "{}");
         if (toolName.empty() || !tools_.contains(toolName)) {
-            return "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an unregistered tool\"}";
+            const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an unregistered tool\"}";
+            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an unregistered tool", false, false);
+            return result;
         }
         if (!tools_.isReadOnly(toolName)) {
-            return "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use may only execute read-only tools\"}";
+            const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use may only execute read-only tools\"}";
+            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use may only execute read-only tools", false, false);
+            return result;
         }
         if (index > 0) {
             observations << ",";

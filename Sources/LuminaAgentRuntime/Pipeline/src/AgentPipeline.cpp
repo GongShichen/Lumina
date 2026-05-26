@@ -21,6 +21,9 @@ std::string Executor::plannerInput(
 }
 
 std::string Responder::finalize(RuntimeSession &session) const {
+    if (session.isPaused()) {
+        return session.snapshotJson();
+    }
     return session.finishIfNeeded();
 }
 

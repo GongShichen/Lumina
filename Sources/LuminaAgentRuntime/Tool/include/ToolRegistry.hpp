@@ -17,6 +17,7 @@ public:
     // Looks up registered capabilities by their stable tool name.
     bool contains(const std::string &toolName) const;
     bool isReadOnly(const std::string &toolName) const;
+    size_t toolCount() const;
 
     // Returns raw schemas for debugging/export and compact schemas for model prompts.
     std::string schemasJson() const;

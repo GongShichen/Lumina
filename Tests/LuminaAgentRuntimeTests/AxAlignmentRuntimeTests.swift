@@ -10,12 +10,14 @@ private final class AxCaptureStore: @unchecked Sendable {
     private var plannerInputs: [String] = []
     private var events: [String] = []
     private var toolCallCount = 0
+    private var modelCallCount = 0
 
     func reset() {
         lock.lock()
         plannerInputs = []
         events = []
         toolCallCount = 0
+        modelCallCount = 0
         lock.unlock()
     }
 
@@ -37,10 +39,18 @@ private final class AxCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], toolCallCount: Int) {
+    func incrementModelCallCount() -> Int {
+        lock.lock()
+        modelCallCount += 1
+        let value = modelCallCount
+        lock.unlock()
+        return value
+    }
+
+    func snapshot() -> (plannerInputs: [String], events: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, toolCallCount)
+        return (plannerInputs, events, toolCallCount, modelCallCount)
     }
 }
 
@@ -60,6 +70,36 @@ private let axAskUserModelCallback: LuminaAgentModelCallback = { plannerInput, _
         AxCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
     return axCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
+}
+
+private let axAskThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        AxCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = AxCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return axCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
+    }
+    return axCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"User answered.","content":"## 已继续\n\n收到你的回答，继续完成。","completed":true,"requires_followup":false}"###)
+}
+
+private let axNeedsContextThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        AxCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = AxCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return axCString(#"{"schema_version":"1.0","step_id":"s-context","type":"reasoning","thought":"Need deeper context.","needs_more_context":true,"confidence":0.7,"requires_followup":true}"#)
+    }
+    return axCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
+}
+
+private let axContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
+    let request = contextRequest.map { String(cString: $0) } ?? ""
+    if request.contains(#""request_more_context":true"#) {
+        return axCString(#"[{"id":"deep","title":"Deep context","summary":"更深层上下文","priority":10,"disclosure_level":1}]"#)
+    }
+    return axCString(#"[{"id":"initial","title":"Initial context","summary":"首轮摘要","priority":100,"disclosure_level":0}]"#)
 }
 
 private let axStreamingModelCallback: LuminaAgentStreamingModelCallback = { plannerInput, emit, emitContext, _ in
@@ -180,6 +220,56 @@ final class AxAlignmentRuntimeTests: XCTestCase {
         XCTAssertTrue(trace.split(separator: "\n").allSatisfy { line in
             (try? JSONSerialization.jsonObject(with: Data(line.utf8))) != nil
         })
+    }
+
+    func testExplicitSessionCanResumeAfterAskUserAnswer() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":3}"#) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, axAskThenFinalModelCallback, nil)
+
+        guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"ask-resume","text":"帮我规划一下","content":[{"modality":"text","text":"帮我规划一下"}]}"#) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+
+        let pausedPointer = LuminaAgentRuntimeRunSession(runtime, session)
+        let pausedJSON = pausedPointer.map { String(cString: $0) } ?? "{}"
+        if let pausedPointer {
+            LuminaAgentRuntimeReleaseString(pausedPointer)
+        }
+        XCTAssertTrue(pausedJSON.contains(#""paused":true"#))
+
+        let resumedPointer = LuminaAgentRuntimeResumeSession(runtime, session, #"{"status":"succeeded","content":"用户选择上午"}"#)
+        let resumedJSON = resumedPointer.map { String(cString: $0) } ?? "{}"
+        if let resumedPointer {
+            LuminaAgentRuntimeReleaseString(resumedPointer)
+        }
+        XCTAssertTrue(resumedJSON.contains(#""status":"succeeded""#))
+        XCTAssertTrue(resumedJSON.contains("已继续"))
+    }
+
+    func testReasoningCanRequestProgressiveContextDisclosure() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":3}"#) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, axNeedsContextThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, axContextCallback, nil)
+
+        let result = LuminaAgentRuntimeRun(runtime, #"{"id":"context","text":"需要上下文","content":[{"modality":"text","text":"需要上下文"}]}"#)
+        if let result {
+            LuminaAgentRuntimeReleaseString(result)
+        }
+
+        let inputs = AxCaptureStore.shared.snapshot().plannerInputs
+        XCTAssertEqual(inputs.count, 2)
+        XCTAssertTrue(inputs[0].contains("首轮摘要"))
+        XCTAssertTrue(inputs[1].contains("更深层上下文"))
     }
 
     func testToolSchemaValidationRejectsMissingRequiredArgumentsBeforeExecution() async {
