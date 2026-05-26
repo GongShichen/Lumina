@@ -5,7 +5,7 @@ swift test
 bash scripts/check_filename_alignment.sh
 xcodebuild -project Lumina.xcodeproj -list >/dev/null
 
-xcodebuild -project Lumina.xcodeproj -scheme AgentRuntime -destination 'platform=macOS,variant=Mac Catalyst' build
+xcodebuild -project Lumina.xcodeproj -scheme LuminaAgentRuntime -destination 'platform=macOS,variant=Mac Catalyst' build
 xcodebuild -project Lumina.xcodeproj -scheme PersonalMemory -destination 'platform=macOS,variant=Mac Catalyst' build
 xcodebuild -project Lumina.xcodeproj -scheme LuminaModelRuntime -destination 'platform=macOS,variant=Mac Catalyst' build
 xcodebuild -project Lumina.xcodeproj -scheme LuminaMarkdownUI -destination 'platform=macOS,variant=Mac Catalyst' build

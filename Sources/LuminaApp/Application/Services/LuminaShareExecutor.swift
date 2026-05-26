@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 
 #if canImport(UIKit)
@@ -15,10 +15,13 @@ enum LuminaShareExecutor {
             return result(status: .failed, message: "没有可分享的文本或文件。", output: [:])
         }
         await MainActor.run {
-            let items: [Any] = [
-                text.isEmpty ? nil : text as NSString,
-                filePath.map { URL(fileURLWithPath: $0) }
-            ].compactMap { $0 }
+            var items: [Any] = []
+            if !text.isEmpty {
+                items.append(text as NSString)
+            }
+            if let filePath {
+                items.append(URL(fileURLWithPath: filePath))
+            }
             guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
                   let controller = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController else {
                 return

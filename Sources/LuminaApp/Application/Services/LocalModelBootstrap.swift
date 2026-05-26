@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 import LuminaModelRuntime
 import PersonalMemory
@@ -31,29 +31,27 @@ enum LocalModelBootstrap {
 
     private static func makeEagerStepGenerator(memoryStore: LuminaMemoryStore, metricsStore: LuminaModelInferenceMetricsStore?) -> LuminaLazyReActStepGenerator.LoadResult {
         let promptBuilder = LuminaAppReActPromptBuilder()
-        #if canImport(CoreML)
-        if let miniMindURL = miniMindOModelURL() {
+        if let miniCPMURL = miniCPMV46ModelURL() {
             if #available(iOS 18.0, macOS 15.0, *) {
                 do {
                     let stepMaxNewTokens = 2_048
-                    let model = try LuminaMiniMindOReActModel(configuration: .init(
-                        modelDirectory: miniMindURL,
-                        computeUnits: modelComputeUnits,
+                    let model = try LuminaMiniCPMV46ReActModel(configuration: .init(
+                        modelDirectory: miniCPMURL,
+                        backendPreference: miniCPMV46BackendPreference,
                         maxNewTokens: stepMaxNewTokens,
-                        expectedContextLength: 12_000,
+                        expectedContextLength: 16_000,
                         outputSafetyMarginTokens: 256,
                         metricsRecorder: { metrics in
                             metricsStore?.record(metrics)
                         }
                     ))
-                    log("Loaded MiniMind-o Core ML model at \(miniMindURL.path)")
-                    let source = "MiniMind-o Core ML · \(model.bundleInfo.contextLength) ctx"
+                    log("Loaded MiniCPM-V 4.6 model bundle at \(miniCPMURL.path)")
+                    let source = "MiniCPM-V 4.6 GGUF · \(model.bundleInfo.contextLength) ctx · \(model.bundleInfo.quantization)"
                     let maxOutputFrom2KPrompt = model.bundleInfo.maximumSupportedOutputTokens(
                         inputTokenCount: 2_000,
                         safetyMargin: 256,
                         configurationCap: stepMaxNewTokens
                     )
-                    let packageText = model.bundleInfo.hasCompiledModel ? "compiled" : "mlpackage"
                     return .model(
                         LuminaModelBackedReActStepGenerator(
                             model: model,
@@ -61,29 +59,27 @@ enum LocalModelBootstrap {
                             fallback: LuminaUnavailableReActStepGenerator()
                         ),
                         source: source,
-                        message: "MiniMind-o Core ML 已连接：architecture \(model.bundleInfo.architecture)，context \(model.bundleInfo.contextLength)，\(packageText)，动态单步输出上限当前最高 \(maxOutputFrom2KPrompt) tokens，推理使用 \(modelComputeUnits.descriptionForLumina)。"
+                        message: "MiniCPM-V 4.6 已连接：architecture \(model.bundleInfo.architecture)，context \(model.bundleInfo.contextLength)，\(model.bundleInfo.quantization)，动态单步输出上限当前最高 \(maxOutputFrom2KPrompt) tokens，推理入口为 LuminaModelRuntimeCore 原生 C++ engine。"
                     )
                 } catch {
-                    log("MiniMind-o Core ML model failed to initialize: \(error.localizedDescription)")
+                    log("MiniCPM-V 4.6 model failed to initialize: \(error.localizedDescription)")
                     return .fallback(
                         unavailableStepGenerator(),
-                        message: "MiniMind-o model 初始化失败：\(error.localizedDescription)。当前没有可用模型。"
+                        message: "MiniCPM-V 4.6 model 初始化失败：\(error.localizedDescription)。当前没有可用模型。"
                     )
                 }
             } else {
                 return .fallback(
                     unavailableStepGenerator(),
-                    message: "当前系统版本不支持 MiniMind-o Core ML；当前没有可用模型。"
+                    message: "当前系统版本不支持 MiniCPM-V 4.6；当前没有可用模型。"
                 )
             }
         }
 
-        #endif
-
         log("Local ReAct model was not found. Requests will fail instead of using app-side rules.")
         return .fallback(
             unavailableStepGenerator(),
-            message: "没有找到 MiniMind-o Core ML 模型；当前没有可用模型。请运行 scripts/setup_models.sh 生成或安装 MiniMindOReActModel。"
+            message: "没有找到 MiniCPM-V 4.6 模型；当前没有可用模型。请运行 scripts/setup_models.sh 生成或安装 MiniCPMV46ReActModel。"
         )
     }
 
@@ -188,25 +184,25 @@ enum LocalModelBootstrap {
     }
 
     private static func processEnvironmentModelURL(kind: ModelKind) -> URL? {
-        let key = kind == .structuredModel ? "LUMINA_MINIMINDO_MODEL" : "LUMINA_EMBEDDING_MODEL"
+        let key = kind == .structuredModel ? "LUMINA_MINICPMV46_MODEL" : "LUMINA_EMBEDDING_MODEL"
         if let value = ProcessInfo.processInfo.environment[key], !value.isEmpty {
             return URL(fileURLWithPath: value)
         }
         return nil
     }
 
-    private static func miniMindOModelURL() -> URL? {
-        if let value = ProcessInfo.processInfo.environment["LUMINA_MINIMINDO_MODEL"], !value.isEmpty {
+    private static func miniCPMV46ModelURL() -> URL? {
+        if let value = ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_MODEL"], !value.isEmpty {
             let url = URL(fileURLWithPath: value)
             if FileManager.default.fileExists(atPath: url.path) {
                 return url
             }
         }
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniMindOReActModel"),
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniCPMV46ReActModel"),
            FileManager.default.fileExists(atPath: url.path) {
             return url
         }
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniMindOModel"),
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniCPMV46Model"),
            FileManager.default.fileExists(atPath: url.path) {
             return url
         }
@@ -244,4 +240,15 @@ enum LocalModelBootstrap {
         #endif
     }
     #endif
+
+    private static var miniCPMV46BackendPreference: LuminaMiniCPMV46BackendPreference {
+        switch ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_BACKEND"]?.lowercased() {
+        case "ane":
+            return .ane
+        case "mps", "metal", "gpu":
+            return .mps
+        default:
+            return .automatic
+        }
+    }
 }

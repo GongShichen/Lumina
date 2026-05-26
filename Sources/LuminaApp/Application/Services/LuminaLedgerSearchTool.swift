@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 
 struct LuminaLedgerSearchTool: LuminaAgentTool {

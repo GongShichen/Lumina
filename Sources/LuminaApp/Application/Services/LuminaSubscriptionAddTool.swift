@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 @preconcurrency import EventKit
 import Foundation
 import PersonalMemory

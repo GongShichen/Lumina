@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import LuminaMarkdownUI
 import PhotosUI
 import PersonalMemory

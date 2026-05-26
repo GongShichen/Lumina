@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 
 public typealias LuminaReActPromptBuilder = @Sendable (LuminaReActStepContext) async throws -> String

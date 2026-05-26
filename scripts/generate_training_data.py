@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate deterministic Lumina ReAct SFT and DPO data.
 
-The generated records are intentionally compact enough for Lumina's 12K mobile
+The generated records are intentionally compact enough for Lumina's 16K mobile
 context budget while still exposing the standard ReAct schema, compressed tool
 list, focused tool schemas, and representative observations.
 """
@@ -17,19 +17,20 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "TrainingData"
-SFT_PATH = OUTPUT_DIR / "lumina_react_sft_300.jsonl"
-SFT_RECORD_COUNT = 300
+SFT_RECORD_COUNT = 600
+SFT_PATH = OUTPUT_DIR / f"lumina_react_sft_{SFT_RECORD_COUNT}.jsonl"
 DPO_BASE_RECORD_COUNT = 500
 DPO_HARD_NEGATIVE_COUNT = 100
-DPO_RECORD_COUNT = DPO_BASE_RECORD_COUNT + DPO_HARD_NEGATIVE_COUNT
+DPO_CHINESE_ADDITIONAL_COUNT = 600
+DPO_RECORD_COUNT = DPO_BASE_RECORD_COUNT + DPO_HARD_NEGATIVE_COUNT + DPO_CHINESE_ADDITIONAL_COUNT
 DPO_PATH = OUTPUT_DIR / f"lumina_react_dpo_{DPO_RECORD_COUNT}.jsonl"
 MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
 SEED = 20260526
-CONTEXT_BUDGET = 12_000
+CONTEXT_BUDGET = 16_000
 
 
 TOOLS: dict[str, dict[str, Any]] = {
-    "ask_user": {"side": "read", "params": {"reason": "string", "questions": "array", "sensitivity": "string?", "timeoutSeconds": "number?"}, "desc": "Ask the user structured questions in Lumina UI and wait for answers."},
+    "ask_user": {"side": "read", "sens": "p", "params": {"reason": "string", "questions": "array", "sensitivity": "string?", "timeoutSeconds": "number?"}, "desc": "Ask the user structured questions in Lumina UI and wait for answers."},
     "device.current_time": {"side": "read", "params": {}, "desc": "Read local device time and timezone."},
     "device.power_status": {"side": "read", "params": {}, "desc": "Read battery, charging, low power, and thermal state."},
     "network.status": {"side": "read", "params": {}, "desc": "Read connectivity, interface type, constrained and low-data state."},
@@ -75,8 +76,8 @@ TOOLS: dict[str, dict[str, Any]] = {
     "subscription.remove": {"side": "write", "params": {"subscriptionID": "string?", "query": "string"}, "desc": "Remove a subscription."},
     "webpage.fetch_text": {"side": "read", "params": {"url": "string"}, "desc": "Fetch webpage readable text."},
     "document.read_text": {"side": "read", "params": {"path": "string"}, "desc": "Read text from sandbox document."},
-    "image.extract_text": {"side": "read", "params": {"attachmentID": "string?"}, "desc": "OCR an attached image."},
-    "image.describe_metadata": {"side": "read", "params": {"attachmentID": "string?"}, "desc": "Read image dimensions, type, and size."},
+    "image.extract_text": {"side": "read", "sens": "p", "params": {"path": "string"}, "desc": "OCR an App sandbox image path."},
+    "image.describe_metadata": {"side": "read", "sens": "s", "params": {"path": "string"}, "desc": "Read image dimensions, type, and size from an App sandbox image path."},
     "calculator.evaluate": {"side": "read", "params": {"expression": "string"}, "desc": "Evaluate local calculation."},
     "text.transform": {"side": "read", "params": {"text": "string", "operation": "string"}, "desc": "Transform local text."},
     "url.open": {"side": "write", "params": {"url": "string"}, "desc": "Open URL after confirmation."},
@@ -124,7 +125,7 @@ BASE_TASKS: list[TaskTemplate] = [
     TaskTemplate("subscription", "订阅 https://example.com/feed.xml，标题标记 LuminaTest", ("subscription.add",), ({"url": "https://example.com/feed.xml", "title": "LuminaTest"},), "subscription.add succeeded summary=已保存订阅源", "已订阅 LuminaTest feed。"),
     TaskTemplate("web", "抓取 https://example.com 的正文并整理成 3 条摘要", ("webpage.fetch_text", "text.transform"), ({"url": "https://example.com"}, {"text": "Example Domain content", "operation": "summarize_3_bullets"}), "webpage.fetch_text succeeded summary=抓取到 1256 字正文", "已抓取网页并整理成 3 条摘要。"),
     TaskTemplate("document", "读取 Documents 里的 LuminaTest-report.md", ("document.read_text",), ({"path": "LuminaTest-report.md"},), "document.read_text succeeded summary=读取到 680 字 Markdown", "已读取 LuminaTest-report.md。"),
-    TaskTemplate("image_meta", "看看这张图片的尺寸和文件大小", ("image.describe_metadata",), ({"attachmentID": "latest"},), "image.describe_metadata succeeded summary=PNG 1170x2532 1.2 MB", "这张图片是 PNG，尺寸 1170x2532，约 1.2 MB。"),
+    TaskTemplate("image_meta", "看看这张图片的尺寸和文件大小", ("image.describe_metadata",), ({"path": "/LuminaSandbox/Attachments/latest-image.png"},), "image.describe_metadata succeeded summary=图片 latest-image.png：1170 x 2532，1200000 bytes。", "这张图片是 latest-image.png，尺寸 1170 x 2532，约 1200000 bytes。"),
     TaskTemplate("calculator", "计算 12*(8+3)-5", ("calculator.evaluate",), ({"expression": "12*(8+3)-5"},), "calculator.evaluate succeeded summary=127", "计算结果是 127。"),
     TaskTemplate("system", "查看当前设备电量、网络和可用存储，判断是否适合执行本地任务", ("device.power_status", "network.status", "storage.status"), ({}, {}, {}), "device.power_status succeeded summary=电量 82%，非低电量", "当前设备状态适合执行本地任务。"),
     TaskTemplate("memory_write", "记住：我偏好早上处理深度工作", ("memory.ingest_text",), ({"title": "工作偏好", "text": "用户偏好早上处理深度工作", "source": "user_explicit", "sensitivity": "normal"},), "memory.ingest_text succeeded summary=已保存 1 条长期记忆", "已记住：你偏好早上处理深度工作。", memory_disabled=False, ask_user_disabled=False),
@@ -160,15 +161,33 @@ def focused_schema(tool_names: tuple[str, ...]) -> str:
         schema = TOOLS[name]
         params = ", ".join(f"{key}:{value}" for key, value in schema["params"].items()) or "{}"
         side = "w" if schema["side"] == "write" else "r"
-        rendered.append(f"{name}|{side}|{{{params}}}|{schema['desc']}")
+        sensitivity = schema.get("sens", default_sensitivity(name))
+        rendered.append(f"{name}|{side}|{sensitivity}|{{{params}}}")
     return "; ".join(rendered)
+
+
+def default_sensitivity(tool_name: str) -> str:
+    if tool_name in {"device.current_time", "calculator.evaluate"}:
+        return "l"
+    if tool_name.startswith(("calendar.", "reminder.", "contacts.", "location.", "health.")):
+        return "p"
+    if tool_name.startswith(("message.", "email.", "phone.")):
+        return "p"
+    if tool_name.startswith(("file.", "clipboard.", "ledger.", "weather.", "webpage.", "document.")):
+        return "s"
+    if tool_name.startswith(("network.", "storage.", "subscription.", "app.")):
+        return "n"
+    return "s" if TOOLS[tool_name]["side"] == "write" else "n"
 
 
 def system_prompt(task: TaskTemplate, *, eval_mode: bool = True) -> str:
     contract = (
         'Return exactly one JSON object. Valid shapes: '
         '{"type":"tool_use","thought":"...","tool_name":"tool.name","parameters":{},"requires_confirmation":false} '
-        'or {"type":"final_answer","thought":"...","content":"markdown"}. '
+        'or {"type":"multi_tool_use","thought":"...","tool_calls":[{"tool_name":"tool.name","parameters":{}}]} '
+        'or {"type":"ask_user","thought":"...","reason":"...","questions":[],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true} '
+        'or {"type":"final_answer","thought":"...","content":"markdown"} '
+        'or {"type":"cannot_complete","thought":"...","reason":"...","recoverable_actions":[]}. '
         'Never output observation, tool_call, function, arguments, input, action, markdown fences, or prose.'
     )
     policies = [
@@ -195,15 +214,26 @@ def system_prompt(task: TaskTemplate, *, eval_mode: bool = True) -> str:
 
 
 def user_context(task: TaskTemplate, observation: str | None = None) -> str:
-    obs = "none" if observation is None else observation
-    return f"User: {task.instruction}\nObs: {obs}\nReturn next ReAct JSON."
+    obs = "无" if observation is None else localized_observation(observation)
+    return f"用户请求：{task.instruction}\n观察结果：{obs}\n请返回下一步标准 ReAct JSON。"
+
+
+def localized_observation(observation: str) -> str:
+    return (
+        observation
+        .replace(" succeeded summary=", " 执行成功，摘要：")
+        .replace(" succeeded", " 执行成功")
+        .replace(" summary=", "，摘要：")
+    )
 
 
 def tool_response(tool_name: str, params: dict[str, Any], thought: str | None = None) -> str:
+    if tool_name == "ask_user":
+        return ask_user_response(params, thought)
     requires = TOOLS[tool_name]["side"] == "write"
     payload = {
         "type": "tool_use",
-        "thought": thought or f"Need {tool_name} to make progress.",
+        "thought": thought or f"需要调用 {tool_name} 才能继续完成用户请求。",
         "tool_name": tool_name,
         "parameters": params,
         "requires_confirmation": requires,
@@ -211,9 +241,43 @@ def tool_response(tool_name: str, params: dict[str, Any], thought: str | None = 
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+def ask_user_response(params: dict[str, Any], thought: str | None = None) -> str:
+    payload = {
+        "type": "ask_user",
+        "thought": thought or "缺少继续执行所需的信息，需要向用户确认。",
+        "reason": params.get("reason", "需要用户补充信息后继续。"),
+        "questions": params.get("questions", []),
+        "sensitivity": params.get("sensitivity", "normal"),
+        "timeout_seconds": params.get("timeoutSeconds", params.get("timeout_seconds", 120)),
+        "allow_custom_answer": params.get("allowCustomAnswer", params.get("allow_custom_answer", True)),
+    }
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def cannot_complete_response(reason: str, thought: str = "当前缺少必要条件，不能安全完成。") -> str:
+    return json.dumps(
+        {
+            "type": "cannot_complete",
+            "thought": thought,
+            "reason": reason,
+            "recoverable_actions": ["补充必要信息或授权后重试"],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def multi_tool_response(calls: list[dict[str, Any]], thought: str = "可以并行读取多个只读状态。") -> str:
+    return json.dumps(
+        {"type": "multi_tool_use", "thought": thought, "tool_calls": calls},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
 def final_response(content: str) -> str:
     return json.dumps(
-        {"type": "final_answer", "thought": "The runtime observation is sufficient to answer.", "content": content},
+        {"type": "final_answer", "thought": "已有工具观察结果足够生成最终回复。", "content": content},
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -225,11 +289,11 @@ def bad_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
     variants = [
         ("openai_tool_call", {"type": "tool_call", "function": first_tool, "arguments": first_params}),
         ("tool_name_as_type", {"type": first_tool, "input": first_params}),
-        ("fake_success_final", {"type": "final_answer", "thought": "done", "content": "已完成。"}),
+        ("fake_success_final", {"type": "final_answer", "thought": "没有等待工具观察结果就声称完成。", "content": "已完成。"}),
         ("observation_from_model", {"type": "observation", "tool_name": first_tool, "content": "succeeded"}),
-        ("wrong_tool", {"type": "tool_use", "thought": "Use a nearby tool.", "tool_name": wrong_tool_for(first_tool), "parameters": {}, "requires_confirmation": False}),
-        ("ask_user_when_disabled", {"type": "tool_use", "thought": "Ask the user.", "tool_name": "ask_user", "parameters": {"questions": []}, "requires_confirmation": False}),
-        ("memory_when_disabled", {"type": "tool_use", "thought": "Search memory.", "tool_name": "local.search", "parameters": {"query": task.instruction}, "requires_confirmation": False}),
+        ("wrong_tool", {"type": "tool_use", "thought": "错误地选择了相邻但不匹配的工具。", "tool_name": wrong_tool_for(first_tool), "parameters": {}, "requires_confirmation": False}),
+        ("ask_user_when_disabled", {"type": "tool_use", "thought": "ask_user 已禁用但仍尝试追问用户。", "tool_name": "ask_user", "parameters": {"questions": []}, "requires_confirmation": False}),
+        ("memory_when_disabled", {"type": "tool_use", "thought": "本次禁用了记忆访问但仍尝试检索记忆。", "tool_name": "local.search", "parameters": {"query": task.instruction}, "requires_confirmation": False}),
         ("prose_not_json", f"我会调用 {first_tool} 来完成这个任务。"),
     ]
     reason, bad = variants[variant % len(variants)]
@@ -248,7 +312,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "missing_confirmation_for_side_effect",
             {
                 "type": "tool_use",
-                "thought": "This action changes user data, but the confirmation flag is omitted.",
+                "thought": "这个动作会改变用户数据，但错误地省略了确认标记。",
                 "tool_name": target_tool,
                 "parameters": target_params,
                 "requires_confirmation": False,
@@ -258,7 +322,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "premature_success_without_observation",
             {
                 "type": "final_answer",
-                "thought": "Assume the operation succeeded.",
+                "thought": "没有等待工具观察结果就假设操作成功。",
                 "content": "已完成并写入系统。",
             },
         ),
@@ -266,7 +330,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "fabricated_sensitive_data",
             {
                 "type": "final_answer",
-                "thought": "Invent private data instead of using a permitted tool.",
+                "thought": "没有通过授权工具读取数据，却编造了隐私信息。",
                 "content": "我已经查到了详细联系人、健康和位置数据。",
             },
         ),
@@ -274,7 +338,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "unregistered_tool_name",
             {
                 "type": "tool_use",
-                "thought": "Use an unavailable native API directly.",
+                "thought": "错误地尝试调用未注册的私有系统接口。",
                 "tool_name": "system.private_database.read",
                 "parameters": {"query": task.instruction},
                 "requires_confirmation": False,
@@ -283,7 +347,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
         (
             "non_standard_react_schema",
             {
-                "thought": "Use a tool.",
+                "thought": "使用工具，但输出了非标准 ReAct 字段。",
                 "action": target_tool,
                 "action_input": target_params,
             },
@@ -291,18 +355,20 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
         (
             "disabled_ask_user",
             {
-                "type": "tool_use",
-                "thought": "Ask follow-up even though this run disabled ask_user.",
-                "tool_name": "ask_user",
-                "parameters": {"reason": "Need more info", "questions": []},
-                "requires_confirmation": False,
+                "type": "ask_user",
+                "thought": "本次运行禁用了 ask_user，但仍尝试追问。",
+                "reason": "Need more info",
+                "questions": [],
+                "sensitivity": "normal",
+                "timeout_seconds": 120,
+                "allow_custom_answer": True,
             },
         ),
         (
             "disabled_memory_access",
             {
                 "type": "tool_use",
-                "thought": "Read memory even though this run disabled memory access.",
+                "thought": "本次运行禁用了记忆访问，但仍尝试读取记忆。",
                 "tool_name": "local.search",
                 "parameters": {"query": task.instruction},
                 "requires_confirmation": False,
@@ -312,7 +378,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "silent_external_completion",
             {
                 "type": "final_answer",
-                "thought": "Claim an external communication was sent.",
+                "thought": "错误地声称外部通信已经自动发送。",
                 "content": "短信、邮件或电话已经自动完成。",
             },
         ),
@@ -320,7 +386,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "raw_json_user_visible_final",
             {
                 "type": "final_answer",
-                "thought": "Expose internal data instead of a user-readable answer.",
+                "thought": "把内部参数暴露给用户，而不是给出可读回复。",
                 "content": json.dumps({"tool": target_tool, "parameters": target_params}, ensure_ascii=False),
             },
         ),
@@ -328,7 +394,7 @@ def hard_negative_response(task: TaskTemplate, variant: int) -> tuple[str, str]:
             "health_memory_leak",
             {
                 "type": "tool_use",
-                "thought": "Persist high-sensitivity health data without explicit request.",
+                "thought": "没有明确请求就尝试保存高敏健康数据。",
                 "tool_name": "memory.ingest_text",
                 "parameters": {
                     "title": "健康摘要",
@@ -373,11 +439,11 @@ def make_sft_records() -> list[dict[str, Any]]:
         mode = index % 3
         if mode == 0:
             step = 0
-            assistant = tool_response(task.tools[step], task.params[step], "Need the first required runtime fact or action.")
+            assistant = tool_response(task.tools[step], task.params[step], "需要先获取完成任务所必需的事实或执行第一步动作。")
             observation = None
         elif mode == 1 and len(task.tools) > 1:
             step = 1
-            assistant = tool_response(task.tools[step], task.params[step], "Use the previous observation to continue.")
+            assistant = tool_response(task.tools[step], task.params[step], "根据上一轮工具观察结果继续执行下一步。")
             observation = task.observation
         else:
             assistant = final_response(task.final)
@@ -394,6 +460,7 @@ def make_sft_records() -> list[dict[str, Any]]:
                 "expectedTools": list(task.tools),
                 "memoryAccessDisabled": task.memory_disabled,
                 "askUserDisabled": task.ask_user_disabled,
+                "language": "zh-Hans",
             },
             "messages": [
                 {"role": "system", "content": system_prompt(task)},
@@ -416,7 +483,7 @@ def make_dpo_records() -> list[dict[str, Any]]:
             chosen = final_response(task.final)
         else:
             prompt_obs = None
-            chosen = tool_response(task.tools[0], task.params[0], "Choose the next valid tool; do not invent results.")
+            chosen = tool_response(task.tools[0], task.params[0], "选择下一步合法工具，不能编造执行结果。")
         reason, rejected = bad_response(task, index)
         records.append(
             {
@@ -430,6 +497,7 @@ def make_dpo_records() -> list[dict[str, Any]]:
                     "memoryAccessDisabled": task.memory_disabled,
                     "askUserDisabled": task.ask_user_disabled,
                     "rejectionReason": reason,
+                    "language": "zh-Hans",
                 },
                 "prompt": [
                     {"role": "system", "content": system_prompt(task)},
@@ -447,7 +515,7 @@ def make_dpo_records() -> list[dict[str, Any]]:
             chosen = final_response(task.final)
         else:
             prompt_obs = None
-            chosen = tool_response(task.tools[0], task.params[0], "Choose the next valid ReAct step and obey tool policy.")
+            chosen = tool_response(task.tools[0], task.params[0], "选择下一步合法 ReAct 输出，并遵守工具权限策略。")
         reason, rejected = hard_negative_response(task, index)
         records.append(
             {
@@ -463,6 +531,43 @@ def make_dpo_records() -> list[dict[str, Any]]:
                     "rejectionReason": reason,
                     "negativeAugmentation": True,
                     "negativeAugmentationRatio": DPO_HARD_NEGATIVE_COUNT / DPO_BASE_RECORD_COUNT,
+                    "language": "zh-Hans",
+                },
+                "prompt": [
+                    {"role": "system", "content": system_prompt(task)},
+                    {"role": "user", "content": user_context(task, prompt_obs)},
+                ],
+                "chosen": {"role": "assistant", "content": chosen},
+                "rejected": {"role": "assistant", "content": rejected},
+            }
+        )
+    for index in range(DPO_CHINESE_ADDITIONAL_COUNT):
+        task = tasks[(index * 13 + 2) % len(tasks)]
+        phase = index % 6
+        if phase in (0, 3):
+            prompt_obs = task.observation
+            chosen = final_response(task.final)
+        elif phase == 1 and len(task.tools) > 1:
+            prompt_obs = task.observation
+            chosen = tool_response(task.tools[1], task.params[1], "上一轮观察已经满足前置条件，现在继续调用下一步工具。")
+        else:
+            prompt_obs = None
+            chosen = tool_response(task.tools[0], task.params[0], "先调用最小必要工具，拿到真实观察结果后再继续。")
+        reason, rejected = hard_negative_response(task, index + DPO_BASE_RECORD_COUNT + DPO_HARD_NEGATIVE_COUNT)
+        records.append(
+            {
+                "id": f"dpo-zh-{index + 1:03d}",
+                "format": "chat-dpo-react-v1",
+                "contextBudgetTokens": CONTEXT_BUDGET,
+                "metadata": {
+                    "category": task.category,
+                    "difficulty": task.difficulty,
+                    "expectedTools": list(task.tools),
+                    "memoryAccessDisabled": task.memory_disabled,
+                    "askUserDisabled": task.ask_user_disabled,
+                    "rejectionReason": reason,
+                    "language": "zh-Hans",
+                    "additionalChineseDPO": True,
                 },
                 "prompt": [
                     {"role": "system", "content": system_prompt(task)},
@@ -499,6 +604,12 @@ def validate_jsonl(path: Path, expected: int) -> None:
 def main() -> None:
     sft = make_sft_records()
     dpo = make_dpo_records()
+    for stale_path in OUTPUT_DIR.glob("lumina_react_sft_*.jsonl"):
+        if stale_path != SFT_PATH:
+            stale_path.unlink()
+    for stale_path in OUTPUT_DIR.glob("lumina_react_dpo_*.jsonl"):
+        if stale_path != DPO_PATH:
+            stale_path.unlink()
     write_jsonl(SFT_PATH, sft)
     write_jsonl(DPO_PATH, dpo)
     validate_jsonl(SFT_PATH, SFT_RECORD_COUNT)
@@ -514,11 +625,14 @@ def main() -> None:
             "records": len(dpo),
             "baseRecords": DPO_BASE_RECORD_COUNT,
             "hardNegativeRecords": DPO_HARD_NEGATIVE_COUNT,
+            "additionalChineseRecords": DPO_CHINESE_ADDITIONAL_COUNT,
             "hardNegativeRatio": DPO_HARD_NEGATIVE_COUNT / DPO_BASE_RECORD_COUNT,
         },
         "notes": [
             "All assistant targets use standard Lumina ReAct JSON.",
             "DPO records contain paired rejected responses; 20% hard-negative augmentation is included for policy and schema failures.",
+            "An additional 600 zh-Hans DPO preference pairs are included; natural-language user context, thoughts, finals, and rejected content are Chinese.",
+            "SFT records are generated as zh-Hans supervised ReAct samples.",
             "Most samples disable memory and ask_user to match evaluation runs; a smaller subset covers ask_user flow.",
             "WeatherKit and HealthKit samples are included for iOS-only and high-sensitivity permission behavior.",
         ],

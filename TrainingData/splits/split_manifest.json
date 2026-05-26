@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "lumina-training-splits-v1",
+  "seed": "20260526",
+  "testRatio": 0.1,
+  "splits": {
+    "sft_general": {
+      "trainPath": "TrainingData/splits/sft_general_train.jsonl",
+      "testPath": "TrainingData/splits/sft_general_test.jsonl",
+      "trainRecords": 613,
+      "testRecords": 70,
+      "filter": "general",
+      "profile": "general-app"
+    },
+    "sft_evaluation": {
+      "trainPath": "TrainingData/splits/sft_evaluation_train.jsonl",
+      "testPath": "TrainingData/splits/sft_evaluation_test.jsonl",
+      "trainRecords": 482,
+      "testRecords": 55,
+      "filter": "evaluation",
+      "profile": "evaluation-runtime-compatible"
+    },
+    "dpo_general": {
+      "trainPath": "TrainingData/splits/dpo_general_train.jsonl",
+      "testPath": "TrainingData/splits/dpo_general_test.jsonl",
+      "trainRecords": 1187,
+      "testRecords": 136,
+      "filter": "general",
+      "profile": "general-app"
+    },
+    "dpo_evaluation": {
+      "trainPath": "TrainingData/splits/dpo_evaluation_train.jsonl",
+      "testPath": "TrainingData/splits/dpo_evaluation_test.jsonl",
+      "trainRecords": 933,
+      "testRecords": 107,
+      "filter": "evaluation",
+      "profile": "evaluation-runtime-compatible"
+    }
+  }
+}

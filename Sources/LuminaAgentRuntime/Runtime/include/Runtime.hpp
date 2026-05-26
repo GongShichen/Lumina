@@ -1,0 +1,58 @@
+#pragma once
+
+#include <string>
+
+#include "Callbacks.hpp"
+#include "Hooks.hpp"
+#include "PlannerInputBuilder.hpp"
+#include "Session.hpp"
+#include "ToolExecutor.hpp"
+#include "ToolRegistry.hpp"
+
+namespace LuminaAgent {
+
+class Runtime {
+public:
+    // Builds a platform-neutral runtime from JSON budget/configuration values.
+    explicit Runtime(const char *configurationJson);
+
+    // Parses, validates, and caches a caller-provided tool schema.
+    std::string registerToolSchema(const char *toolSchemaJson);
+
+    // Callback setters store function pointers and caller-owned contexts.
+    void setModelCallback(LuminaAgentModelCallback callback, void *context);
+    void setStreamingModelCallback(LuminaAgentStreamingModelCallback callback, void *context);
+    void setToolCallback(LuminaAgentToolCallback callback, void *context);
+    void setContextCallback(LuminaAgentContextCallback callback, void *context);
+    void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
+    void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
+    void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
+    void setRollbackCallback(LuminaAgentRollbackCallback callback, void *context);
+    void setEventCallback(LuminaAgentEventCallback callback, void *context);
+    void setHookCallback(LuminaAgentHookCallback callback, void *context);
+
+    // Runs a single isolated task from request JSON to final runtime result.
+    std::string run(const char *requestJson);
+
+    // Advances an explicit session until completion, failure, cancellation, or pause.
+    std::string runSession(RuntimeSession &session, const char *requestJson, bool allowPause);
+
+    // Adds an external observation to a paused session and continues execution.
+    std::string resumeSession(RuntimeSession &session, const char *resumeJson);
+
+    // Marks the current runtime execution as cancelled.
+    std::string cancel(const char *requestId);
+
+    // Exposes normalized session budgets for explicit session creation.
+    RuntimeSessionConfig sessionConfig() const;
+
+private:
+    RuntimeSessionConfig sessionConfig_;
+    int maximumConsecutiveReasoningSteps_ = 3;
+    bool cancelled_ = false;
+    ToolRegistry tools_;
+    RuntimeCallbacks callbacks_;
+
+};
+
+} // namespace LuminaAgent

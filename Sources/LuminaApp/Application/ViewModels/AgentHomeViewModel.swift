@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Combine
 import Foundation
 import LuminaAppCore
@@ -451,7 +451,7 @@ final class AgentHomeViewModel: ObservableObject {
         markdown.contains("results") ||
             markdown.contains("events") ||
             markdown.contains("ReAct Trace") ||
-            markdown.contains("AgentRuntime.LuminaJSONValue")
+            markdown.contains("LuminaAgentRuntime.LuminaJSONValue")
     }
 
     private func friendlySummary(for result: LuminaToolResult) -> String {

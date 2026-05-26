@@ -1,7 +1,7 @@
 .build/
 .swiftpm/
 .venv*/
-.venv-minimindo/
+.venv-minicpm/
 __pycache__/
 **/__pycache__/
 *.pyc
@@ -16,9 +16,9 @@ Resources/Models/BGETextEmbedding.mlmodelc
 Resources/Models/Downloaded/
 Resources/Models/.staging/
 Resources/Models/BGETextEmbedding-tokenizer.json
-Resources/Models/MiniMindOReActModel
-Resources/Models/MiniMindOReActModel/
+Resources/Models/MiniCPMV46ReActModel/
 *.xcresult
 Reports/
 optimize/
 agentic_rl/
+PLAN.md

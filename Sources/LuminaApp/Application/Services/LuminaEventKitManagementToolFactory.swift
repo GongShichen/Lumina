@@ -1,9 +1,9 @@
-import AgentRuntime
+import LuminaAgentClient
 @preconcurrency import EventKit
 import Foundation
 import LuminaAppCore
 
-extension EKEventStore: @unchecked @retroactive Sendable {}
+
 
 enum LuminaEventKitManagementToolFactory {
     static func makeTools() -> [AnyLuminaAgentTool] {
@@ -222,13 +222,7 @@ enum LuminaEventKitManagementToolFactory {
     }
 }
 
-private struct UncheckedEventKitValue<Value>: @unchecked Sendable {
-    let value: Value
 
-    init(_ value: Value) {
-        self.value = value
-    }
-}
 
 private func configured(
     name: String,

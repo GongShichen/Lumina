@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 import LuminaModelRuntime
 import XCTest
@@ -38,17 +38,16 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
         #endif
     }
 
-    func testMiniMindOInferenceSpeedSmoke() async throws {
+    func testMiniCPMV46InferenceSpeedSmoke() async throws {
         guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
             throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run local model speed smoke tests.")
         }
-        #if canImport(CoreML)
         let metricsBox = ModelMetricsBox()
-        let model = try LuminaMiniMindOReActModel(configuration: .init(
-            modelDirectory: Self.miniMindOModelURL(),
-            computeUnits: Self.modelComputeUnits,
+        let model = try LuminaMiniCPMV46ReActModel(configuration: .init(
+            modelDirectory: Self.miniCPMV46ModelURL(),
+            backendPreference: Self.miniCPMV46BackendPreference,
             maxNewTokens: 96,
-            expectedContextLength: 12_000,
+            expectedContextLength: 16_000,
             outputSafetyMarginTokens: 256,
             metricsRecorder: { metrics in
                 metricsBox.record(metrics)
@@ -57,23 +56,24 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
 
         do {
             _ = try await model.generateJSON(
-                prompt: Self.miniMindOSpeedPrompt,
+                prompt: Self.miniCPMV46SpeedPrompt,
                 maxOutputTokens: 96
             )
+        } catch LuminaMiniCPMV46ReActModelError.engineUnavailable(let message) {
+            let metrics = try XCTUnwrap(metricsBox.latest, "MiniCPM-V 4.6 native engine should emit metadata before reporting unavailability.")
+            print("[Lumina][ModelSpeed] MiniCPM-V 4.6 native engine unavailable: \(message); metadata=\(metrics)")
+            throw XCTSkip("MiniCPM-V 4.6 native engine is not linked in this build.")
         } catch {
-            let metrics = try XCTUnwrap(metricsBox.latest, "MiniMind-o should emit inference metrics even if schema validation rejects model text.")
-            print("[Lumina][ModelSpeed] MiniMind-o schema smoke ended with \(type(of: error)); metrics remain valid for speed: \(metrics)")
+            let metrics = try XCTUnwrap(metricsBox.latest, "MiniCPM-V 4.6 should emit inference metrics even if schema validation rejects model text.")
+            print("[Lumina][ModelSpeed] MiniCPM-V 4.6 schema smoke ended with \(type(of: error)); metrics remain valid for speed: \(metrics)")
         }
 
         let metrics = try XCTUnwrap(metricsBox.latest)
-        print("[Lumina][ModelSpeed] MiniMind-o computeUnits=\(metrics.computeUnits) promptTokens=\(metrics.promptTokens) outputTokens=\(metrics.outputTokens) ttftMs=\(metrics.timeToFirstTokenMilliseconds ?? -1) tokPerSec=\(String(format: "%.2f", metrics.tokensPerSecond)) totalMs=\(String(format: "%.1f", metrics.totalMilliseconds))")
-        XCTAssertEqual(metrics.contextLength, 12_000)
+        print("[Lumina][ModelSpeed] MiniCPM-V 4.6 computeUnits=\(metrics.computeUnits) promptTokens=\(metrics.promptTokens) outputTokens=\(metrics.outputTokens) ttftMs=\(metrics.timeToFirstTokenMilliseconds ?? -1) tokPerSec=\(String(format: "%.2f", metrics.tokensPerSecond)) totalMs=\(String(format: "%.1f", metrics.totalMilliseconds))")
+        XCTAssertEqual(metrics.contextLength, 16_000)
         XCTAssertGreaterThan(metrics.promptTokens, 0)
         XCTAssertGreaterThan(metrics.totalMilliseconds, 0)
         XCTAssertGreaterThanOrEqual(metrics.outputTokens, 0)
-        #else
-        throw XCTSkip("CoreML is unavailable on this platform.")
-        #endif
     }
 
     #if canImport(CoreML)
@@ -96,7 +96,7 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
     }
     #endif
 
-    private static var miniMindOSpeedPrompt: String {
+    private static var miniCPMV46SpeedPrompt: String {
         """
         You are Lumina. Output exactly one standard ReAct JSON object.
         \(LuminaReActSchema.promptContract)
@@ -127,12 +127,12 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
             .appendingPathComponent("BGETextEmbedding-tokenizer.json")
     }
 
-    private static func miniMindOModelURL() -> URL {
-        if let path = ProcessInfo.processInfo.environment["LUMINA_MINIMINDO_MODEL"], !path.isEmpty {
+    private static func miniCPMV46ModelURL() -> URL {
+        if let path = ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_MODEL"], !path.isEmpty {
             return URL(fileURLWithPath: path)
         }
         return repositoryRoot()
-            .appendingPathComponent("Resources/Models/MiniMindOReActModel")
+            .appendingPathComponent("Resources/Models/MiniCPMV46ReActModel")
     }
 
     private static func repositoryRoot() -> URL {
@@ -140,6 +140,17 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+    }
+
+    private static var miniCPMV46BackendPreference: LuminaMiniCPMV46BackendPreference {
+        switch ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_BACKEND"]?.lowercased() {
+        case "ane":
+            return .ane
+        case "mps", "metal", "gpu":
+            return .mps
+        default:
+            return .automatic
+        }
     }
 
     private static var strictPerformance: Bool {

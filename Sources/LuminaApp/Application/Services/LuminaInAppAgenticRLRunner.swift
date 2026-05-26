@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 import LuminaModelRuntime
 
@@ -222,9 +222,4 @@ final class LuminaInAppAgenticRLRunner {
             return
         }
     }
-}
-
-private struct LuminaAgenticRLSummaryPayload: Codable {
-    let report: LuminaAgenticRLReport
-    let taskIDs: [String]
 }

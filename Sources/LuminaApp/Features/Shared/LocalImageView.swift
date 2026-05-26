@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import AVKit
 import LuminaMarkdownUI
 import SwiftUI

@@ -80,9 +80,9 @@
 
   <rect x="1076" y="558" width="468" height="194" rx="30" class="model"/>
   <text x="1106" y="602" class="section">LuminaModelRuntime</text>
-  <text x="1106" y="636" class="small">Core ML ReAct model、embedding、tokenizer、模型资产校验</text>
+  <text x="1106" y="636" class="small">MiniCPM-V ReAct model、BGE embedding、tokenizer、模型资产校验</text>
   <rect x="1106" y="662" width="184" height="54" rx="16" class="ui"/>
-  <text x="1126" y="696" class="text">Gemma4 Step generator</text>
+  <text x="1126" y="696" class="text">MiniCPM-V Step generator</text>
   <rect x="1310" y="662" width="184" height="54" rx="16" class="ui"/>
   <text x="1330" y="696" class="text">BGE Embedding</text>
 

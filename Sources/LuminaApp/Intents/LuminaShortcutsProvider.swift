@@ -1,5 +1,5 @@
 import AppIntents
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 
 struct LuminaShortcutsProvider: AppShortcutsProvider {

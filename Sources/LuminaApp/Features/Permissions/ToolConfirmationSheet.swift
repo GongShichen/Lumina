@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import SwiftUI
 
 struct ToolConfirmationSheet: View {

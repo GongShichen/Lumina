@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Foundation
 
 struct LuminaAppReActPromptBuilder: Sendable {
@@ -114,7 +114,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
             examples.append("""
             Example missing required info:
             User: 帮我安排一下
-            JSON: {"type":"tool_use","thought":"Need user preference before continuing.","tool_name":"ask_user","parameters":{"reason":"缺少安排偏好","questions":[{"id":"preference","question":"你想优先安排哪类事情？","options":[{"label":"工作","description":"优先整理工作任务"},{"label":"生活","description":"优先整理生活事项"}]}]},"requires_confirmation":false}
+            JSON: {"type":"ask_user","thought":"Need user preference before continuing.","reason":"缺少安排偏好","questions":[{"id":"preference","question":"你想优先安排哪类事情？","options":[{"label":"工作","description":"优先整理工作任务"},{"label":"生活","description":"优先整理生活事项"}]}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}
             """)
         }
         guard !examples.isEmpty else { return "Examples: none" }
@@ -321,42 +321,5 @@ struct LuminaAppReActPromptBuilder: Sendable {
         }
         let text = lines.joined(separator: "\n")
         return text.isEmpty ? "none" : text.truncated(to: isEvaluation ? 420 : maximumTraceCharacters)
-    }
-}
-
-private extension String {
-    func truncated(to limit: Int) -> String {
-        guard count > limit else { return self }
-        let end = index(startIndex, offsetBy: max(0, limit - 1))
-        return String(self[..<end]) + "..."
-    }
-}
-
-private extension Dictionary where Key == String, Value == LuminaJSONValue {
-    var compactModelTraceValue: String {
-        guard !isEmpty else { return "{}" }
-        let pairs = sorted { $0.key < $1.key }.map { key, value in
-            "\(key)=\(value.compactModelTraceValue)"
-        }
-        return "{\(pairs.joined(separator: ","))}"
-    }
-}
-
-private extension LuminaJSONValue {
-    var compactModelTraceValue: String {
-        switch self {
-        case let .string(value):
-            return "\"\(value.truncated(to: 80))\""
-        case let .number(value):
-            return "\(value)"
-        case let .bool(value):
-            return value ? "true" : "false"
-        case let .object(value):
-            return value.compactModelTraceValue
-        case let .array(values):
-            return "[\(values.prefix(4).map(\.compactModelTraceValue).joined(separator: ","))\(values.count > 4 ? ",..." : "")]"
-        case .null:
-            return "null"
-        }
     }
 }

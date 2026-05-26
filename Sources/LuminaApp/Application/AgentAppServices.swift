@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import Combine
 import Foundation
 import PersonalMemory
@@ -105,19 +105,20 @@ final class AgentAppServices: ObservableObject {
     }
 
     func run(_ text: String) async -> LuminaAgentRunResult {
-        await runtime.run(request: LuminaAgentRequest(text: text))
+        await runtime.run(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, text: text))
     }
 
     func run(content: [LuminaAgentContentPart]) async -> LuminaAgentRunResult {
-        await runtime.run(request: LuminaAgentRequest(content: content))
+        await runtime.run(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, content: content))
     }
 
     func runStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
-        runtime.runStream(request: LuminaAgentRequest(content: content))
+        runtime.runStream(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, content: content))
     }
 
     func runEvaluationStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
         evaluationRuntime.runStream(request: LuminaAgentRequest(
+            systemInstructions: LuminaAppSystemInstructions.evaluation,
             content: content,
             metadata: [
                 LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true),

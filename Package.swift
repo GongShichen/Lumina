@@ -9,7 +9,8 @@ let package = Package(
         .macOS(.v15)
     ],
     products: [
-        .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
+        .library(name: "LuminaAgentRuntime", targets: ["LuminaAgentRuntime"]),
+        .library(name: "LuminaAgentClient", targets: ["LuminaAgentClient"]),
         .library(name: "PersonalMemory", targets: ["PersonalMemory"]),
         .library(name: "LuminaModelRuntime", targets: ["LuminaModelRuntime"]),
         .library(name: "LuminaMarkdownUI", targets: ["LuminaMarkdownUI"]),
@@ -21,17 +22,69 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "AgentRuntime",
-            exclude: ["Info.plist"]
+            name: "LuminaAgentRuntime",
+            path: "Sources/LuminaAgentRuntime",
+            exclude: [],
+            sources: [
+                "Callbacks/src",
+                "Context/src",
+                "Contract/src",
+                "Envelope/src",
+                "Hooks/src",
+                "Json/src",
+                "Observation/src",
+                "Pipeline/src",
+                "Planner/src",
+                "ReAct/src",
+                "Session/src",
+                "Status/src",
+                "Streaming/src",
+                "Tool/src",
+                "Trace/src",
+                "Runtime/src"
+            ],
+            publicHeadersPath: "Runtime/include",
+            cxxSettings: [
+                .headerSearchPath("Budget/include"),
+                .headerSearchPath("Callbacks/include"),
+                .headerSearchPath("Context/include"),
+                .headerSearchPath("Contract/include"),
+                .headerSearchPath("Envelope/include"),
+                .headerSearchPath("Hooks/include"),
+                .headerSearchPath("Json/include"),
+                .headerSearchPath("Observation/include"),
+                .headerSearchPath("Pipeline/include"),
+                .headerSearchPath("Planner/include"),
+                .headerSearchPath("ReAct/include"),
+                .headerSearchPath("Session/include"),
+                .headerSearchPath("Status/include"),
+                .headerSearchPath("Streaming/include"),
+                .headerSearchPath("Tool/include"),
+                .headerSearchPath("Trace/include"),
+                .headerSearchPath("Runtime/include")
+            ]
+        ),
+        .target(
+            name: "LuminaAgentClient",
+            dependencies: ["LuminaAgentRuntime"],
+            path: "Sources/LuminaAgentClient"
         ),
         .target(
             name: "PersonalMemory",
             exclude: ["Info.plist"]
         ),
         .target(
+            name: "LuminaModelRuntimeCore",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("Metal")
+            ]
+        ),
+        .target(
             name: "LuminaModelRuntime",
             dependencies: [
-                "AgentRuntime",
+                "LuminaAgentClient",
+                "LuminaModelRuntimeCore",
                 "PersonalMemory",
                 .product(name: "Tokenizers", package: "swift-transformers")
             ],
@@ -46,12 +99,12 @@ let package = Package(
         ),
         .target(
             name: "LuminaAppCore",
-            dependencies: ["AgentRuntime", "PersonalMemory"],
+            dependencies: ["LuminaAgentClient", "PersonalMemory"],
             exclude: ["Info.plist"]
         ),
         .testTarget(
-            name: "AgentRuntimeTests",
-            dependencies: ["AgentRuntime", "LuminaModelRuntime"]
+            name: "LuminaAgentRuntimeTests",
+            dependencies: ["LuminaAgentClient", "LuminaAgentRuntime", "LuminaModelRuntime"]
         ),
         .testTarget(
             name: "LuminaMarkdownUITests",
@@ -63,7 +116,7 @@ let package = Package(
         ),
         .testTarget(
             name: "LuminaAppCoreTests",
-            dependencies: ["LuminaAppCore", "AgentRuntime", "PersonalMemory", "LuminaModelRuntime"]
+            dependencies: ["LuminaAppCore", "LuminaAgentClient", "LuminaAgentRuntime", "PersonalMemory", "LuminaModelRuntime"]
         )
     ]
 )

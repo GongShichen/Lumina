@@ -1,5 +1,5 @@
 import XCTest
-import AgentRuntime
+import LuminaAgentClient
 @testable import LuminaAppCore
 @testable import PersonalMemory
 

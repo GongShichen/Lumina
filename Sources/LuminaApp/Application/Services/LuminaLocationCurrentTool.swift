@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 import CoreLocation
 import Foundation
 
@@ -41,10 +41,14 @@ struct LuminaLocationCurrentTool: LuminaAgentTool {
     }
 
     private func reverseGeocode(_ location: CLLocation) async throws -> String? {
+        #if targetEnvironment(macCatalyst)
+        return nil
+        #else
         let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
         guard let placemark = placemarks.first else { return nil }
         return [placemark.locality, placemark.administrativeArea, placemark.country]
             .compactMap { $0 }
             .joined(separator: " ")
+        #endif
     }
 }

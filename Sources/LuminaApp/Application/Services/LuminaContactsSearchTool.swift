@@ -1,4 +1,4 @@
-import AgentRuntime
+import LuminaAgentClient
 @preconcurrency import Contacts
 import Foundation
 import LuminaAppCore
