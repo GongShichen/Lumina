@@ -29,17 +29,17 @@
 Agent Runtime 路径：
 
 - `LuminaAgentRuntime` actor 负责 run lifecycle、streaming events、取消、预算和终止状态。
-- ReAct 子系统拆分为 `LuminaReActTypes`、`LuminaReActPlanner`、`LuminaStructuredReActPrompt`、`LuminaReActStepParser`、`LuminaReActObservationCompressor`。
+- ReAct 子系统拆分为 `LuminaReActTypes`、`LuminaReActStepGenerator`、`LuminaStructuredReActPrompt`、`LuminaReActStepParser`、`LuminaReActObservationCompressor`。
 - action 必须是结构化 `LuminaToolCall`，工具执行仍统一经过 `LuminaToolRouter`、`LuminaPermissionGate`、`LuminaConfirmationCoordinator`、`LuminaAuditLogger`。
 - `AgentRuntime` 不包含 Core ML 具体推理实现；它只依赖 `LuminaLocalStructuredInferenceModel` 等协议。
 - `PersonalMemory` 不包含 BGE/Core ML 具体实现；它只依赖 `LuminaEmbeddingProvider` 协议。
 
 本地模型接口：
 
-- Planner 模型走通用 `LuminaLocalStructuredInferenceModel`，Core ML 适配器是 `LuminaCoreMLTextToJSONModel`。
-- `LuminaCoreMLTextToJSONModel` 位于 `LuminaModelRuntime` framework。
-- 默认 bundle 文件名是 `Gemma4Planner.mlmodelc` 或 `LocalPlanner.mlmodelc`，输入名 `prompt`，输出名 `json`。
+- Model 模型走通用 `LuminaLocalDynamicOutputStreamingStructuredInferenceModel`，当前 App 注入的 Core ML 适配器是 `LuminaMiniMindOReActModel`。
+- `LuminaMiniMindOReActModel` 位于 `LuminaModelRuntime` framework，并通过 `LuminaModelBackedReActStepGenerator` 接入纯 `AgentRuntime`。
+- 默认 planner bundle 文件名是 `MiniMindOReActModel/`，内部包含 `model.mlmodelc`、`model_config.json` 和 `hf_model/tokenizer.json`。
 - Embedding 模型走通用 `LuminaEmbeddingProvider`，Core ML 适配器是 `LuminaCoreMLEmbeddingProvider`。
 - `LuminaCoreMLEmbeddingProvider` / `LuminaBGECoreMLEmbeddingProvider` 位于 `LuminaModelRuntime` framework。
-- 默认 bundle 文件名优先 `BGETextEmbedding.mlmodelc`，再降级到 `Gemma4Embedding.mlmodelc` / `LocalEmbedding.mlmodelc`，输入名 `text`，输出名 `embedding`。
-- Gemma 4 Core ML 可以作为上述接口的一个实现；为了迁移方便，bootstrap 也兼容 `Gemma4Planner.mlmodelc` 和 `Gemma4Embedding.mlmodelc`。
+- 默认 embedding bundle 文件名优先 `BGETextEmbedding.mlmodelc`，再降级到 `LocalEmbedding.mlmodelc`，输入名 `text`，输出名 `embedding`。
+- MiniMind-o Core ML 是 planner 默认模型；`AgentRuntime` 仍只依赖通用 step generator 接口，不知道具体模型实现。

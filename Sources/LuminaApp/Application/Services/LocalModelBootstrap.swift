@@ -9,17 +9,17 @@ import CoreML
 
 enum LocalModelBootstrap {
     private enum ModelKind: String {
-        case planner
+        case structuredModel
         case embedding
     }
 
-    static func makePlanner(
+    static func makeStepGenerator(
         readinessStore: LuminaModelReadinessStore? = nil,
         metricsStore: LuminaModelInferenceMetricsStore? = nil,
         memoryStore: LuminaMemoryStore
-    ) -> any LuminaReActPlanner {
-        LuminaLazyPlanner(fallback: unavailablePlanner(), readinessStore: readinessStore) {
-            makeEagerPlanner(memoryStore: memoryStore, metricsStore: metricsStore)
+    ) -> any LuminaReActStepGenerator {
+        LuminaLazyReActStepGenerator(fallback: unavailableStepGenerator(), readinessStore: readinessStore) {
+            makeEagerStepGenerator(memoryStore: memoryStore, metricsStore: metricsStore)
         }
     }
 
@@ -29,88 +29,71 @@ enum LocalModelBootstrap {
         }
     }
 
-    private static func makeEagerPlanner(memoryStore: LuminaMemoryStore, metricsStore: LuminaModelInferenceMetricsStore?) -> LuminaLazyPlanner.LoadResult {
+    private static func makeEagerStepGenerator(memoryStore: LuminaMemoryStore, metricsStore: LuminaModelInferenceMetricsStore?) -> LuminaLazyReActStepGenerator.LoadResult {
         let promptBuilder = LuminaAppReActPromptBuilder()
         #if canImport(CoreML)
-        if let statefulURL = gemma4StatefulModelURL() {
+        if let miniMindURL = miniMindOModelURL() {
             if #available(iOS 18.0, macOS 15.0, *) {
                 do {
-                    let model = try LuminaGemma4StatefulPlannerModel(configuration: .init(
-                        modelDirectory: statefulURL,
+                    let stepMaxNewTokens = 2_048
+                    let model = try LuminaMiniMindOReActModel(configuration: .init(
+                        modelDirectory: miniMindURL,
                         computeUnits: modelComputeUnits,
-                        maxNewTokens: .max,
+                        maxNewTokens: stepMaxNewTokens,
                         expectedContextLength: 12_000,
                         outputSafetyMarginTokens: 256,
                         metricsRecorder: { metrics in
                             metricsStore?.record(metrics)
                         }
                     ))
-                    log("Loaded Gemma4 stateful Core ML planner at \(statefulURL.path)")
-                    let source = "Gemma4 stateful Core ML · \(model.bundleInfo.contextLength) ctx"
+                    log("Loaded MiniMind-o Core ML model at \(miniMindURL.path)")
+                    let source = "MiniMind-o Core ML · \(model.bundleInfo.contextLength) ctx"
                     let maxOutputFrom2KPrompt = model.bundleInfo.maximumSupportedOutputTokens(
                         inputTokenCount: 2_000,
                         safetyMargin: 256,
-                        configurationCap: .max
+                        configurationCap: stepMaxNewTokens
                     )
+                    let packageText = model.bundleInfo.hasCompiledModel ? "compiled" : "mlpackage"
                     return .model(
-                        LuminaModelBackedReActPlanner(
+                        LuminaModelBackedReActStepGenerator(
                             model: model,
                             promptBuilder: promptBuilder.build(context:),
-                            fallback: LuminaNoOpReActPlanner()
+                            fallback: LuminaUnavailableReActStepGenerator()
                         ),
                         source: source,
-                        message: "Gemma4 stateful Core ML planner 已连接：context \(model.bundleInfo.contextLength)，2k prompt 约可输出 \(maxOutputFrom2KPrompt) tokens，推理使用 \(modelComputeUnits.descriptionForLumina)。"
+                        message: "MiniMind-o Core ML 已连接：architecture \(model.bundleInfo.architecture)，context \(model.bundleInfo.contextLength)，\(packageText)，动态单步输出上限当前最高 \(maxOutputFrom2KPrompt) tokens，推理使用 \(modelComputeUnits.descriptionForLumina)。"
                     )
                 } catch {
-                    log("Gemma4 stateful Core ML planner failed to initialize: \(error.localizedDescription)")
+                    log("MiniMind-o Core ML model failed to initialize: \(error.localizedDescription)")
                     return .fallback(
-                        unavailablePlanner(),
-                        message: "Gemma4 planner 初始化失败：\(error.localizedDescription)。当前没有可用模型 planner。"
+                        unavailableStepGenerator(),
+                        message: "MiniMind-o model 初始化失败：\(error.localizedDescription)。当前没有可用模型。"
                     )
                 }
             } else {
                 return .fallback(
-                    unavailablePlanner(),
-                    message: "当前系统版本不支持 Gemma4 stateful Core ML planner；当前没有可用模型 planner。"
+                    unavailableStepGenerator(),
+                    message: "当前系统版本不支持 MiniMind-o Core ML；当前没有可用模型。"
                 )
             }
         }
 
-        if let url = firstModelURL(kind: .planner, candidates: ["Gemma4Planner", "LocalPlanner"]),
-           let model = try? LuminaCoreMLTextToJSONModel(configuration: .init(
-               modelURL: url,
-               promptInputName: "prompt",
-               jsonOutputName: "json",
-               computeUnits: modelComputeUnits
-           )) {
-            log("Loaded Gemma/local planner Core ML model at \(url.path)")
-            let source = url.lastPathComponent
-            return .model(
-                LuminaModelBackedReActPlanner(
-                    model: model,
-                    promptBuilder: promptBuilder.build(context:),
-                    fallback: LuminaNoOpReActPlanner()
-                ),
-                source: source,
-                message: "端侧 Core ML planner 已加载：\(url.lastPathComponent)。"
-            )
-        }
         #endif
 
-        log("Planner model was not found. Requests will not be routed by app-side rules.")
+        log("Local ReAct model was not found. Requests will fail instead of using app-side rules.")
         return .fallback(
-            unavailablePlanner(),
-            message: "没有找到 Gemma4 stateful 或 prompt-to-JSON Core ML planner；当前没有可用模型 planner。"
+            unavailableStepGenerator(),
+            message: "没有找到 MiniMind-o Core ML 模型；当前没有可用模型。请运行 scripts/setup_models.sh 生成或安装 MiniMindOReActModel。"
         )
     }
 
-    private static func unavailablePlanner() -> any LuminaReActPlanner {
-        LuminaNoOpReActPlanner()
+    private static func unavailableStepGenerator() -> any LuminaReActStepGenerator {
+        LuminaUnavailableReActStepGenerator()
     }
 
     private static func makeEagerEmbeddingProvider() -> LuminaLazyEmbeddingProvider.LoadResult {
         #if canImport(CoreML)
-        if let url = firstModelURL(kind: .embedding, candidates: ["BGETextEmbedding", "Gemma4Embedding", "LocalEmbedding"]) {
+        if let url = firstModelURL(kind: .embedding, candidates: ["BGETextEmbedding", "LocalEmbedding"]) {
             if let tokenizerURL = tokenizerURL(for: url),
                let provider = try? LuminaBGECoreMLEmbeddingProvider(configuration: .init(
                    modelURL: url,
@@ -146,7 +129,7 @@ enum LocalModelBootstrap {
 
     private static func preferredEmbeddingDimension() -> Int {
         #if canImport(CoreML)
-        if let url = firstModelURL(kind: .embedding, candidates: ["BGETextEmbedding", "Gemma4Embedding", "LocalEmbedding"]) {
+        if let url = firstModelURL(kind: .embedding, candidates: ["BGETextEmbedding", "LocalEmbedding"]) {
             return embeddingDimension(for: url)
         }
         #endif
@@ -205,26 +188,25 @@ enum LocalModelBootstrap {
     }
 
     private static func processEnvironmentModelURL(kind: ModelKind) -> URL? {
-        let key = kind == .planner ? "LUMINA_GEMMA4_PLANNER_MODEL" : "LUMINA_EMBEDDING_MODEL"
+        let key = kind == .structuredModel ? "LUMINA_MINIMINDO_MODEL" : "LUMINA_EMBEDDING_MODEL"
         if let value = ProcessInfo.processInfo.environment[key], !value.isEmpty {
             return URL(fileURLWithPath: value)
-        }
-        if kind == .embedding,
-           let legacyValue = ProcessInfo.processInfo.environment["LUMINA_GEMMA4_EMBEDDING_MODEL"],
-           !legacyValue.isEmpty {
-            return URL(fileURLWithPath: legacyValue)
         }
         return nil
     }
 
-    private static func gemma4StatefulModelURL() -> URL? {
-        if let value = ProcessInfo.processInfo.environment["LUMINA_GEMMA4_STATEFUL_MODEL"], !value.isEmpty {
+    private static func miniMindOModelURL() -> URL? {
+        if let value = ProcessInfo.processInfo.environment["LUMINA_MINIMINDO_MODEL"], !value.isEmpty {
             let url = URL(fileURLWithPath: value)
             if FileManager.default.fileExists(atPath: url.path) {
                 return url
             }
         }
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/Gemma4Planner"),
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniMindOReActModel"),
+           FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniMindOModel"),
            FileManager.default.fileExists(atPath: url.path) {
             return url
         }
@@ -239,8 +221,24 @@ enum LocalModelBootstrap {
 
     #if canImport(CoreML)
     private static var modelComputeUnits: MLComputeUnits {
+        if let override = ProcessInfo.processInfo.environment["LUMINA_COREML_COMPUTE_UNITS"]?.lowercased() {
+            switch override {
+            case "cpu":
+                return .cpuOnly
+            case "gpu", "mps", "cpuandgpu", "cpu+gpu":
+                return .cpuAndGPU
+            case "ane", "cpuandneuralengine", "cpu+ane":
+                return .cpuAndNeuralEngine
+            case "all":
+                return .all
+            default:
+                break
+            }
+        }
         #if targetEnvironment(simulator)
         return .cpuOnly
+        #elseif targetEnvironment(macCatalyst) || os(macOS)
+        return .cpuAndGPU
         #else
         return .cpuAndNeuralEngine
         #endif

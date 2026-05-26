@@ -13,7 +13,7 @@ struct AppEnvironment {
     var modelMetrics: LuminaModelInferenceMetricsStore
     var auditLogger: any LuminaAuditLogger
     var auditLogReader: (any LuminaAuditLogReader)?
-    var reactPlanner: any LuminaReActPlanner
+    var stepGenerator: any LuminaReActStepGenerator
     var contextProvider: any LuminaRuntimeContextProvider
     var runtimeConfiguration: LuminaAgentRuntimeConfiguration
 
@@ -52,7 +52,7 @@ struct AppEnvironment {
             modelMetrics: modelMetrics,
             auditLogger: auditLogger,
             auditLogReader: auditLogger,
-            reactPlanner: LocalModelBootstrap.makePlanner(readinessStore: modelReadiness, metricsStore: modelMetrics, memoryStore: memoryStore),
+            stepGenerator: LocalModelBootstrap.makeStepGenerator(readinessStore: modelReadiness, metricsStore: modelMetrics, memoryStore: memoryStore),
             contextProvider: LuminaAppContextProvider(memoryStore: memoryStore),
             runtimeConfiguration: LuminaAgentRuntimeConfiguration(
                 maximumToolCalls: 8,

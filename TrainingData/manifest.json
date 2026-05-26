@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "lumina-training-data-v1",
+  "generatedBy": "scripts/generate_training_data.py",
+  "seed": 20260526,
+  "contextBudgetTokens": 12000,
+  "sft": {
+    "path": "TrainingData/lumina_react_sft_300.jsonl",
+    "records": 300
+  },
+  "dpo": {
+    "path": "TrainingData/lumina_react_dpo_600.jsonl",
+    "records": 600,
+    "baseRecords": 500,
+    "hardNegativeRecords": 100,
+    "hardNegativeRatio": 0.2
+  },
+  "notes": [
+    "All assistant targets use standard Lumina ReAct JSON.",
+    "DPO records contain paired rejected responses; 20% hard-negative augmentation is included for policy and schema failures.",
+    "Most samples disable memory and ask_user to match evaluation runs; a smaller subset covers ask_user flow.",
+    "WeatherKit and HealthKit samples are included for iOS-only and high-sensitivity permission behavior."
+  ]
+}

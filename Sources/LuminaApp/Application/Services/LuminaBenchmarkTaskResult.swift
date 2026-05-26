@@ -17,7 +17,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let wallClockMilliseconds: Double
     let confirmationWaitMilliseconds: Double
     let systemPermissionWaitMilliseconds: Double
-    let planningMilliseconds: Double
+    let stepGenerationMilliseconds: Double
     let toolMilliseconds: Double
     let modelMetrics: [LuminaModelInferenceMetrics]
     let failureSummary: String?
@@ -28,7 +28,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         status: String,
         totalMilliseconds: Double,
         observedTimings: LuminaObservedRunTimings,
-        planningMilliseconds: Double,
+        stepGenerationMilliseconds: Double,
         toolMilliseconds: Double,
         modelMetrics: [LuminaModelInferenceMetrics],
         failureSummary: String?
@@ -53,7 +53,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.wallClockMilliseconds = observedTimings.wallClockMilliseconds
         self.confirmationWaitMilliseconds = observedTimings.confirmationWaitMilliseconds
         self.systemPermissionWaitMilliseconds = observedTimings.systemPermissionWaitMilliseconds
-        self.planningMilliseconds = planningMilliseconds
+        self.stepGenerationMilliseconds = stepGenerationMilliseconds
         self.toolMilliseconds = toolMilliseconds
         self.modelMetrics = modelMetrics
         self.failureSummary = failureSummary

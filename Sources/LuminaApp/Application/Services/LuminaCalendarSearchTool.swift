@@ -54,8 +54,10 @@ final class LuminaCalendarSearchTool: LuminaAgentTool, @unchecked Sendable {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await LuminaPermissionTimingRecorder.shared.record {
-                try await eventStore.requestFullAccessToEvents()
+            let granted = try await LuminaSystemPermissionRequest.withTimeout {
+                try await LuminaPermissionTimingRecorder.shared.record {
+                    try await self.eventStore.requestFullAccessToEvents()
+                }
             }
             if granted {
                 return

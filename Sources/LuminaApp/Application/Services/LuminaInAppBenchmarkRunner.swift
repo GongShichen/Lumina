@@ -22,7 +22,7 @@ final class LuminaInAppBenchmarkRunner {
             progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: task.expectedTools.last))
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
-            let (result, observedTimings) = await runSingleTask(task)
+            let (result, observedTimings) = await runSingleTask(task, completed: results.count, total: tasks.count, progress: progress)
             let actualTools = result.toolResults.map(\.toolName)
             let failure = result.status == .succeeded ? nil : result.plan.summary
             results.append(LuminaBenchmarkTaskResult(
@@ -31,7 +31,7 @@ final class LuminaInAppBenchmarkRunner {
                 status: result.status.rawValue,
                 totalMilliseconds: result.timing.totalMilliseconds,
                 observedTimings: observedTimings,
-                planningMilliseconds: result.timing.planningMilliseconds,
+                stepGenerationMilliseconds: result.timing.stepGenerationMilliseconds,
                 toolMilliseconds: result.timing.toolExecutionMilliseconds,
                 modelMetrics: services.modelMetrics.metrics(after: metricsMark),
                 failureSummary: failure
@@ -44,13 +44,76 @@ final class LuminaInAppBenchmarkRunner {
         return report
     }
 
-    private func runSingleTask(_ task: LuminaBenchmarkTask) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
+    private func runSingleTask(
+        _ task: LuminaBenchmarkTask,
+        completed: Int,
+        total: Int,
+        progress: @escaping ProgressHandler
+    ) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
         var finalResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
+        var latestPromptTokens: Int?
+        var latestSampledTokens = 0
+        var latestOutputTokens = 0
         observer.start()
         for await event in services.runEvaluationStream(content: [.text(task.text)]) {
             if Task.isCancelled { break }
             observer.observe(event)
+            if case let .stepGenerationProgress(stepGenerationProgress) = event {
+                if let promptTokens = stepGenerationProgress.promptTokens {
+                    latestPromptTokens = promptTokens
+                }
+                if let sampledTokens = stepGenerationProgress.sampledTokens {
+                    latestSampledTokens = max(latestSampledTokens, sampledTokens)
+                }
+                latestOutputTokens = max(latestOutputTokens, stepGenerationProgress.outputTokens)
+                let promptText = latestPromptTokens.map { " · prompt \($0) tok" } ?? ""
+                let sampledText = latestOutputTokens == 0 && latestSampledTokens > 0 ? " · sampled \(latestSampledTokens) tok" : ""
+                let outputText = latestOutputTokens > 0 ? " · output \(latestOutputTokens) tok" : sampledText
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · 模型生成中 \(Int(stepGenerationProgress.elapsedMilliseconds / 1_000))s\(promptText)\(outputText)",
+                    completed: completed,
+                    total: total,
+                    latestTool: "model.generating"
+                ))
+            }
+            if case let .actionProposed(call) = event {
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · action \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: call.toolName
+                ))
+            }
+            if case let .confirmationRequired(call) = event {
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · 自动确认 \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: "confirming.\(call.toolName)"
+                ))
+            }
+            if case let .toolStarted(call) = event {
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · 执行 \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: call.toolName
+                ))
+            }
+            if case let .toolFinished(result) = event {
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · \(result.toolName) \(result.status.rawValue)",
+                    completed: completed,
+                    total: total,
+                    latestTool: result.toolName
+                ))
+            }
             if case let .finished(result) = event {
                 finalResult = result
             }
@@ -106,7 +169,7 @@ final class LuminaInAppBenchmarkRunner {
         - Wall-clock p95: \(Int(report.wallClockP95Milliseconds))ms
         - Confirmation wait p95: \(Int(report.confirmationWaitP95Milliseconds))ms
         - System permission wait p95: \(Int(report.systemPermissionWaitP95Milliseconds))ms
-        - Planning p95: \(Int(report.planningP95Milliseconds))ms
+        - Step generation p95: \(Int(report.stepGenerationP95Milliseconds))ms
         - Tool p95: \(Int(report.toolP95Milliseconds))ms
         - Memory access disabled: \(report.memoryAccessDisabled)
 

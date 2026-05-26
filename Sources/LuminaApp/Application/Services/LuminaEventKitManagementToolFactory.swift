@@ -155,8 +155,10 @@ enum LuminaEventKitManagementToolFactory {
         case .fullAccess:
             return
         case .notDetermined:
-            guard try await LuminaPermissionTimingRecorder.shared.record({
-                try await store.requestFullAccessToEvents()
+            guard try await LuminaSystemPermissionRequest.withTimeout(operation: {
+                try await LuminaPermissionTimingRecorder.shared.record({
+                    try await store.requestFullAccessToEvents()
+                })
             }) else {
                 throw AppToolError.permissionDenied("你没有授予日历完整访问权限。请允许 Lumina 访问日历后再试。")
             }
@@ -176,8 +178,10 @@ enum LuminaEventKitManagementToolFactory {
         case .fullAccess, .writeOnly:
             return
         case .notDetermined:
-            guard try await LuminaPermissionTimingRecorder.shared.record({
-                try await store.requestFullAccessToReminders()
+            guard try await LuminaSystemPermissionRequest.withTimeout(operation: {
+                try await LuminaPermissionTimingRecorder.shared.record({
+                    try await store.requestFullAccessToReminders()
+                })
             }) else {
                 throw AppToolError.permissionDenied("你没有授予提醒事项访问权限。请允许 Lumina 访问提醒事项后再试。")
             }

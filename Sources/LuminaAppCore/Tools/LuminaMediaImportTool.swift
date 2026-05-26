@@ -35,7 +35,7 @@ public struct LuminaMediaImportTool: LuminaAgentTool {
             return LuminaToolResult(callID: context.call.id, toolName: schema.name, status: .failed, errorMessage: "No media content found in request.")
         }
         let note = context.call.arguments.string("note") ?? context.request.text
-        let body = ([note] + mediaParts.compactMap(\.textForPlanning)).joined(separator: "\n")
+        let body = ([note] + mediaParts.compactMap(\.textForModelInput)).joined(separator: "\n")
         let chunkIDs = await memoryStore.ingest(LuminaMemoryDocument(
             source: LuminaMemorySource(kind: .imported, identifier: context.request.id.uuidString),
             title: "Imported Media",

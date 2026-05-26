@@ -52,10 +52,10 @@ struct LuminaRunStreamObserver {
 
     func finish(result: LuminaAgentRunResult?) -> LuminaObservedRunTimings {
         let wallClock = startedAt.map(milliseconds(since:)) ?? 0
-        let planning = result?.timing.planningMilliseconds ?? 0
+        let modelGeneration = result?.timing.stepGenerationMilliseconds ?? 0
         let permissionWait = LuminaPermissionTimingRecorder.shared.milliseconds(after: permissionTimingMark)
         let measuredToolExecution = max(0, observedToolExecutionMilliseconds - permissionWait)
-        let active = planning + measuredToolExecution
+        let active = modelGeneration + measuredToolExecution
         return LuminaObservedRunTimings(
             wallClockMilliseconds: wallClock,
             activeRuntimeMilliseconds: active,

@@ -79,7 +79,7 @@ struct AgentRunTimelineView: View {
     }
 
     private func displayTitle(for title: String) -> String {
-        if title.localizedCaseInsensitiveContains("thought") || title.contains("规划") || title.contains("准备") {
+        if title.localizedCaseInsensitiveContains("thought") || title.contains("模型") || title.contains("准备") {
             return "Thinking"
         }
         if title.localizedCaseInsensitiveContains("tool") || title.contains("工具") || title.contains("Action") {
@@ -96,7 +96,7 @@ struct AgentRunTimelineView: View {
 
     private func displayDetail(for detail: String) -> String {
         detail
-            .replacingOccurrences(of: "planner/tool", with: "Lumina")
+            .replacingOccurrences(of: "stepGenerator/tool", with: "Lumina")
             .replacingOccurrences(of: "schema", with: "permission details")
             .replacingOccurrences(of: "ReAct", with: "steps")
     }

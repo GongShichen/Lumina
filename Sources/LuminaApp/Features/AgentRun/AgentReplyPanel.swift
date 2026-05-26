@@ -93,12 +93,12 @@ struct AgentReplyPanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     LuminaStatusPill(
-                        title: "Planner",
-                        value: modelReadiness.plannerState == .ready ? "Fallback used" : modelReadiness.plannerState.displayName,
+                        title: "Model",
+                        value: modelReadiness.modelState == .ready ? "Fallback used" : modelReadiness.modelState.displayName,
                         systemImage: "cpu",
                         tint: LuminaTheme.amber
                     )
-                    if modelReadiness.plannerState == .ready && !isRunning {
+                    if modelReadiness.modelState == .ready && !isRunning {
                         Button(action: rerunWithModel) {
                             Label("用端侧模型重新运行", systemImage: "arrow.clockwise")
                                 .font(.caption.weight(.semibold))
@@ -107,7 +107,7 @@ struct AgentReplyPanel: View {
                         .tint(LuminaTheme.deepInk)
                     }
                 }
-                Text(modelReadiness.plannerMessage)
+                Text(modelReadiness.modelMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -199,7 +199,7 @@ struct AgentReplyPanel: View {
     private func rawDebug(_ summary: LuminaAgentRunSummary) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("status: \(summary.status.rawValue)")
-            Text(String(format: "timing: total %.1fms / planning %.1fms / tools %.1fms", summary.timing.totalMilliseconds, summary.timing.planningMilliseconds, summary.timing.toolExecutionMilliseconds))
+            Text(String(format: "timing: total %.1fms / model %.1fms / tools %.1fms", summary.timing.totalMilliseconds, summary.timing.stepGenerationMilliseconds, summary.timing.toolExecutionMilliseconds))
             Text("summary: \(summary.planSummary)")
                 .fixedSize(horizontal: false, vertical: true)
             ForEach(summary.toolResults, id: \.callID) { result in

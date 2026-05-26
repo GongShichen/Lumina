@@ -1,20 +1,20 @@
 import Foundation
 
 struct LuminaModelReadinessSnapshot: Equatable, Sendable {
-    var plannerState: LuminaModelReadinessState
+    var modelState: LuminaModelReadinessState
     var embeddingState: LuminaModelReadinessState
-    var plannerSource: String
+    var modelSource: String
     var embeddingSource: String
-    var plannerMessage: String
+    var modelMessage: String
     var embeddingMessage: String
     var lastRunUsedFallback: Bool
 
     static let initial = LuminaModelReadinessSnapshot(
-        plannerState: .loading,
+        modelState: .loading,
         embeddingState: .loading,
-        plannerSource: "Preparing",
+        modelSource: "Preparing",
         embeddingSource: "Preparing",
-        plannerMessage: "端侧 planner 正在后台准备。",
+        modelMessage: "端侧模型正在后台准备。",
         embeddingMessage: "端侧 embedding 会在首次检索时懒加载。",
         lastRunUsedFallback: false
     )

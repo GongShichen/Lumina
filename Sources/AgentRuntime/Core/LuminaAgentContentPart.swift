@@ -49,7 +49,7 @@ public enum LuminaAgentContentPart: Codable, Hashable, Identifiable, Sendable {
         .structuredData(id: id, value)
     }
 
-    public var textForPlanning: String? {
+    public var textForModelInput: String? {
         switch self {
         case let .text(_, value), let .markdown(_, value):
             return value

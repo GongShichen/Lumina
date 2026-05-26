@@ -31,10 +31,10 @@ public enum LuminaReActStepParser {
                 )
             )
         case "final_answer":
-            guard let finalAnswer = dto.finalAnswer else {
-                throw LuminaReActParserError.invalidSchema("final_answer steps require a final_answer string.")
+            guard let content = dto.content else {
+                throw LuminaReActParserError.invalidSchema("final_answer steps require a content string.")
             }
-            return .final(finalAnswer, thought: thought)
+            return .final(content, thought: thought)
         default:
             throw LuminaReActParserError.invalidStepType(stepType)
         }
@@ -49,7 +49,7 @@ public enum LuminaReActStepParser {
         }
 
         let topLevelKeys = Set(object.keys)
-        let allowedTopLevelKeys = Set(["type", "thought", "tool_name", "parameters", "requires_confirmation", "final_answer"])
+        let allowedTopLevelKeys = Set(["type", "thought", "tool_name", "parameters", "requires_confirmation", "content"])
         let unknownTopLevelKeys = topLevelKeys.subtracting(allowedTopLevelKeys)
         guard unknownTopLevelKeys.isEmpty else {
             throw LuminaReActParserError.invalidSchema("unknown top-level keys: \(unknownTopLevelKeys.sorted().joined(separator: ", ")).")
@@ -77,11 +77,11 @@ public enum LuminaReActStepParser {
                 throw LuminaReActParserError.invalidSchema("requires_confirmation must be a boolean when present.")
             }
         case "final_answer":
-            guard topLevelKeys.isSubset(of: Set(["type", "thought", "final_answer"])) else {
-                throw LuminaReActParserError.invalidSchema("final_answer may only contain type, optional thought, and final_answer.")
+            guard topLevelKeys.isSubset(of: Set(["type", "thought", "content"])) else {
+                throw LuminaReActParserError.invalidSchema("final_answer may only contain type, optional thought, and content.")
             }
-            guard object["final_answer"] is String else {
-                throw LuminaReActParserError.invalidSchema("final_answer requires a string final_answer field.")
+            guard object["content"] is String else {
+                throw LuminaReActParserError.invalidSchema("final_answer requires a string content field.")
             }
         default:
             return

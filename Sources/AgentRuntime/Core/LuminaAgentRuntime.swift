@@ -1,7 +1,7 @@
 import Foundation
 
 public actor LuminaAgentRuntime {
-    private let reactPlanner: any LuminaReActPlanner
+    private let stepGenerator: any LuminaReActStepGenerator
     private let router: LuminaToolRouter
     private let configuration: LuminaAgentRuntimeConfiguration
     private let contextProvider: any LuminaRuntimeContextProvider
@@ -10,7 +10,7 @@ public actor LuminaAgentRuntime {
 
     public init(
         tools: [AnyLuminaAgentTool],
-        reactPlanner: any LuminaReActPlanner = LuminaNoOpReActPlanner(),
+        stepGenerator: any LuminaReActStepGenerator = LuminaUnavailableReActStepGenerator(),
         contextProvider: any LuminaRuntimeContextProvider = LuminaEmptyRuntimeContextProvider(),
         contextCompactor: any LuminaReActContextCompactor = LuminaSummarizingReActContextCompactor(),
         configuration: LuminaAgentRuntimeConfiguration = LuminaAgentRuntimeConfiguration(),
@@ -19,7 +19,7 @@ public actor LuminaAgentRuntime {
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
         hooks: [any LuminaAgentRuntimeHook] = []
     ) {
-        self.reactPlanner = reactPlanner
+        self.stepGenerator = stepGenerator
         self.contextProvider = contextProvider
         self.contextCompactor = contextCompactor
         self.configuration = configuration
@@ -45,7 +45,7 @@ public actor LuminaAgentRuntime {
         eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     ) async -> LuminaAgentRunResult {
         let totalStart = ContinuousClock.now
-        var planningMilliseconds = Double(0)
+        var stepGenerationMilliseconds = Double(0)
         var toolExecutionMilliseconds = Double(0)
         var trace = LuminaReActTrace()
         var results: [LuminaToolResult] = []
@@ -55,7 +55,7 @@ public actor LuminaAgentRuntime {
 
         do {
             try Task.checkCancellation()
-            eventSink?(.planningStarted(request.id))
+            eventSink?(.stepGenerationStarted(request.id))
             schemas = await router.schemas()
             var emptyContext = LuminaRuntimeContext.empty
             if let termination = try await applyHookDirectives(
@@ -98,23 +98,27 @@ public actor LuminaAgentRuntime {
                     trace: trace,
                     loadedContext: loadedContext
                 )
-                var plannerContext = LuminaReActPlannerContext(
+                let stepGenerationStart = ContinuousClock.now
+                var stepContext = LuminaReActStepContext(
                     request: activeRequest,
                     availableTools: schemas,
                     trace: trace,
                     loadedContext: loadedContext,
                     iteration: trace.steps.count,
                     remainingToolCalls: max(0, configuration.maximumToolCalls - trace.actionCount),
-                    maximumObservationCharacters: configuration.maximumObservationCharacters
+                    maximumObservationCharacters: configuration.maximumObservationCharacters,
+                    progressSink: { progress in
+                        eventSink?(.stepGenerationProgress(progress))
+                    }
                 )
                 if let termination = try await applyHookDirectives(
-                    event: .plannerContextReady,
+                    event: .stepContextReady,
                     context: hookContext(
                         request: activeRequest,
                         schemas: schemas,
                         trace: trace,
                         loadedContext: loadedContext,
-                        plannerContext: plannerContext
+                        stepContext: stepContext
                     ),
                     request: &activeRequest,
                     loadedContext: &loadedContext,
@@ -125,13 +129,31 @@ public actor LuminaAgentRuntime {
                     trace.terminationReason = termination.reason
                     break reactLoop
                 }
-                plannerContext.request = activeRequest
-                plannerContext.loadedContext = loadedContext
-                let planningStart = ContinuousClock.now
-                var step = try await reactPlanner.nextStep(context: plannerContext)
-                let stepMilliseconds = LuminaRuntimeClock.milliseconds(since: planningStart)
+                stepContext.request = activeRequest
+                stepContext.loadedContext = loadedContext
+                let progressTask = Task { [eventSink, requestID = activeRequest.id, iteration = stepContext.iteration] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { break }
+                        eventSink?(.stepGenerationProgress(LuminaStepGenerationProgress(
+                            requestID: requestID,
+                            iteration: iteration,
+                            elapsedMilliseconds: LuminaRuntimeClock.milliseconds(since: stepGenerationStart),
+                            message: "端侧模型仍在生成 ReAct step"
+                        )))
+                    }
+                }
+                var step: LuminaReActStep
+                do {
+                    step = try await stepGenerator.nextStep(context: stepContext)
+                    progressTask.cancel()
+                } catch {
+                    progressTask.cancel()
+                    throw error
+                }
+                let stepMilliseconds = LuminaRuntimeClock.milliseconds(since: stepGenerationStart)
                 step.elapsedMilliseconds = stepMilliseconds
-                planningMilliseconds += stepMilliseconds
+                stepGenerationMilliseconds += stepMilliseconds
                 if let termination = try await applyHookDirectives(
                     event: .stepProduced,
                     context: hookContext(
@@ -139,7 +161,7 @@ public actor LuminaAgentRuntime {
                         schemas: schemas,
                         trace: trace,
                         loadedContext: loadedContext,
-                        plannerContext: plannerContext,
+                        stepContext: stepContext,
                         step: step
                     ),
                     request: &activeRequest,
@@ -161,7 +183,7 @@ public actor LuminaAgentRuntime {
                         eventSink?(.thoughtGenerated(.thought(thought, elapsedMilliseconds: step.elapsedMilliseconds)))
                     }
                     guard let call = step.action else {
-                        finalMarkdown = "### 执行失败\n\nReAct planner returned an action step without a tool call."
+                        finalMarkdown = "### 执行失败\n\nReAct step generator returned an action step without a tool call."
                         trace.terminationReason = "invalid-action"
                         break reactLoop
                     }
@@ -173,10 +195,6 @@ public actor LuminaAgentRuntime {
                     }
                     trace.steps.append(step)
                     eventSink?(.actionProposed(call))
-                    eventSink?(.planCreated(LuminaAgentPlan(
-                        summary: step.thought ?? "ReAct action proposed.",
-                        toolCalls: trace.steps.compactMap(\.action)
-                    )))
 
                     if let termination = try await applyHookDirectives(
                         event: .toolWillExecute,
@@ -185,7 +203,7 @@ public actor LuminaAgentRuntime {
                             schemas: schemas,
                             trace: trace,
                             loadedContext: loadedContext,
-                            plannerContext: plannerContext,
+                            stepContext: stepContext,
                             step: step,
                             call: call
                         ),
@@ -199,7 +217,7 @@ public actor LuminaAgentRuntime {
                         break reactLoop
                     }
                     let toolStart = ContinuousClock.now
-                    let (result, _, _) = await router.execute(call: call, request: activeRequest, eventSink: eventSink)
+                    let (result, permissionDecision, confirmed) = await router.execute(call: call, request: activeRequest, eventSink: eventSink)
                     toolExecutionMilliseconds += LuminaRuntimeClock.milliseconds(since: toolStart)
                     results.append(result)
                     if let termination = try await applyHookDirectives(
@@ -209,7 +227,7 @@ public actor LuminaAgentRuntime {
                             schemas: schemas,
                             trace: trace,
                             loadedContext: loadedContext,
-                            plannerContext: plannerContext,
+                            stepContext: stepContext,
                             step: step,
                             call: call,
                             result: result
@@ -232,6 +250,8 @@ public actor LuminaAgentRuntime {
 
                     let observation = LuminaReActObservationCompressor.observation(
                         from: result,
+                        permissionDecision: permissionDecision,
+                        confirmed: confirmed,
                         maximumCharacters: configuration.maximumObservationCharacters
                     )
                     trace.steps.append(.observation(observation))
@@ -243,7 +263,7 @@ public actor LuminaAgentRuntime {
                             schemas: schemas,
                             trace: trace,
                             loadedContext: loadedContext,
-                            plannerContext: plannerContext,
+                            stepContext: stepContext,
                             step: step,
                             call: call,
                             result: result,
@@ -279,7 +299,7 @@ public actor LuminaAgentRuntime {
                             schemas: schemas,
                             trace: trace,
                             loadedContext: loadedContext,
-                            plannerContext: plannerContext,
+                            stepContext: stepContext,
                             step: step,
                             finalMarkdown: finalMarkdown
                         ),
@@ -314,7 +334,7 @@ public actor LuminaAgentRuntime {
                 toolResults: results,
                 status: status(for: results),
                 timing: LuminaRuntimeTiming(
-                    planningMilliseconds: planningMilliseconds,
+                    stepGenerationMilliseconds: stepGenerationMilliseconds,
                     toolExecutionMilliseconds: toolExecutionMilliseconds,
                     totalMilliseconds: LuminaRuntimeClock.milliseconds(since: totalStart)
                 ),
@@ -355,7 +375,7 @@ public actor LuminaAgentRuntime {
                 toolResults: results,
                 status: .cancelled,
                 timing: LuminaRuntimeTiming(
-                    planningMilliseconds: planningMilliseconds,
+                    stepGenerationMilliseconds: stepGenerationMilliseconds,
                     toolExecutionMilliseconds: toolExecutionMilliseconds,
                     totalMilliseconds: LuminaRuntimeClock.milliseconds(since: totalStart)
                 ),
@@ -364,9 +384,9 @@ public actor LuminaAgentRuntime {
             eventSink?(.finished(result))
             return result
         } catch {
-            trace.terminationReason = "planning-failed"
+            trace.terminationReason = "step-generation-failed"
             let errorMessage = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-            debugLog("Planning failed: \(errorMessage)")
+            debugLog("Step generation failed: \(errorMessage)")
             var terminalContext = LuminaRuntimeContext.empty
             _ = try? await applyHookDirectives(
                 event: .failed,
@@ -384,7 +404,7 @@ public actor LuminaAgentRuntime {
             )
             let result = LuminaAgentRunResult(
                 requestID: activeRequest.id,
-                plan: LuminaAgentPlan(summary: "ReAct planning failed: \(errorMessage)", toolCalls: trace.steps.compactMap(\.action)),
+                plan: LuminaAgentPlan(summary: "ReAct step generation failed: \(errorMessage)", toolCalls: trace.steps.compactMap(\.action)),
                 toolResults: results,
                 status: .failed,
                 timing: LuminaRuntimeTiming(totalMilliseconds: LuminaRuntimeClock.milliseconds(since: totalStart)),
@@ -441,7 +461,7 @@ public actor LuminaAgentRuntime {
         schemas: [LuminaToolSchema],
         trace: LuminaReActTrace,
         loadedContext: LuminaRuntimeContext = .empty,
-        plannerContext: LuminaReActPlannerContext? = nil,
+        stepContext: LuminaReActStepContext? = nil,
         step: LuminaReActStep? = nil,
         call: LuminaToolCall? = nil,
         result: LuminaToolResult? = nil,
@@ -455,7 +475,7 @@ public actor LuminaAgentRuntime {
             availableTools: schemas,
             trace: trace,
             loadedContext: loadedContext,
-            plannerContext: plannerContext,
+            stepContext: stepContext,
             step: step,
             toolCall: call,
             toolResult: result,

@@ -3,7 +3,7 @@ import Foundation
 public enum LuminaAgentRuntimeHookEvent: String, Codable, Hashable, Sendable {
     case runStarted
     case contextLoaded
-    case plannerContextReady
+    case stepContextReady
     case stepProduced
     case toolWillExecute
     case toolDidExecute

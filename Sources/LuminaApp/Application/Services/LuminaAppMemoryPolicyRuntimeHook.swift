@@ -6,7 +6,7 @@ struct LuminaAppMemoryPolicyRuntimeHook: LuminaAgentRuntimeHook {
         event: LuminaAgentRuntimeHookEvent,
         context: LuminaAgentRuntimeHookContext
     ) async throws -> [LuminaAgentRuntimeHookDirective] {
-        guard event == .plannerContextReady,
+        guard event == .stepContextReady,
               context.availableTools.contains(where: { $0.name == "memory.ingest_text" })
         else {
             return []

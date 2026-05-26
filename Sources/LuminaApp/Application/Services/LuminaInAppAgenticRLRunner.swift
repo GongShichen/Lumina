@@ -26,7 +26,7 @@ final class LuminaInAppAgenticRLRunner {
             progress(LuminaAgenticRLSnapshot(state: .running, currentTask: task.instruction, completed: records.count, total: tasks.count, latestTool: task.expectedTools.last))
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
-            let (result, observedTimings) = await runSingleTask(task)
+            let (result, observedTimings) = await runSingleTask(task, completed: records.count, total: tasks.count, progress: progress)
             let metrics = services.modelMetrics.metrics(after: metricsMark)
             let record = makeRecord(task: task, result: result, observedTimings: observedTimings, modelMetrics: metrics)
             records.append(record)
@@ -40,13 +40,76 @@ final class LuminaInAppAgenticRLRunner {
         return report
     }
 
-    private func runSingleTask(_ task: LuminaAgenticRLTask) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
+    private func runSingleTask(
+        _ task: LuminaAgenticRLTask,
+        completed: Int,
+        total: Int,
+        progress: @escaping ProgressHandler
+    ) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
         var finalResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
+        var latestPromptTokens: Int?
+        var latestSampledTokens = 0
+        var latestOutputTokens = 0
         observer.start()
         for await event in services.runEvaluationStream(content: [.text(task.instruction)]) {
             if Task.isCancelled { break }
             observer.observe(event)
+            if case let .stepGenerationProgress(stepGenerationProgress) = event {
+                if let promptTokens = stepGenerationProgress.promptTokens {
+                    latestPromptTokens = promptTokens
+                }
+                if let sampledTokens = stepGenerationProgress.sampledTokens {
+                    latestSampledTokens = max(latestSampledTokens, sampledTokens)
+                }
+                latestOutputTokens = max(latestOutputTokens, stepGenerationProgress.outputTokens)
+                let promptText = latestPromptTokens.map { " · prompt \($0) tok" } ?? ""
+                let sampledText = latestOutputTokens == 0 && latestSampledTokens > 0 ? " · sampled \(latestSampledTokens) tok" : ""
+                let outputText = latestOutputTokens > 0 ? " · output \(latestOutputTokens) tok" : sampledText
+                progress(LuminaAgenticRLSnapshot(
+                    state: .running,
+                    currentTask: "\(task.instruction) · 模型生成中 \(Int(stepGenerationProgress.elapsedMilliseconds / 1_000))s\(promptText)\(outputText)",
+                    completed: completed,
+                    total: total,
+                    latestTool: "model.generating"
+                ))
+            }
+            if case let .actionProposed(call) = event {
+                progress(LuminaAgenticRLSnapshot(
+                    state: .running,
+                    currentTask: "\(task.instruction) · action \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: call.toolName
+                ))
+            }
+            if case let .confirmationRequired(call) = event {
+                progress(LuminaAgenticRLSnapshot(
+                    state: .running,
+                    currentTask: "\(task.instruction) · 自动确认 \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: "confirming.\(call.toolName)"
+                ))
+            }
+            if case let .toolStarted(call) = event {
+                progress(LuminaAgenticRLSnapshot(
+                    state: .running,
+                    currentTask: "\(task.instruction) · 执行 \(call.toolName)",
+                    completed: completed,
+                    total: total,
+                    latestTool: call.toolName
+                ))
+            }
+            if case let .toolFinished(result) = event {
+                progress(LuminaAgenticRLSnapshot(
+                    state: .running,
+                    currentTask: "\(task.instruction) · \(result.toolName) \(result.status.rawValue)",
+                    completed: completed,
+                    total: total,
+                    latestTool: result.toolName
+                ))
+            }
             if case let .finished(result) = event {
                 finalResult = result
             }
@@ -110,7 +173,7 @@ final class LuminaInAppAgenticRLRunner {
                 confirmationWaitMilliseconds: observedTimings.confirmationWaitMilliseconds,
                 systemPermissionWaitMilliseconds: observedTimings.systemPermissionWaitMilliseconds,
                 totalMilliseconds: result.timing.totalMilliseconds,
-                planningMilliseconds: result.timing.planningMilliseconds,
+                stepGenerationMilliseconds: result.timing.stepGenerationMilliseconds,
                 toolMilliseconds: observedTimings.observedToolExecutionMilliseconds,
                 memoryAccessDisabled: true,
                 failureSummary: result.status == .succeeded ? nil : result.plan.summary

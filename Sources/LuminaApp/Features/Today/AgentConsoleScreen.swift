@@ -287,7 +287,7 @@ struct AgentConsoleScreen: View {
     private var trustPreview: some View {
         HStack(spacing: 10) {
             TrustSummaryTile(title: "Memory", value: "\(stats.chunkCount) fragments", icon: "brain.head.profile", tint: LuminaTheme.mint)
-            TrustSummaryTile(title: "Planner", value: modelReadiness.plannerSource, icon: "cpu", tint: LuminaTheme.amber)
+            TrustSummaryTile(title: "Model", value: modelReadiness.modelSource, icon: "cpu", tint: LuminaTheme.amber)
             TrustSummaryTile(title: "Control", value: "执行前确认", icon: "hand.raised.fill", tint: LuminaTheme.aqua)
         }
     }

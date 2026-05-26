@@ -2,20 +2,16 @@ import XCTest
 @testable import AgentRuntime
 import LuminaModelRuntime
 
-#if canImport(CoreML)
-import CoreML
-#endif
-
 final class ReActRuntimeTests: XCTestCase {
     func testRuntimeExecutesReActActionObservationFinal() async {
-        let planner = ScriptedReActPlanner(steps: [
+        let model = ScriptedReActModel(steps: [
             .action(thought: "Need local context.", call: LuminaToolCall(toolName: "local.search", arguments: ["query": .string("coffee")])),
             .final("### Done\n\nFound context.")
         ])
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(callID: UUID(), toolName: "local.search", status: .succeeded, content: [.markdown("### Result\n\n- coffee")])
         }
-        let runtime = LuminaAgentRuntime(tools: [tool], reactPlanner: planner)
+        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "查 coffee"))
 
@@ -25,12 +21,12 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue(result.reactTrace?.observations.first?.summary.contains("coffee") == true)
     }
 
-    func testRuntimeLoadsInjectedContextBeforeReActPlanning() async {
+    func testRuntimeLoadsInjectedContextBeforeReActStepGeneration() async {
         let contextProvider = CountingContextProvider()
-        let planner = ContextAwareReActPlanner()
+        let model = ContextAwareReActModel()
         let runtime = LuminaAgentRuntime(
             tools: [],
-            reactPlanner: planner,
+            stepGenerator: model,
             contextProvider: contextProvider
         )
 
@@ -45,7 +41,7 @@ final class ReActRuntimeTests: XCTestCase {
         let hook = RecordingRuntimeHook()
         let runtime = LuminaAgentRuntime(
             tools: [],
-            reactPlanner: ScriptedReActPlanner(steps: [.final("done")]),
+            stepGenerator: ScriptedReActModel(steps: [.final("done")]),
             hooks: [hook]
         )
 
@@ -53,14 +49,14 @@ final class ReActRuntimeTests: XCTestCase {
         let events = await hook.events
 
         XCTAssertEqual(result.status, .succeeded)
-        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .plannerContextReady, .stepProduced, .finalGenerated]))
+        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .stepContextReady, .stepProduced, .finalGenerated]))
         XCTAssertEqual(events.last, .runEnded)
     }
 
-    func testRuntimeHookCanAppendContextBeforePlanner() async {
+    func testRuntimeHookCanAppendContextBeforeModel() async {
         let runtime = LuminaAgentRuntime(
             tools: [],
-            reactPlanner: ContextAwareReActPlanner(),
+            stepGenerator: ContextAwareReActModel(),
             hooks: [AppendingContextHook()]
         )
 
@@ -72,7 +68,7 @@ final class ReActRuntimeTests: XCTestCase {
     func testRuntimeHookFailureFailsRun() async {
         let runtime = LuminaAgentRuntime(
             tools: [],
-            reactPlanner: ScriptedReActPlanner(steps: [.final("done")]),
+            stepGenerator: ScriptedReActModel(steps: [.final("done")]),
             hooks: [FailingRuntimeHook()]
         )
 
@@ -111,7 +107,7 @@ final class ReActRuntimeTests: XCTestCase {
         }
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            reactPlanner: BudgetAwareReActPlanner(),
+            stepGenerator: BudgetAwareReActModel(),
             configuration: LuminaAgentRuntimeConfiguration(
                 maximumToolCalls: 2,
                 maximumReActIterations: 8,
@@ -142,7 +138,7 @@ final class ReActRuntimeTests: XCTestCase {
     func testReActParserParsesStandardFinalAnswerShape() throws {
         let step = try LuminaReActStepParser.parse(
             json: """
-            {"type":"final_answer","final_answer":"## 完成\\n\\n已处理。"}
+            {"type":"final_answer","content":"## 完成\\n\\n已处理。"}
             """,
             availableTools: []
         )
@@ -188,6 +184,13 @@ final class ReActRuntimeTests: XCTestCase {
 
         XCTAssertThrowsError(try LuminaReActStepParser.parse(
             json: """
+            {"type":"tool_call","function":"local.search()","args":{}}
+            """,
+            availableTools: [schema]
+        ))
+
+        XCTAssertThrowsError(try LuminaReActStepParser.parse(
+            json: """
             {"type":"tool_use","reasoning":"x","tool_name":"local.search","parameters":{},"requires_confirmation":false}
             """,
             availableTools: [schema]
@@ -202,10 +205,10 @@ final class ReActRuntimeTests: XCTestCase {
     }
 
     func testIterationLimitReturnsMarkdownFinal() async {
-        let planner = ScriptedReActPlanner(steps: [.thought("still thinking"), .thought("again")])
+        let model = ScriptedReActModel(steps: [.thought("still thinking"), .thought("again")])
         let runtime = LuminaAgentRuntime(
             tools: [],
-            reactPlanner: planner,
+            stepGenerator: model,
             configuration: LuminaAgentRuntimeConfiguration(maximumToolCalls: 2, maximumReActIterations: 1)
         )
 
@@ -217,7 +220,7 @@ final class ReActRuntimeTests: XCTestCase {
     }
 
     func testReActFinalDoesNotNestMarkdownHeadingInsideListItem() async {
-        let planner = StaticReActPlanner(toolName: "device.current_time")
+        let model = StaticReActModel(toolName: "device.current_time")
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "device.current_time", description: "Current time", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(
                 callID: UUID(),
@@ -227,7 +230,7 @@ final class ReActRuntimeTests: XCTestCase {
                 content: [.markdown("### 本机时间\n\n- 时间：10:41")]
             )
         }
-        let runtime = LuminaAgentRuntime(tools: [tool], reactPlanner: planner)
+        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "现在几点"))
 
@@ -238,7 +241,7 @@ final class ReActRuntimeTests: XCTestCase {
     }
 
     func testReActFinalDeduplicatesRepeatedObservations() async {
-        let planner = StaticReActPlanner(toolName: "local.search")
+        let model = StaticReActModel(toolName: "local.search")
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(
                 callID: UUID(),
@@ -250,7 +253,7 @@ final class ReActRuntimeTests: XCTestCase {
         }
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            reactPlanner: planner,
+            stepGenerator: model,
             configuration: LuminaAgentRuntimeConfiguration(maximumToolCalls: 3)
         )
 
@@ -264,7 +267,7 @@ final class ReActRuntimeTests: XCTestCase {
 
 final class AgentRuntimePerformanceTests: XCTestCase {
     func testRunStreamFirstEventLatency() async {
-        let runtime = LuminaAgentRuntime(tools: [], reactPlanner: LuminaNoOpReActPlanner())
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator())
         let start = ContinuousClock.now
         var firstEventMilliseconds = Double.greatestFiniteMagnitude
 
@@ -276,13 +279,13 @@ final class AgentRuntimePerformanceTests: XCTestCase {
         XCTAssertLessThan(firstEventMilliseconds, PerformanceBudget.strict ? 50 : 500)
     }
 
-    func testNoAvailablePlannerFailsRunInsteadOfCompleting() async {
-        let runtime = LuminaAgentRuntime(tools: [], reactPlanner: LuminaNoOpReActPlanner())
+    func testNoAvailableModelFailsRunInsteadOfCompleting() async {
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator())
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "帮我创建提醒"))
 
         XCTAssertEqual(result.status, .failed)
-        XCTAssertTrue(result.plan.summary.contains("No available ReAct planner"))
+        XCTAssertTrue(result.plan.summary.contains("No available ReAct step generator"))
         XCTAssertTrue(result.toolResults.isEmpty)
     }
 
@@ -293,11 +296,11 @@ final class AgentRuntimePerformanceTests: XCTestCase {
         var samples: [Double] = []
 
         for _ in 0..<20 {
-            let planner = ScriptedReActPlanner(steps: [
+            let model = ScriptedReActModel(steps: [
                 .action(thought: "search", call: LuminaToolCall(toolName: "local.search", arguments: [:])),
                 .final("done")
             ])
-            let runtime = LuminaAgentRuntime(tools: [tool], reactPlanner: planner)
+            let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
             let start = ContinuousClock.now
             _ = await runtime.run(request: LuminaAgentRequest(text: "查"))
             samples.append(TestClock.milliseconds(since: start))
@@ -306,8 +309,8 @@ final class AgentRuntimePerformanceTests: XCTestCase {
         XCTAssertLessThan(samples.percentile95, PerformanceBudget.strict ? 180 : 800)
     }
 
-    func testCancellationLatencyForSlowPlanner() async {
-        let runtime = LuminaAgentRuntime(tools: [], reactPlanner: SlowReActPlanner(delayNanoseconds: 2_000_000_000))
+    func testCancellationLatencyForSlowModel() async {
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: SlowReActModel(delayNanoseconds: 2_000_000_000))
         let task = Task { await runtime.run(request: LuminaAgentRequest(text: "cancel")) }
         try? await Task.sleep(nanoseconds: 50_000_000)
         let start = ContinuousClock.now
@@ -319,85 +322,34 @@ final class AgentRuntimePerformanceTests: XCTestCase {
         XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 100 : 500)
     }
 
-    func testOptionalCoreMLPlannerModelContract() async throws {
-        guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
-            throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run Core ML planner benchmark.")
-        }
-        guard let path = ProcessInfo.processInfo.environment["LUMINA_GEMMA4_PLANNER_MODEL"], !path.isEmpty else {
-            throw XCTSkip("Set LUMINA_GEMMA4_PLANNER_MODEL to a compiled planner .mlmodelc.")
-        }
-        #if canImport(CoreML)
-        let model = try LuminaCoreMLTextToJSONModel(configuration: .init(modelURL: URL(fileURLWithPath: path)))
-        let start = ContinuousClock.now
-        let json = try await model.generateJSON(prompt: """
-        Return {"type":"final_answer","final_answer":"ok"} exactly.
-        """)
-        let elapsed = TestClock.milliseconds(since: start)
-
-        XCTAssertFalse(json.isEmpty)
-        XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 2_000 : 10_000)
-        #else
-        throw XCTSkip("CoreML is unavailable on this platform.")
-        #endif
-    }
-
-    func testOptionalGemma4StatefulCoreMLAssetsLoad() throws {
-        guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
-            throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run Gemma4 asset smoke test.")
-        }
-        guard let path = ProcessInfo.processInfo.environment["LUMINA_GEMMA4_STATEFUL_MODEL"], !path.isEmpty else {
-            throw XCTSkip("Set LUMINA_GEMMA4_STATEFUL_MODEL to the downloaded Gemma4Planner directory.")
-        }
-        #if canImport(CoreML)
-        let root = URL(fileURLWithPath: path)
-        let chunks = [1, 2, 3].map { root.appendingPathComponent("chunk_\($0).mlmodelc") }
-        for chunk in chunks {
-            XCTAssertTrue(FileManager.default.fileExists(atPath: chunk.path), "Missing \(chunk.lastPathComponent)")
-        }
-
-        let start = ContinuousClock.now
-        let configuration = MLModelConfiguration()
-        configuration.computeUnits = .cpuAndNeuralEngine
-        for chunk in chunks {
-            _ = try MLModel(contentsOf: chunk, configuration: configuration)
-        }
-        let elapsed = TestClock.milliseconds(since: start)
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("hf_model/tokenizer.json").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("model_config.json").path))
-        XCTAssertLessThan(elapsed, PerformanceBudget.strict ? 30_000 : 120_000)
-        #else
-        throw XCTSkip("CoreML is unavailable on this platform.")
-        #endif
-    }
 }
 
-private actor ScriptedReActPlanner: LuminaReActPlanner {
+private actor ScriptedReActModel: LuminaReActStepGenerator {
     private var steps: [LuminaReActStep]
 
     init(steps: [LuminaReActStep]) {
         self.steps = steps
     }
 
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         guard !steps.isEmpty else { return .final("done") }
         return steps.removeFirst()
     }
 }
 
-private struct SlowReActPlanner: LuminaReActPlanner {
+private struct SlowReActModel: LuminaReActStepGenerator {
     var delayNanoseconds: UInt64
 
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         try await Task.sleep(nanoseconds: delayNanoseconds)
         return .final("done")
     }
 }
 
-private struct StaticReActPlanner: LuminaReActPlanner {
+private struct StaticReActModel: LuminaReActStepGenerator {
     var toolName: String
 
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         guard context.trace.actionCount == 0 else {
             let observations = context.trace.observations.reduce(into: [LuminaReActObservation]()) { partial, observation in
                 let signature = "\(observation.toolName)|\(observation.status.rawValue)|\(observation.summary)"
@@ -433,8 +385,8 @@ private actor CountingContextProvider: LuminaRuntimeContextProvider {
     }
 }
 
-private struct ContextAwareReActPlanner: LuminaReActPlanner {
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+private struct ContextAwareReActModel: LuminaReActStepGenerator {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         LuminaReActStep(kind: .final, finalMarkdown: context.loadedContext.sections.first?.summary ?? "missing context")
     }
 }
@@ -456,7 +408,7 @@ private struct AppendingContextHook: LuminaAgentRuntimeHook {
         event: LuminaAgentRuntimeHookEvent,
         context: LuminaAgentRuntimeHookContext
     ) async throws -> [LuminaAgentRuntimeHookDirective] {
-        guard event == .plannerContextReady else { return [] }
+        guard event == .stepContextReady else { return [] }
         return [
             .appendContextSection(LuminaRuntimeContextSection(
                 id: "hook.context",
@@ -481,8 +433,8 @@ private struct FailingRuntimeHook: LuminaAgentRuntimeHook {
     }
 }
 
-private struct BudgetAwareReActPlanner: LuminaReActPlanner {
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+private struct BudgetAwareReActModel: LuminaReActStepGenerator {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         guard context.trace.actionCount < 2 else {
             return .final("done compactions=\(context.trace.compactionCount)")
         }

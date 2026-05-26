@@ -17,8 +17,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.8.0"),
-        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0"),
-        .package(url: "https://github.com/john-rocky/CoreML-LLM.git", branch: "main")
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.0.0")
     ],
     targets: [
         .target(
@@ -34,7 +33,6 @@ let package = Package(
             dependencies: [
                 "AgentRuntime",
                 "PersonalMemory",
-                .product(name: "CoreMLLLM", package: "CoreML-LLM"),
                 .product(name: "Tokenizers", package: "swift-transformers")
             ],
             exclude: ["Info.plist"]

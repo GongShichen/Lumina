@@ -9,11 +9,11 @@ extension MLComputeUnits {
         case .cpuOnly:
             return "CPU"
         case .cpuAndGPU:
-            return "CPU+GPU"
+            return "CPU+GPU/MPS"
         case .cpuAndNeuralEngine:
             return "CPU+ANE"
         case .all:
-            return "CPU+GPU+ANE"
+            return "CPU+GPU/MPS+ANE"
         @unknown default:
             return "Core ML default"
         }

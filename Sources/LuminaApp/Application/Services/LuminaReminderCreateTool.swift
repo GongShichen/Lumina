@@ -61,8 +61,10 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await LuminaPermissionTimingRecorder.shared.record {
-                try await eventStore.requestFullAccessToReminders()
+            let granted = try await LuminaSystemPermissionRequest.withTimeout {
+                try await LuminaPermissionTimingRecorder.shared.record {
+                    try await self.eventStore.requestFullAccessToReminders()
+                }
             }
             if granted {
                 return

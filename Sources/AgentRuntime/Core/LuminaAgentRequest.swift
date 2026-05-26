@@ -28,7 +28,7 @@ public struct LuminaAgentRequest: Codable, Hashable, Sendable {
     ) {
         self.id = id
         self.content = content
-        self.text = content.textForPlanning
+        self.text = content.textForModelInput
         self.localeIdentifier = localeIdentifier
         self.metadata = metadata
     }

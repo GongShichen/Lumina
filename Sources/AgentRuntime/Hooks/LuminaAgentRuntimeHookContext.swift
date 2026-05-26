@@ -5,7 +5,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
     public var availableTools: [LuminaToolSchema]
     public var trace: LuminaReActTrace
     public var loadedContext: LuminaRuntimeContext
-    public var plannerContext: LuminaReActPlannerContext?
+    public var stepContext: LuminaReActStepContext?
     public var step: LuminaReActStep?
     public var toolCall: LuminaToolCall?
     public var toolResult: LuminaToolResult?
@@ -19,7 +19,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
         availableTools: [LuminaToolSchema] = [],
         trace: LuminaReActTrace = LuminaReActTrace(),
         loadedContext: LuminaRuntimeContext = .empty,
-        plannerContext: LuminaReActPlannerContext? = nil,
+        stepContext: LuminaReActStepContext? = nil,
         step: LuminaReActStep? = nil,
         toolCall: LuminaToolCall? = nil,
         toolResult: LuminaToolResult? = nil,
@@ -32,7 +32,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
         self.availableTools = availableTools
         self.trace = trace
         self.loadedContext = loadedContext
-        self.plannerContext = plannerContext
+        self.stepContext = stepContext
         self.step = step
         self.toolCall = toolCall
         self.toolResult = toolResult

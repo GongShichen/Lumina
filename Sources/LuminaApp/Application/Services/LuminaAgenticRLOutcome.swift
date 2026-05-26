@@ -11,7 +11,7 @@ struct LuminaAgenticRLOutcome: Codable, Hashable {
     let confirmationWaitMilliseconds: Double
     let systemPermissionWaitMilliseconds: Double
     let totalMilliseconds: Double
-    let planningMilliseconds: Double
+    let stepGenerationMilliseconds: Double
     let toolMilliseconds: Double
     let memoryAccessDisabled: Bool
     let failureSummary: String?

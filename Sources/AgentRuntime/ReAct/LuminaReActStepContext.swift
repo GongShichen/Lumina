@@ -1,6 +1,6 @@
 import Foundation
 
-public struct LuminaReActPlannerContext: Sendable {
+public struct LuminaReActStepContext: Sendable {
     public var request: LuminaAgentRequest
     public var availableTools: [LuminaToolSchema]
     public var trace: LuminaReActTrace
@@ -8,6 +8,7 @@ public struct LuminaReActPlannerContext: Sendable {
     public var iteration: Int
     public var remainingToolCalls: Int
     public var maximumObservationCharacters: Int
+    public var progressSink: (@Sendable (LuminaStepGenerationProgress) -> Void)?
 
     public init(
         request: LuminaAgentRequest,
@@ -16,7 +17,8 @@ public struct LuminaReActPlannerContext: Sendable {
         loadedContext: LuminaRuntimeContext = .empty,
         iteration: Int,
         remainingToolCalls: Int,
-        maximumObservationCharacters: Int
+        maximumObservationCharacters: Int,
+        progressSink: (@Sendable (LuminaStepGenerationProgress) -> Void)? = nil
     ) {
         self.request = request
         self.availableTools = availableTools
@@ -25,5 +27,6 @@ public struct LuminaReActPlannerContext: Sendable {
         self.iteration = iteration
         self.remainingToolCalls = remainingToolCalls
         self.maximumObservationCharacters = maximumObservationCharacters
+        self.progressSink = progressSink
     }
 }

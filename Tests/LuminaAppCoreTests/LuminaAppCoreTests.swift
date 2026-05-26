@@ -31,7 +31,7 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(result.output.string("dayPeriod"), "下午")
         XCTAssertEqual(result.output.number("hour"), 13)
         XCTAssertEqual(result.output.string("timeZoneIdentifier"), "Asia/Shanghai")
-        XCTAssertTrue(result.content.contains { ($0.textForPlanning ?? "").contains("本机时间") })
+        XCTAssertTrue(result.content.contains { ($0.textForModelInput ?? "").contains("本机时间") })
     }
 
     func testFactoryIncludesCurrentTimeTool() async {
@@ -229,7 +229,7 @@ final class LuminaAppCoreTests: XCTestCase {
             return XCTFail("Expected answers array")
         }
         XCTAssertEqual(answers.count, 1)
-        XCTAssertTrue(result.content.contains { ($0.textForPlanning ?? "").contains("已收到你的回答") })
+        XCTAssertTrue(result.content.contains { ($0.textForModelInput ?? "").contains("已收到你的回答") })
     }
 
     func testAskUserToolCanPauseAndResumeThroughCoordinatorClosure() async throws {
@@ -316,7 +316,7 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(components.minute, 0)
     }
 
-    func testHomeGreetingRequestUsesPlannerSelectedCurrentTimeToolThroughRuntime() async {
+    func testHomeGreetingRequestUsesModelSelectedCurrentTimeToolThroughRuntime() async {
         var calendar = Calendar(identifier: .gregorian)
         let timeZone = TimeZone(identifier: "Asia/Shanghai")!
         calendar.timeZone = timeZone
@@ -332,7 +332,7 @@ final class LuminaAppCoreTests: XCTestCase {
         let timeTool = LuminaCurrentTimeTool(now: { fixedDate }, calendar: calendar, locale: Locale(identifier: "zh_CN"), timeZone: timeZone)
         let runtime = LuminaAgentRuntime(
             tools: [timeTool.eraseToAnyTool()],
-            reactPlanner: LuminaFixedReActPlanner(calls: [
+            stepGenerator: LuminaFixedReActModel(calls: [
                 LuminaToolCall(toolName: "device.current_time", arguments: [:])
             ])
         )
@@ -525,7 +525,7 @@ final class LuminaAppCoreTests: XCTestCase {
                 messageDrafts: drafts,
                 calendarStore: calendar
             ),
-            reactPlanner: LuminaFixedReActPlanner(calls: [
+            stepGenerator: LuminaFixedReActModel(calls: [
                 LuminaToolCall(toolName: "calendar.search", arguments: ["query": .string("下一个会议"), "limit": .number(1)]),
                 LuminaToolCall(
                     toolName: "reminder.create",
@@ -566,7 +566,7 @@ final class LuminaAppCoreTests: XCTestCase {
                 messageDrafts: drafts,
                 calendarStore: calendar
             ),
-            reactPlanner: LuminaFixedReActPlanner(calls: [
+            stepGenerator: LuminaFixedReActModel(calls: [
                 LuminaToolCall(
                     toolName: "calendar.create",
                     arguments: [
@@ -670,7 +670,7 @@ private actor AskUserProbe {
 }
 
 private func collectReActCalls(
-    _ planner: any LuminaReActPlanner,
+    _ stepGenerator: any LuminaReActStepGenerator,
     request: LuminaAgentRequest,
     schemas: [LuminaToolSchema],
     maximumToolCalls: Int = 8
@@ -679,7 +679,7 @@ private func collectReActCalls(
     var calls: [LuminaToolCall] = []
 
     for iteration in 0..<maximumToolCalls {
-        let step = try await planner.nextStep(context: LuminaReActPlannerContext(
+        let step = try await stepGenerator.nextStep(context: LuminaReActStepContext(
             request: request,
             availableTools: schemas,
             trace: trace,
@@ -702,16 +702,16 @@ private func collectReActCalls(
     return calls
 }
 
-private struct LuminaFixedReActPlanner: LuminaReActPlanner {
+private struct LuminaFixedReActModel: LuminaReActStepGenerator {
     let calls: [LuminaToolCall]
 
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         try Task.checkCancellation()
         let index = context.trace.actionCount
         guard index < calls.count else {
-            return .final("## 完成\n\n测试 planner 已完成指定工具调用。")
+            return .final("## 完成\n\n测试 model 已完成指定工具调用。")
         }
-        return .action(thought: "Test planner selected \(calls[index].toolName).", call: calls[index])
+        return .action(thought: "Test model selected \(calls[index].toolName).", call: calls[index])
     }
 }
 

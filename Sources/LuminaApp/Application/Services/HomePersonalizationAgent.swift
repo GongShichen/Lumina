@@ -3,22 +3,14 @@ import Foundation
 import PersonalMemory
 
 struct HomePersonalizationAgent {
-    let runtime: LuminaAgentRuntime
     let memoryStore: LuminaMemoryStore
     let auditLogReader: (any LuminaAuditLogReader)?
-    let tools: [LuminaToolSchema]
-    let modelReadiness: LuminaModelReadinessSnapshot
 
     func generate() async -> HomeContent {
-        async let agentResult = runtime.run(request: LuminaAgentRequest(
-            text: Self.agentPrompt,
-            metadata: [LuminaAppPromptProfile.metadataKey: .string(LuminaAppPromptProfile.homePersonalization.rawValue)]
-        ))
         async let stats = memoryStore.stats()
         async let recentMemory = memoryStore.recentChunks(limit: 3, maximumSensitivity: .normal)
         async let recentAudit = auditLogReader?.recentRecords(limit: 3) ?? []
         return await makeContent(
-            agentResult: agentResult,
             stats: stats,
             recentMemory: recentMemory,
             recentAudit: recentAudit
@@ -26,22 +18,20 @@ struct HomePersonalizationAgent {
     }
 
     private func makeContent(
-        agentResult: LuminaAgentRunResult,
         stats: LuminaMemoryIndexStats,
         recentMemory: [LuminaMemoryChunk],
         recentAudit: [LuminaAuditRecord]
     ) -> HomeContent {
-        let time = currentTimeOutput(from: agentResult)
-        let period = time["dayPeriod"]?.stringValue ?? "你好"
-        let localizedTime = time["localizedTime"]?.stringValue
+        let time = Self.currentTimeSnapshot()
+        let period = time.dayPeriod
+        let localizedTime = time.localizedTime
         let title = period == "你好" ? "你好，Lumina 已准备好" : "\(period)好，Lumina 已准备好"
         let subtitle = subtitleText(stats: stats, recentAudit: recentAudit, localizedTime: localizedTime)
-        let suggestions = modelCanPersonalizeSuggestions ? suggestionsFromAgentOutput(agentResult).prefixArray(3) : []
         return HomeContent(
             greetingTitle: title,
             greetingSubtitle: subtitle,
-            defaultPrompt: suggestions.first?.prompt ?? "",
-            suggestions: suggestions
+            defaultPrompt: "",
+            suggestions: []
         )
     }
 
@@ -60,33 +50,26 @@ struct HomePersonalizationAgent {
         return "\(timePrefix)已有 \(stats.chunkCount) 条本地记忆。我会优先本机检索，只把必要摘要交给 agent。"
     }
 
-    private var modelCanPersonalizeSuggestions: Bool {
-        modelReadiness.plannerState == .ready &&
-            !modelReadiness.lastRunUsedFallback &&
-            !modelReadiness.plannerSource.localizedCaseInsensitiveContains("fallback")
-    }
-
-    private func suggestionsFromAgentOutput(_ result: LuminaAgentRunResult) -> [HomeSuggestion] {
-        let candidates = [result.plan.summary]
-            + (result.reactTrace?.steps.compactMap(\.finalMarkdown) ?? [])
-        return candidates.flatMap(Self.parseSuggestionLines)
-    }
-
-    private func currentTimeOutput(from result: LuminaAgentRunResult) -> [String: LuminaJSONValue] {
-        result.toolResults.first { $0.toolName == "device.current_time" }?.output ?? [:]
-    }
-
-    private static let agentPrompt = """
-    请为 Lumina 首页生成最多 3 条推荐 query。建议只能基于当前已注册能力和真实本机状态，不要编造任何联系人、会议、账单、地点或记忆。
-    """
-
-    private static func parseSuggestionLines(_ text: String) -> [HomeSuggestion] {
-        text
-            .components(separatedBy: .newlines)
-            .compactMap { line -> HomeSuggestion? in
-                let parts = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-                guard parts.count == 4, parts[0] == "SUGGESTION" else { return nil }
-                return HomeSuggestion(title: parts[1], prompt: parts[2], icon: parts[3])
-            }
+    private static func currentTimeSnapshot() -> (dayPeriod: String, localizedTime: String) {
+        let date = Date()
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let dayPeriod: String
+        switch hour {
+        case 5..<12:
+            dayPeriod = "早上"
+        case 12..<18:
+            dayPeriod = "下午"
+        case 18..<23:
+            dayPeriod = "晚上"
+        default:
+            dayPeriod = "你好"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .none
+        formatter.timeStyle = .medium
+        return (dayPeriod, formatter.string(from: date))
     }
 }

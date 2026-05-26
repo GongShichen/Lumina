@@ -19,8 +19,8 @@ struct RuntimeStatusScreen: View {
                     LuminaSectionHeader(title: "Privacy & Trust", subtitle: "把技术细节收起来，但把控制权交给你")
                     LuminaPanel {
                         VStack(alignment: .leading, spacing: 12) {
-                            RuntimeCapabilityRow(title: "端侧理解", value: "\(modelReadiness.plannerState.displayName) · \(modelReadiness.plannerSource)", icon: "iphone.gen3")
-                            RuntimeCapabilityRow(title: "模型说明", value: modelReadiness.plannerMessage, icon: "cpu")
+                            RuntimeCapabilityRow(title: "端侧理解", value: "\(modelReadiness.modelState.displayName) · \(modelReadiness.modelSource)", icon: "iphone.gen3")
+                            RuntimeCapabilityRow(title: "模型说明", value: modelReadiness.modelMessage, icon: "cpu")
                             RuntimeCapabilityRow(title: "Embedding", value: "\(modelReadiness.embeddingState.displayName) · \(modelReadiness.embeddingSource)", icon: "point.3.connected.trianglepath.dotted")
                             RuntimeCapabilityRow(title: "私人记忆", value: "\(stats.documentCount) docs / \(stats.chunkCount) fragments，只回传必要摘要。", icon: "brain.head.profile")
                             RuntimeCapabilityRow(title: "执行前确认", value: "创建提醒、写账、日历变更等都会先弹出确认。", icon: "checkmark.shield.fill")

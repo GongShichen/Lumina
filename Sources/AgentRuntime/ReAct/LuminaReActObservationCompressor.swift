@@ -1,10 +1,18 @@
 import Foundation
 
 enum LuminaReActObservationCompressor {
-    static func observation(from result: LuminaToolResult, maximumCharacters: Int) -> LuminaReActObservation {
+    static func observation(
+        from result: LuminaToolResult,
+        permissionDecision: LuminaPermissionDecision? = nil,
+        confirmed: Bool = false,
+        maximumCharacters: Int
+    ) -> LuminaReActObservation {
         var parts: [String] = []
+        if case .requiresConfirmation? = permissionDecision {
+            parts.append(confirmed ? "用户已确认执行该工具。" : "用户没有确认执行该工具。")
+        }
         if !result.content.isEmpty {
-            parts.append(result.content.compactMap(\.textForPlanning).joined(separator: "\n"))
+            parts.append(result.content.compactMap(\.textForModelInput).joined(separator: "\n"))
         }
         if parts.isEmpty, !result.output.isEmpty {
             parts.append("工具已返回结构化结果。")

@@ -20,15 +20,15 @@ final class AgentAppServices: ObservableObject {
 
     private(set) lazy var runtime: LuminaAgentRuntime = {
         makeRuntime(
-            tools: AppToolFactory.makeTools(
-                memoryStore: memoryStore,
-                ledgerStore: ledgerStore,
-                subscriptionStore: subscriptionStore,
-                messageDrafts: messageDrafts,
-                askUser: askUser
-            ),
+            tools: allAppTools(),
             contextProvider: environment.contextProvider
         )
+    }()
+
+    private(set) lazy var homeRuntime: LuminaAgentRuntime = {
+        let allowedHomeTools: Set<String> = ["device.current_time", "memory.stats", "memory.recent"]
+        let tools = allAppTools().filter { allowedHomeTools.contains($0.schema.name) }
+        return makeRuntime(tools: tools, contextProvider: LuminaEmptyRuntimeContextProvider())
     }()
 
     private(set) lazy var evaluationRuntime: LuminaAgentRuntime = {
@@ -36,27 +36,37 @@ final class AgentAppServices: ObservableObject {
             "local.search", "memory.recent", "memory.stats", "memory.delete", "memory.ingest_text",
             "webpage.save_to_memory", "media.import", "subscription.refresh"
         ]
-        let tools = AppToolFactory.makeTools(
+        let interactiveTools: Set<String> = ["ask_user"]
+        let tools = allAppTools().filter { !memoryTools.contains($0.schema.name) && !interactiveTools.contains($0.schema.name) }
+        return makeRuntime(
+            tools: tools,
+            contextProvider: LuminaEmptyRuntimeContextProvider(),
+            confirmationCoordinator: LuminaAlwaysConfirmCoordinator()
+        )
+    }()
+
+    private func allAppTools() -> [AnyLuminaAgentTool] {
+        AppToolFactory.makeTools(
             memoryStore: memoryStore,
             ledgerStore: ledgerStore,
             subscriptionStore: subscriptionStore,
             messageDrafts: messageDrafts,
             askUser: askUser
-        ).filter { !memoryTools.contains($0.schema.name) }
-        return makeRuntime(tools: tools, contextProvider: LuminaEmptyRuntimeContextProvider())
-    }()
+        )
+    }
 
     private func makeRuntime(
         tools: [AnyLuminaAgentTool],
-        contextProvider: any LuminaRuntimeContextProvider
+        contextProvider: any LuminaRuntimeContextProvider,
+        confirmationCoordinator: (any LuminaConfirmationCoordinator)? = nil
     ) -> LuminaAgentRuntime {
         LuminaAgentRuntime(
             tools: tools,
-            reactPlanner: environment.reactPlanner,
+            stepGenerator: environment.stepGenerator,
             contextProvider: contextProvider,
             configuration: environment.runtimeConfiguration,
             permissionGate: LuminaAppRuntimePermissionGate(),
-            confirmationCoordinator: confirmation,
+            confirmationCoordinator: confirmationCoordinator ?? confirmation,
             auditLogger: auditLogger,
             hooks: [LuminaAppMemoryPolicyRuntimeHook()]
         )
@@ -111,7 +121,8 @@ final class AgentAppServices: ObservableObject {
             content: content,
             metadata: [
                 LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true),
-                "lumina.evaluation.memory_access_disabled": .bool(true)
+                "lumina.evaluation.memory_access_disabled": .bool(true),
+                "lumina.evaluation.ask_user_disabled": .bool(true)
             ]
         ))
     }

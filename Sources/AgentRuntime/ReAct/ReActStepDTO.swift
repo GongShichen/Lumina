@@ -6,7 +6,7 @@ struct ReActStepDTO: Decodable {
     var toolName: String?
     var parameters: [String: LuminaJSONValue]?
     var requiresConfirmation: Bool?
-    var finalAnswer: String?
+    var content: String?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -14,6 +14,6 @@ struct ReActStepDTO: Decodable {
         case toolName = "tool_name"
         case parameters
         case requiresConfirmation = "requires_confirmation"
-        case finalAnswer = "final_answer"
+        case content
     }
 }

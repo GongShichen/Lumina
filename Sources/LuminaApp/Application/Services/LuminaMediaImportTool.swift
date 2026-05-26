@@ -45,7 +45,7 @@ struct LuminaMediaImportTool: LuminaAgentTool {
         }
 
         let note = context.call.arguments.string("note") ?? context.request.text
-        let body = ([note] + mediaParts.compactMap(\.textForPlanning)).joined(separator: "\n")
+        let body = ([note] + mediaParts.compactMap(\.textForModelInput)).joined(separator: "\n")
         let document = LuminaMemoryDocument(
             source: LuminaMemorySource(kind: .imported, identifier: context.request.id.uuidString),
             title: "Imported Media",

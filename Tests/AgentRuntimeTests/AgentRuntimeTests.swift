@@ -59,7 +59,7 @@ final class AgentRuntimeTests: XCTestCase {
         let part = LuminaAgentContentPart.markdown(markdown)
 
         XCTAssertEqual(part.modality, .text)
-        XCTAssertEqual(part.textForPlanning, markdown)
+        XCTAssertEqual(part.textForModelInput, markdown)
 
         let data = try JSONEncoder().encode(part)
         let decoded = try JSONDecoder().decode(LuminaAgentContentPart.self, from: data)
@@ -155,7 +155,7 @@ final class AgentRuntimeTests: XCTestCase {
 
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            reactPlanner: FixedReActPlanner(calls: [
+            stepGenerator: FixedReActModel(calls: [
                 LuminaToolCall(toolName: "local.search", arguments: ["query": .string("查本地数据")])
             ])
         )
@@ -181,7 +181,7 @@ final class AgentRuntimeTests: XCTestCase {
 
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            reactPlanner: FixedReActPlanner(calls: [
+            stepGenerator: FixedReActModel(calls: [
                 LuminaToolCall(toolName: "ledger.record", arguments: ["memo": .string("咖啡 42 元")], requiresConfirmation: true)
             ]),
             confirmationCoordinator: LuminaDenyAllConfirmationCoordinator()
@@ -192,7 +192,40 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(result.toolResults.first?.status, .denied)
     }
 
-    func testModelBackedReActPlannerParsesActionStep() async throws {
+    func testRuntimeObservationIncludesAcceptedConfirmationFeedback() async {
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
+                name: "ledger.record",
+                description: "Ledger",
+                parameters: [LuminaToolParameterSchema(name: "memo", type: .string, description: "Memo")],
+                sideEffect: .appLocalWrite
+            )
+        ) { _, _ in
+            LuminaToolResult(
+                callID: UUID(),
+                toolName: "ledger.record",
+                status: .succeeded,
+                content: [.text("账目已写入。")]
+            )
+        }
+
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: FixedReActModel(calls: [
+                LuminaToolCall(toolName: "ledger.record", arguments: ["memo": .string("咖啡 42 元")], requiresConfirmation: true)
+            ]),
+            confirmationCoordinator: LuminaAlwaysConfirmCoordinator()
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "记账 咖啡 42 元"))
+        let observation = result.reactTrace?.observations.first?.summary ?? ""
+
+        XCTAssertEqual(result.status, .succeeded)
+        XCTAssertTrue(observation.contains("用户已确认执行该工具"))
+        XCTAssertTrue(observation.contains("账目已写入"))
+    }
+
+    func testModelBackedReActModelParsesActionStep() async throws {
         let model = MockStructuredInferenceModel(json: """
         {
           "type": "tool_use",
@@ -202,7 +235,7 @@ final class AgentRuntimeTests: XCTestCase {
           "requires_confirmation": false
         }
         """)
-        let planner = LuminaModelBackedReActPlanner(model: model) { context in
+        let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
         }
         let schema = LuminaToolSchema(
@@ -212,7 +245,7 @@ final class AgentRuntimeTests: XCTestCase {
             sideEffect: .readOnly
         )
 
-        let step = try await planner.nextStep(context: LuminaReActPlannerContext(
+        let step = try await stepGenerator.nextStep(context: LuminaReActStepContext(
             request: LuminaAgentRequest(text: "coffee"),
             availableTools: [schema],
             trace: LuminaReActTrace(),
@@ -227,9 +260,9 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(step.action?.arguments["query"], .string("coffee"))
     }
 
-    func testModelBackedReActPlannerPassesMultimodalContentToModel() async throws {
+    func testModelBackedReActModelPassesMultimodalContentToModel() async throws {
         let model = CapturingMultimodalModel()
-        let planner = LuminaModelBackedReActPlanner(multimodalModel: model) { context in
+        let stepGenerator = LuminaModelBackedReActStepGenerator(multimodalModel: model) { context in
             context.request.text
         }
         let schema = LuminaToolSchema(
@@ -245,7 +278,7 @@ final class AgentRuntimeTests: XCTestCase {
             .image(LuminaAgentMediaAsset(location: .fileURL("/tmp/receipt.jpg"), mimeType: "image/jpeg", summary: "receipt"))
         ])
 
-        _ = try await planner.nextStep(context: LuminaReActPlannerContext(
+        _ = try await stepGenerator.nextStep(context: LuminaReActStepContext(
             request: request,
             availableTools: [schema],
             trace: LuminaReActTrace(),
@@ -272,16 +305,16 @@ final class AgentRuntimeTests: XCTestCase {
 
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            reactPlanner: FixedReActPlanner(calls: [LuminaToolCall(toolName: "local.search", arguments: [:])])
+            stepGenerator: FixedReActModel(calls: [LuminaToolCall(toolName: "local.search", arguments: [:])])
         )
-        var sawPlan = false
+        var sawAction = false
         var sawToolStart = false
         var sawFinished = false
 
         for await event in runtime.runStream(request: LuminaAgentRequest(text: "查 coffee")) {
             switch event {
-            case .planCreated:
-                sawPlan = true
+            case .actionProposed:
+                sawAction = true
             case .toolStarted:
                 sawToolStart = true
             case .finished(let result):
@@ -291,7 +324,7 @@ final class AgentRuntimeTests: XCTestCase {
             }
         }
 
-        XCTAssertTrue(sawPlan)
+        XCTAssertTrue(sawAction)
         XCTAssertTrue(sawToolStart)
         XCTAssertTrue(sawFinished)
     }
@@ -305,10 +338,10 @@ private struct MockStructuredInferenceModel: LuminaLocalStructuredInferenceModel
     }
 }
 
-private struct FixedReActPlanner: LuminaReActPlanner {
+private struct FixedReActModel: LuminaReActStepGenerator {
     var calls: [LuminaToolCall]
 
-    func nextStep(context: LuminaReActPlannerContext) async throws -> LuminaReActStep {
+    func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         let index = context.trace.actionCount
         guard index < calls.count else { return .final("done") }
         return .action(thought: "Fixed ReAct test step", call: calls[index])
@@ -318,7 +351,7 @@ private struct FixedReActPlanner: LuminaReActPlanner {
 private actor CapturingMultimodalModel: LuminaLocalMultimodalStructuredInferenceModel {
     private var modalities: Set<LuminaAgentModality> = []
 
-    func generateJSON(input: LuminaStructuredPlannerModelInput) async throws -> String {
+    func generateJSON(input: LuminaStructuredStepGenerationInput) async throws -> String {
         modalities = input.content.modalities
         return """
         {

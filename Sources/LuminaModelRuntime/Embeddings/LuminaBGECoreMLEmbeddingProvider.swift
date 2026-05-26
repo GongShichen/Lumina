@@ -53,8 +53,9 @@ public final class LuminaBGECoreMLEmbeddingProvider: LuminaEmbeddingProvider, @u
         self.dimension = configuration.dimension
         self.tokenizer = try LuminaBGEWordPieceTokenizer(tokenizerURL: configuration.tokenizerURL)
 
-        let mlConfiguration = MLModelConfiguration()
-        mlConfiguration.computeUnits = configuration.computeUnits
+        let mlConfiguration = LuminaCoreMLModelConfigurationFactory.make(
+            computeUnits: configuration.computeUnits
+        )
         self.model = try MLModel(contentsOf: configuration.modelURL, configuration: mlConfiguration)
     }
 
@@ -73,7 +74,7 @@ public final class LuminaBGECoreMLEmbeddingProvider: LuminaEmbeddingProvider, @u
             throw LuminaCoreMLEmbeddingError.missingEmbeddingOutput(configuration.embeddingOutputName)
         }
 
-        var values = (0..<array.count).map { Float(truncating: array[$0]) }
+        var values = Self.floatValues(from: array)
         if values.count != configuration.dimension {
             throw LuminaCoreMLEmbeddingError.dimensionMismatch(expected: configuration.dimension, actual: values.count)
         }
@@ -85,10 +86,24 @@ public final class LuminaBGECoreMLEmbeddingProvider: LuminaEmbeddingProvider, @u
 
     private static func multiArray(_ values: [Int32]) throws -> MLMultiArray {
         let array = try MLMultiArray(shape: [1, NSNumber(value: values.count)], dataType: .int32)
+        let pointer = array.dataPointer.bindMemory(to: Int32.self, capacity: values.count)
         for (index, value) in values.enumerated() {
-            array[index] = NSNumber(value: value)
+            pointer[index] = value
         }
         return array
+    }
+
+    private static func floatValues(from array: MLMultiArray) -> [Float] {
+        switch array.dataType {
+        case .float32:
+            let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: array.count)
+            return Array(UnsafeBufferPointer(start: pointer, count: array.count))
+        case .float16:
+            let pointer = array.dataPointer.bindMemory(to: Float16.self, capacity: array.count)
+            return UnsafeBufferPointer(start: pointer, count: array.count).map(Float.init)
+        default:
+            return (0..<array.count).map { Float(truncating: array[$0]) }
+        }
     }
 }
 

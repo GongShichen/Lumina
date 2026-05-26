@@ -3,18 +3,27 @@ import Foundation
 
 enum AgentRunEventPresenter {
     static func displaySummary(_ summary: String) -> String {
-        if summary.localizedCaseInsensitiveContains("planner unavailable") {
-            return "端侧模型 planner 当前不可用。"
+        if summary.localizedCaseInsensitiveContains("stepGenerator unavailable") {
+            return "端侧模型 model 当前不可用。"
         }
         return summary
     }
 
     static func item(for event: LuminaAgentRunEvent) -> AgentRunTimelineItem? {
         switch event {
-        case .planningStarted:
-            return AgentRunTimelineItem(title: "开始规划", detail: nil, systemImage: "brain", status: .active)
-        case let .planCreated(plan):
-            return AgentRunTimelineItem(title: "计划已生成", detail: displaySummary(plan.summary), systemImage: "list.bullet.clipboard", status: .success)
+        case .stepGenerationStarted:
+            return AgentRunTimelineItem(title: "开始 ReAct", detail: nil, systemImage: "brain", status: .active)
+        case let .stepGenerationProgress(progress):
+            let promptText = progress.promptTokens.map { "，prompt \($0) tokens" } ?? ""
+            let sampledText = progress.outputTokens == 0 ? progress.sampledTokens.map { "，已采样 \($0) tokens" } ?? "" : ""
+            let outputText = progress.outputTokens > 0 ? "，已输出 \(progress.outputTokens) tokens" : sampledText
+            return AgentRunTimelineItem(
+                coalescingKey: "step-generation-progress-\(progress.iteration)",
+                title: "模型生成中",
+                detail: String(format: "第 %d 轮 ReAct，已运行 %.1fs%@%@", progress.iteration + 1, progress.elapsedMilliseconds / 1_000, promptText, outputText),
+                systemImage: "waveform.path.ecg",
+                status: .active
+            )
         case let .thoughtGenerated(step):
             return AgentRunTimelineItem(title: "ReAct 思考", detail: step.thought, systemImage: "bubble.left.and.text.bubble.right", status: .info)
         case let .actionProposed(call):
@@ -74,7 +83,7 @@ enum AgentRunEventPresenter {
         case let .finished(result):
             return AgentRunTimelineItem(
                 title: "运行结束：\(result.status.rawValue)",
-                detail: String(format: "总 %.1fms / 规划 %.1fms / 工具 %.1fms", result.timing.totalMilliseconds, result.timing.planningMilliseconds, result.timing.toolExecutionMilliseconds),
+                detail: String(format: "总 %.1fms / 模型 %.1fms / 工具 %.1fms", result.timing.totalMilliseconds, result.timing.stepGenerationMilliseconds, result.timing.toolExecutionMilliseconds),
                 systemImage: result.status == .succeeded ? "checkmark.seal" : "exclamationmark.triangle",
                 status: result.status == .succeeded ? .success : .warning
             )

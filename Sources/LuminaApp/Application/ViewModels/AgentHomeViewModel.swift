@@ -42,6 +42,8 @@ final class AgentHomeViewModel: ObservableObject {
     private var runTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
     private var agenticRLTask: Task<Void, Never>?
+    private var benchmarkRunID: UUID?
+    private var agenticRLRunID: UUID?
     private var messageDraftTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
@@ -74,6 +76,8 @@ final class AgentHomeViewModel: ObservableObject {
         benchmarkTask = nil
         agenticRLTask?.cancel()
         agenticRLTask = nil
+        benchmarkRunID = nil
+        agenticRLRunID = nil
         messageDraftTask?.cancel()
         messageDraftTask = nil
     }
@@ -99,45 +103,67 @@ final class AgentHomeViewModel: ObservableObject {
     }
 
     func runBenchmark() {
-        guard let services, !benchmarkSnapshot.isRunning else { return }
+        guard let services else { return }
+        benchmarkTask?.cancel()
+        agenticRLTask?.cancel()
+        let runID = UUID()
+        benchmarkRunID = runID
+        agenticRLRunID = nil
+        agenticRLSnapshot = LuminaAgenticRLSnapshot()
         benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "准备 200 条真实任务", completed: 0, total: 200)
         benchmarkTask = Task { [weak self] in
             guard let self else { return }
             await services.waitUntilLoaded()
+            guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
             let runner = services.makeBenchmarkRunner()
             _ = await runner.run(taskCount: 200) { snapshot in
+                guard self.benchmarkRunID == runID else { return }
                 self.benchmarkSnapshot = snapshot
             }
+            guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
+            self.benchmarkTask = nil
             await self.refreshStats()
             await self.refreshAuditRecords()
         }
     }
 
     func cancelBenchmark() {
+        benchmarkRunID = nil
         benchmarkTask?.cancel()
         benchmarkTask = nil
-        benchmarkSnapshot.state = .cancelled
+        benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .cancelled, currentTask: "Benchmark 已停止", completed: benchmarkSnapshot.completed, total: benchmarkSnapshot.total)
     }
 
     func runAgenticRLTrajectories() {
-        guard let services, !agenticRLSnapshot.isRunning else { return }
+        guard let services else { return }
+        agenticRLTask?.cancel()
+        benchmarkTask?.cancel()
+        let runID = UUID()
+        agenticRLRunID = runID
+        benchmarkRunID = nil
+        benchmarkSnapshot = LuminaBenchmarkSnapshot()
         agenticRLSnapshot = LuminaAgenticRLSnapshot(state: .running, currentTask: "准备 200 条复杂轨迹任务", completed: 0, total: 200)
         agenticRLTask = Task { [weak self] in
             guard let self else { return }
             await services.waitUntilLoaded()
+            guard self.agenticRLRunID == runID, !Task.isCancelled else { return }
             let runner = services.makeAgenticRLRunner()
             _ = await runner.run(taskCount: 200) { snapshot in
+                guard self.agenticRLRunID == runID else { return }
                 self.agenticRLSnapshot = snapshot
             }
+            guard self.agenticRLRunID == runID, !Task.isCancelled else { return }
+            self.agenticRLTask = nil
             await self.refreshStats()
             await self.refreshAuditRecords()
         }
     }
 
     func cancelAgenticRLTrajectories() {
+        agenticRLRunID = nil
         agenticRLTask?.cancel()
         agenticRLTask = nil
-        agenticRLSnapshot.state = .cancelled
+        agenticRLSnapshot = LuminaAgenticRLSnapshot(state: .cancelled, currentTask: "Agentic RL 轨迹生成已停止", completed: agenticRLSnapshot.completed, total: agenticRLSnapshot.total)
     }
 
     func toggleVoiceInput() {
@@ -333,7 +359,7 @@ final class AgentHomeViewModel: ObservableObject {
         isRunning = false
         timelineItems.append(AgentRunTimelineItem(
             title: "用户已停止",
-            detail: "当前 planner/tool 调用已收到取消信号",
+            detail: "当前 stepGenerator/tool 调用已收到取消信号",
             systemImage: "stop.circle",
             status: .warning
         ))
@@ -360,7 +386,7 @@ final class AgentHomeViewModel: ObservableObject {
 
     private func handleRunEvent(_ event: LuminaAgentRunEvent) {
         if let item = AgentRunEventPresenter.item(for: event) {
-            timelineItems.append(item)
+            upsertTimelineItem(item)
         }
         updateActivitySnapshot(for: event)
 
@@ -377,6 +403,20 @@ final class AgentHomeViewModel: ObservableObject {
             resultContent = result.toolResults.flatMap(\.content)
         default:
             break
+        }
+    }
+
+    private func upsertTimelineItem(_ item: AgentRunTimelineItem) {
+        guard let key = item.coalescingKey else {
+            timelineItems.append(item)
+            return
+        }
+        if let index = timelineItems.lastIndex(where: { $0.coalescingKey == key }) {
+            var updated = item
+            updated.id = timelineItems[index].id
+            timelineItems[index] = updated
+        } else {
+            timelineItems.append(item)
         }
     }
 
@@ -399,7 +439,7 @@ final class AgentHomeViewModel: ObservableObject {
             }
         }
         lines.append("")
-        lines.append(String(format: "耗时：总 %.1fms，规划 %.1fms，工具 %.1fms。", result.timing.totalMilliseconds, result.timing.planningMilliseconds, result.timing.toolExecutionMilliseconds))
+        lines.append(String(format: "耗时：总 %.1fms，模型 %.1fms，工具 %.1fms。", result.timing.totalMilliseconds, result.timing.stepGenerationMilliseconds, result.timing.toolExecutionMilliseconds))
         if result.status != .succeeded {
             lines.append("")
             lines.append("你可以展开下方详情查看失败原因或重试。")
@@ -471,10 +511,17 @@ final class AgentHomeViewModel: ObservableObject {
         let baseProgress = min(0.92, max(0.12, Double(timelineItems.count) / 16.0))
         let snapshot: LuminaAgentActivitySnapshot
         switch event {
-        case .planningStarted:
+        case .stepGenerationStarted:
             snapshot = runningSnapshot(title: "正在理解请求", detail: "整理输入与可用工具", progress: baseProgress)
-        case let .planCreated(plan):
-            snapshot = runningSnapshot(title: "计划已生成", detail: AgentRunEventPresenter.displaySummary(plan.summary), progress: baseProgress)
+        case let .stepGenerationProgress(progress):
+            let promptDetail = progress.promptTokens.map { "，prompt \($0) tokens" } ?? ""
+            let sampledDetail = progress.outputTokens == 0 ? progress.sampledTokens.map { "，采样 \($0) tokens" } ?? "" : ""
+            let outputDetail = progress.outputTokens > 0 ? "，输出 \(progress.outputTokens) tokens" : sampledDetail
+            snapshot = runningSnapshot(
+                title: "端侧模型生成中",
+                detail: String(format: "第 %d 轮 ReAct，已运行 %.1fs%@%@", progress.iteration + 1, progress.elapsedMilliseconds / 1_000, promptDetail, outputDetail),
+                progress: min(0.88, max(baseProgress, 0.18))
+            )
         case let .thoughtGenerated(step):
             snapshot = runningSnapshot(title: "正在思考", detail: step.thought ?? "分析下一步动作", progress: baseProgress)
         case let .actionProposed(call):
@@ -617,11 +664,8 @@ final class AgentHomeViewModel: ObservableObject {
     private func refreshHomeContent() async {
         guard let services else { return }
         let agent = HomePersonalizationAgent(
-            runtime: services.runtime,
             memoryStore: services.memoryStore,
-            auditLogReader: services.auditLogReader,
-            tools: await services.runtime.availableToolSchemas(),
-            modelReadiness: modelReadiness
+            auditLogReader: services.auditLogReader
         )
         let content = await agent.generate()
         homeContent = content

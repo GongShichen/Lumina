@@ -1,15 +1,6 @@
 {
-  "originHash" : "5d7894f3ae55364e65cca14f8b144eb36a6e8d94a1fddf8207ecf8a1e20e4239",
+  "originHash" : "c2a419f3e5828bc31faa58c2792a56ed59e266fc31968d8917246f156c87184f",
   "pins" : [
-    {
-      "identity" : "coreml-llm",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/john-rocky/CoreML-LLM.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "72178c6ada289b8e151a61d08e7bbc7e53025e05"
-      }
-    },
     {
       "identity" : "eventsource",
       "kind" : "remoteSourceControl",

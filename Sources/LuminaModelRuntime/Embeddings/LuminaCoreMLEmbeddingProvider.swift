@@ -37,8 +37,9 @@ public final class LuminaCoreMLEmbeddingProvider: LuminaEmbeddingProvider, @unch
     public init(configuration: Configuration) throws {
         self.configuration = configuration
         self.dimension = configuration.dimension
-        let mlConfiguration = MLModelConfiguration()
-        mlConfiguration.computeUnits = configuration.computeUnits
+        let mlConfiguration = LuminaCoreMLModelConfigurationFactory.make(
+            computeUnits: configuration.computeUnits
+        )
         self.model = try MLModel(contentsOf: configuration.modelURL, configuration: mlConfiguration)
     }
 
@@ -52,7 +53,7 @@ public final class LuminaCoreMLEmbeddingProvider: LuminaEmbeddingProvider, @unch
             throw LuminaCoreMLEmbeddingError.missingEmbeddingOutput(configuration.embeddingOutputName)
         }
 
-        var values = (0..<array.count).map { Float(truncating: array[$0]) }
+        var values = Self.floatValues(from: array)
         if values.count != configuration.dimension {
             throw LuminaCoreMLEmbeddingError.dimensionMismatch(expected: configuration.dimension, actual: values.count)
         }
@@ -60,6 +61,19 @@ public final class LuminaCoreMLEmbeddingProvider: LuminaEmbeddingProvider, @unch
             values = LuminaVectorMath.normalized(values)
         }
         return values
+    }
+
+    private static func floatValues(from array: MLMultiArray) -> [Float] {
+        switch array.dataType {
+        case .float32:
+            let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: array.count)
+            return Array(UnsafeBufferPointer(start: pointer, count: array.count))
+        case .float16:
+            let pointer = array.dataPointer.bindMemory(to: Float16.self, capacity: array.count)
+            return UnsafeBufferPointer(start: pointer, count: array.count).map(Float.init)
+        default:
+            return (0..<array.count).map { Float(truncating: array[$0]) }
+        }
     }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 #if canImport(CoreML)
 import CoreML
 
-public final class LuminaCoreMLJSONPlannerModel: LuminaLocalStructuredInferenceModel, @unchecked Sendable {
+public final class LuminaCoreMLJSONStepModel: LuminaLocalStructuredInferenceModel, @unchecked Sendable {
     public struct Configuration: Sendable {
         public var modelURL: URL
         public var promptInputName: String
@@ -29,8 +29,9 @@ public final class LuminaCoreMLJSONPlannerModel: LuminaLocalStructuredInferenceM
 
     public init(configuration: Configuration) throws {
         self.configuration = configuration
-        let mlConfiguration = MLModelConfiguration()
-        mlConfiguration.computeUnits = configuration.computeUnits
+        let mlConfiguration = LuminaCoreMLModelConfigurationFactory.make(
+            computeUnits: configuration.computeUnits
+        )
         self.model = try MLModel(contentsOf: configuration.modelURL, configuration: mlConfiguration)
     }
 
@@ -41,7 +42,7 @@ public final class LuminaCoreMLJSONPlannerModel: LuminaLocalStructuredInferenceM
         ])
         let output = try await model.prediction(from: input, options: MLPredictionOptions())
         guard let value = output.featureValue(for: configuration.jsonOutputName)?.stringValue else {
-            throw LuminaCoreMLPlannerError.missingStringOutput(configuration.jsonOutputName)
+            throw LuminaCoreMLStepModelError.missingStringOutput(configuration.jsonOutputName)
         }
         return value
     }

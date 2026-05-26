@@ -1,8 +1,8 @@
 import Foundation
 
 public enum LuminaAgentRunEvent: Sendable {
-    case planningStarted(UUID)
-    case planCreated(LuminaAgentPlan)
+    case stepGenerationStarted(UUID)
+    case stepGenerationProgress(LuminaStepGenerationProgress)
     case thoughtGenerated(LuminaReActStep)
     case actionProposed(LuminaToolCall)
     case observationCreated(LuminaReActObservation)

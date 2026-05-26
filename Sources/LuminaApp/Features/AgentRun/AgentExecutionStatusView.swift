@@ -9,7 +9,7 @@ struct AgentExecutionStatusView: View {
 
     private var groups: [(String, String, String, Color, [AgentRunTimelineItem])] {
         [
-            ("Thinking", "brain.head.profile", "思考与计划", LuminaTheme.aqua, items.filter { matches($0, words: ["规划", "思考", "计划", "准备", "Thinking", "ReAct"]) }),
+            ("Thinking", "brain.head.profile", "思考与计划", LuminaTheme.aqua, items.filter { matches($0, words: ["模型", "思考", "计划", "准备", "Thinking", "ReAct"]) }),
             ("Permission", "lock.shield", "权限与确认", LuminaTheme.amber, items.filter { matches($0, words: ["权限", "确认", "等待"]) }),
             ("Tool Calls", "hammer", "工具调用", LuminaTheme.mint, items.filter { matches($0, words: ["工具", "动作", "Action", "local.", "calendar.", "reminder."]) }),
             ("Observations", "eye", "观察结果", LuminaTheme.lavender, items.filter { matches($0, words: ["观察", "Observation", "读取", "完成"]) }),

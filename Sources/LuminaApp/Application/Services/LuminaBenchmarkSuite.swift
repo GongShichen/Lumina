@@ -93,6 +93,6 @@ enum LuminaBenchmarkSuite {
         Template(text: "查看当前网络状态和可用存储，并整理成一句摘要", tools: ["network.status", "storage.status", "text.transform"], category: "system"),
         Template(text: "列出本地 Markdown 笔记并整理成一句摘要", tools: ["file.list_notes", "text.transform"], category: "file"),
         Template(text: "查看当前时间、电量和网络状态，判断是否适合继续本地处理", tools: ["device.current_time", "device.power_status", "network.status"], category: "system"),
-        Template(text: "帮我安排明天的工作，但先问我偏好", tools: ["ask_user"], category: "interaction")
+        Template(text: "把当前时间、电量和网络状态整理成一条 LuminaTest 本地运行记录", tools: ["device.current_time", "device.power_status", "network.status", "text.transform"], category: "system")
     ]
 }

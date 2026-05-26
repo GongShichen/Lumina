@@ -1,5 +1,11 @@
 .build/
 .swiftpm/
+.venv*/
+.venv-minimindo/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
 DerivedData/
 *.xcuserstate
 *.xcuserdata/
@@ -10,7 +16,9 @@ Resources/Models/BGETextEmbedding.mlmodelc
 Resources/Models/Downloaded/
 Resources/Models/.staging/
 Resources/Models/BGETextEmbedding-tokenizer.json
-Resources/Models/Gemma4Planner
-Resources/Models/Gemma4Planner/
+Resources/Models/MiniMindOReActModel
+Resources/Models/MiniMindOReActModel/
 *.xcresult
 Reports/
+optimize/
+agentic_rl/

@@ -5,35 +5,35 @@ import Foundation
 final class LuminaModelReadinessStore: ObservableObject, @unchecked Sendable {
     @Published private(set) var snapshot = LuminaModelReadinessSnapshot.initial
 
-    func markPlannerFallback(_ message: String) {
-        snapshot.plannerState = .fallbackUsed
-        snapshot.plannerSource = "Planner unavailable"
-        snapshot.plannerMessage = message
+    func markModelFallback(_ message: String) {
+        snapshot.modelState = .fallbackUsed
+        snapshot.modelSource = "Model unavailable"
+        snapshot.modelMessage = message
         snapshot.lastRunUsedFallback = true
     }
 
-    func markPlannerReady(source: String, message: String) {
-        snapshot.plannerState = .ready
-        snapshot.plannerSource = source
-        snapshot.plannerMessage = message
+    func markModelReady(source: String, message: String) {
+        snapshot.modelState = .ready
+        snapshot.modelSource = source
+        snapshot.modelMessage = message
     }
 
-    func markPlannerUnavailable(_ message: String) {
-        snapshot.plannerState = .unavailable
-        snapshot.plannerSource = "No local planner model"
-        snapshot.plannerMessage = message
+    func markModelUnavailable(_ message: String) {
+        snapshot.modelState = .unavailable
+        snapshot.modelSource = "No local model"
+        snapshot.modelMessage = message
     }
 
-    func markPlannerFailed(_ message: String) {
-        snapshot.plannerState = .failed
-        snapshot.plannerSource = "Local planner model failed"
-        snapshot.plannerMessage = message
+    func markModelFailed(_ message: String) {
+        snapshot.modelState = .failed
+        snapshot.modelSource = "Local model failed"
+        snapshot.modelMessage = message
     }
 
-    func markPlannerModelRun(source: String) {
-        snapshot.plannerState = .ready
-        snapshot.plannerSource = source
-        snapshot.plannerMessage = "本次由端侧模型 planner 生成结构化 action/final。"
+    func markModelRun(source: String) {
+        snapshot.modelState = .ready
+        snapshot.modelSource = source
+        snapshot.modelMessage = "本次由端侧模型生成标准 ReAct action/final。"
         snapshot.lastRunUsedFallback = false
     }
 
