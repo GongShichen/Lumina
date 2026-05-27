@@ -21,4 +21,5 @@ app/Resources/Models/MiniCPMV46ReActModel/
 app/Reports/
 app/optimize/
 agentic_rl/
+TrainingData/
 PLAN.md
