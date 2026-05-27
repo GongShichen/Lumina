@@ -77,29 +77,34 @@ def masked_lines(lines):
     return result
 
 
+roots = [Path("LuminaAgentRuntime/Sources"), Path("app/Sources")]
 failures = []
-for path in sorted(Path("Sources").rglob("*.swift")):
-    lines = path.read_text().splitlines()
-    depth = 0
-    declarations = []
-    extensions = 0
-    for line in masked_lines(lines):
-        if depth == 0:
-            match = DECL_RE.match(line)
-            if match:
-                declarations.append(match.group(1))
-            elif EXT_RE.match(line):
-                extensions += 1
-        depth += line.count("{") - line.count("}")
+for root in roots:
+    if not root.exists():
+        continue
+    paths = sorted(root.rglob("*.swift"))
+    for path in paths:
+        lines = path.read_text().splitlines()
+        depth = 0
+        declarations = []
+        extensions = 0
+        for line in masked_lines(lines):
+            if depth == 0:
+                match = DECL_RE.match(line)
+                if match:
+                    declarations.append(match.group(1))
+                elif EXT_RE.match(line):
+                    extensions += 1
+            depth += line.count("{") - line.count("}")
 
-    if len(declarations) > 1:
-        failures.append(f"{path}: contains multiple top-level declarations: {', '.join(declarations)}")
-    elif len(declarations) == 1 and declarations[0] != path.stem:
-        failures.append(f"{path}: top-level declaration {declarations[0]} does not match filename")
-    elif extensions and declarations:
-        failures.append(f"{path}: contains both a declaration and top-level extension")
-    elif extensions and "+" not in path.stem:
-        failures.append(f"{path}: extension-only files must use Type+Purpose.swift naming")
+        if len(declarations) > 1:
+            failures.append(f"{path}: contains multiple top-level declarations: {', '.join(declarations)}")
+        elif len(declarations) == 1 and declarations[0] != path.stem:
+            failures.append(f"{path}: top-level declaration {declarations[0]} does not match filename")
+        elif extensions and declarations:
+            failures.append(f"{path}: contains both a declaration and top-level extension")
+        elif extensions and "+" not in path.stem:
+            failures.append(f"{path}: extension-only files must use Type+Purpose.swift naming")
 
 if failures:
     print("Filename alignment check failed:")

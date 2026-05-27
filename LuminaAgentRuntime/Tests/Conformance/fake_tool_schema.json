@@ -1,0 +1,14 @@
+{
+  "name": "conformance.echo",
+  "description": "Fake echo tool used by cross-platform runtime conformance tests.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string"
+      }
+    }
+  },
+  "sideEffect": "none",
+  "requiresConfirmation": false
+}

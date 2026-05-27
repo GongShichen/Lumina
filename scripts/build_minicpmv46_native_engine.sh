@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENGINE_SRC="$ROOT_DIR/NativeEngines/MiniCPMV46/LuminaMiniCPMV46GGUFEngine.cpp"
+ENGINE_SRC="$ROOT_DIR/app/NativeEngines/MiniCPMV46/LuminaMiniCPMV46GGUFEngine.cpp"
 LLAMA_DIR="${LUMINA_LLAMA_CPP_DIR:-$ROOT_DIR/.build/vendor/llama.cpp}"
 LLAMA_REPO="${LUMINA_LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 LLAMA_BUILD_DIR="$LLAMA_DIR/build"
-MODEL_DIR="${LUMINA_MINICPMV46_OUTPUT_DIR:-$ROOT_DIR/Resources/Models/MiniCPMV46ReActModel}"
+MODEL_DIR="${LUMINA_MINICPMV46_OUTPUT_DIR:-$ROOT_DIR/app/Resources/Models/MiniCPMV46ReActModel}"
 OUTPUT_DYLIB="$MODEL_DIR/libLuminaMiniCPMV46GGUFEngine.dylib"
 
 if [[ ! -f "$ENGINE_SRC" ]]; then

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPORT_DIR="$ROOT_DIR/Reports"
+REPORT_DIR="$ROOT_DIR/app/Reports"
 mkdir -p "$REPORT_DIR"
 
 if [[ "${1:-}" == "--heavy" ]]; then
@@ -22,8 +22,7 @@ LOG_FILE="$REPORT_DIR/benchmark-latest.log"
 JSON_FILE="$REPORT_DIR/benchmark-latest.json"
 MD_FILE="$REPORT_DIR/benchmark-latest.md"
 
-cd "$ROOT_DIR"
-swift test --filter PerformanceTests | tee "$LOG_FILE"
+swift test --package-path "$ROOT_DIR/app" --filter PerformanceTests | tee "$LOG_FILE"
 
 cat > "$JSON_FILE" <<JSON
 {
@@ -33,7 +32,7 @@ cat > "$JSON_FILE" <<JSON
   "strict": "${LUMINA_STRICT_PERF:-0}",
   "heavy": "${LUMINA_RUN_HEAVY_BENCHMARKS:-0}",
   "model": "${LUMINA_RUN_MODEL_BENCHMARKS:-0}",
-  "log": "Reports/benchmark-latest.log"
+  "log": "app/Reports/benchmark-latest.log"
 }
 JSON
 
@@ -46,7 +45,7 @@ cat > "$MD_FILE" <<MD
 - Strict: \`${LUMINA_STRICT_PERF:-0}\`
 - Heavy: \`${LUMINA_RUN_HEAVY_BENCHMARKS:-0}\`
 - Model: \`${LUMINA_RUN_MODEL_BENCHMARKS:-0}\`
-- Log: \`Reports/benchmark-latest.log\`
+- Log: \`app/Reports/benchmark-latest.log\`
 
 The XCTest log contains per-test pass/fail and skip details. Strict thresholds are enabled with \`LUMINA_STRICT_PERF=1\`.
 MD

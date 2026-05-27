@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODELS_DIR="$ROOT_DIR/Resources/Models"
+MODELS_DIR="$ROOT_DIR/app/Resources/Models"
 HF_BIN="${HF_BIN:-hf}"
 
 BGE_REPO="${LUMINA_BGE_REPO:-zhufucdev/BAAI-bge-small-zh-v1.5}"
