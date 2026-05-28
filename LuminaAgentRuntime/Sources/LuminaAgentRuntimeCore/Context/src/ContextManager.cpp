@@ -1,5 +1,7 @@
 #include "ContextManager.hpp"
 
+#include <algorithm>
+
 #include "Json.hpp"
 
 namespace LuminaAgent {
@@ -66,12 +68,37 @@ std::string ContextManager::mergeContextJson(const std::string &currentContextJs
 }
 
 std::string ContextManager::compactIfNeeded(const std::string &contextJson) const {
-    if (session_.remainingContextTokensEstimate() > 1200) {
-        return normalizeLoadedContext(contextJson);
-    }
+    return compactIfNeeded(session_.requestJson(), contextJson, session_.stepsSummaryJson(), session_.lastObservationJson());
+}
+
+std::string ContextManager::compactIfNeeded(
+    const std::string &requestJson,
+    const std::string &contextJson,
+    const std::string &progressJson,
+    const std::string &lastObservationJson
+) const {
     const std::string normalized = normalizeLoadedContext(contextJson);
-    return "{\"sections\":[],\"compact_summary\":\"context omitted because execution budget is near the context window limit\",\"source_context\":" +
-        jsonString(truncateToCharacters(normalized, 1600)) + "}";
+    RuntimeSessionConfig config;
+    config.isConfigured = true;
+    config.maximumReActIterations = session_.maximumReActIterations();
+    config.maximumToolCalls = session_.maximumToolCalls();
+    config.contextWindowTokens = session_.contextWindowTokens();
+    config.maxOutputTokens = session_.maxOutputTokens();
+    config.reservedOutputTokens = session_.reservedOutputTokens();
+    config.maximumObservationCharacters = session_.maximumObservationCharacters();
+    config.toolResultTokenBudget = session_.toolResultTokenBudget();
+    config.compactThresholdTokens = session_.compactThresholdTokens();
+    config.maximumCompactFailures = session_.maximumCompactFailures();
+    config.maximumConsecutiveReasoningSteps = session_.maximumConsecutiveReasoningSteps();
+    const ContextBudgetSnapshot snapshot = ContextBudgetManager(config).snapshotFor(requestJson, normalized, progressJson, lastObservationJson);
+    if (!snapshot.shouldCompact) {
+        return normalized;
+    }
+    const int summaryLimit = session_.maximumObservationCharacters();
+    return "{\"sections\":[],\"compact_summary\":\"context compacted because execution budget is near the configured context window\",\"used_tokens_estimate\":" +
+        std::to_string(snapshot.usedTokens) +
+        ",\"remaining_tokens_estimate\":" + std::to_string(snapshot.remainingTokens) +
+        ",\"source_context\":" + jsonString(truncateToCharacters(normalized, summaryLimit)) + "}";
 }
 
 } // namespace LuminaAgent

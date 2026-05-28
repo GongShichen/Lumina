@@ -21,7 +21,8 @@ public struct LuminaNotificationScheduleTool: LuminaAgentTool {
             sideEffect: .systemWrite,
             sensitivity: .sensitive,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 

@@ -9,6 +9,7 @@ struct LuminaMiniCPMV46EngineResponse: Sendable {
     var outputTokens: Int
     var maxOutputTokens: Int
     var contextLength: Int
+    var schemaStep: Bool
     var timeToFirstTokenMilliseconds: Double?
     var generationMilliseconds: Double
     var totalMilliseconds: Double
@@ -28,6 +29,7 @@ struct LuminaMiniCPMV46EngineResponse: Sendable {
             outputTokens: object.int("outputTokens") ?? 0,
             maxOutputTokens: object.int("maxOutputTokens") ?? 0,
             contextLength: object.int("contextLength") ?? 0,
+            schemaStep: object.bool("schemaStep") ?? false,
             timeToFirstTokenMilliseconds: object.double("timeToFirstTokenMilliseconds"),
             generationMilliseconds: object.double("generationMilliseconds") ?? 0,
             totalMilliseconds: object.double("totalMilliseconds") ?? 0,

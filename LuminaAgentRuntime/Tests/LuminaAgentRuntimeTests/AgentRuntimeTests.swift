@@ -156,7 +156,8 @@ final class LuminaAgentRuntimeTests: XCTestCase {
             tools: [tool],
             stepGenerator: FixedReActModel(calls: [
                 LuminaToolCall(toolName: "local.search", arguments: ["query": .string("查本地数据")])
-            ])
+            ]),
+            configuration: luminaTestRuntimeConfiguration
         )
         let result = await runtime.run(request: LuminaAgentRequest(text: "查本地数据"))
 
@@ -183,6 +184,7 @@ final class LuminaAgentRuntimeTests: XCTestCase {
             stepGenerator: FixedReActModel(calls: [
                 LuminaToolCall(toolName: "ledger.record", arguments: ["memo": .string("咖啡 42 元")], requiresConfirmation: true)
             ]),
+            configuration: luminaTestRuntimeConfiguration,
             confirmationCoordinator: LuminaDenyAllConfirmationCoordinator()
         )
         let result = await runtime.run(request: LuminaAgentRequest(text: "记账 咖啡 42 元"))
@@ -213,6 +215,7 @@ final class LuminaAgentRuntimeTests: XCTestCase {
             stepGenerator: FixedReActModel(calls: [
                 LuminaToolCall(toolName: "ledger.record", arguments: ["memo": .string("咖啡 42 元")], requiresConfirmation: true)
             ]),
+            configuration: luminaTestRuntimeConfiguration,
             confirmationCoordinator: LuminaAlwaysConfirmCoordinator()
         )
 
@@ -238,7 +241,8 @@ final class LuminaAgentRuntimeTests: XCTestCase {
 
         let runtime = LuminaAgentRuntime(
             tools: [tool],
-            stepGenerator: FixedReActModel(calls: [LuminaToolCall(toolName: "local.search", arguments: [:])])
+            stepGenerator: FixedReActModel(calls: [LuminaToolCall(toolName: "local.search", arguments: [:])]),
+            configuration: luminaTestRuntimeConfiguration
         )
         var sawAction = false
         var sawToolStart = false

@@ -75,6 +75,11 @@ int intField(const std::map<std::string, JsonField> &fields, const std::string &
 // Reads a boolean field or returns the provided fallback.
 bool boolField(const std::map<std::string, JsonField> &fields, const std::string &key, bool fallback);
 
+// Produces a stable JSON object representation with sorted object keys.
+// Invalid JSON is returned as a trimmed fragment so callers can still build
+// deterministic signatures for best-effort replay decisions.
+std::string canonicalizeJsonObject(const std::string &json);
+
 // Verifies that a parsed object contains only known protocol keys.
 bool hasOnlyKeys(
     const std::map<std::string, JsonField> &fields,

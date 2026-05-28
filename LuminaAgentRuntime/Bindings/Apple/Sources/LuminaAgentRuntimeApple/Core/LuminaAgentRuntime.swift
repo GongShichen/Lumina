@@ -10,7 +10,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         stepGenerator: any LuminaReActStepGenerator = LuminaUnavailableReActStepGenerator(),
         contextProvider: any LuminaRuntimeContextProvider = LuminaEmptyRuntimeContextProvider(),
         contextCompactor: any LuminaReActContextCompactor = LuminaSummarizingReActContextCompactor(),
-        configuration: LuminaAgentRuntimeConfiguration = LuminaAgentRuntimeConfiguration(),
+        configuration: LuminaAgentRuntimeConfiguration,
         permissionGate: any LuminaPermissionGate = LuminaDefaultPermissionGate(),
         confirmationCoordinator: any LuminaConfirmationCoordinator = LuminaAlwaysConfirmCoordinator(),
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
@@ -73,6 +73,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.trace = LuminaReActTrace()
         box.toolResults = []
         box.hookContextSections = []
+        box.stepGenerationMilliseconds = 0
+        box.toolExecutionMilliseconds = 0
         box.timingStartedAt = ContinuousClock.now
         let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
         let resultJSON = runtimeHandle.run(requestJSON: requestJSON)

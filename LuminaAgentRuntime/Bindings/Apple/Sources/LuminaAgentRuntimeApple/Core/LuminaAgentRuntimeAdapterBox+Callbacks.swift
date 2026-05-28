@@ -24,8 +24,10 @@ extension LuminaAgentRuntimeAdapterBox {
             let schema = tool.schema
             let call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: parsed.requiresConfirmation)
             let context = LuminaToolExecutionContext(request: request, call: call, schema: schema)
+            let startedAt = ContinuousClock.now
             currentEventSink?(.toolStarted(call))
             let result = try await tool.call(context: context, cancellation: LuminaCancellationToken())
+            toolExecutionMilliseconds += Self.milliseconds(since: startedAt)
             toolResults.append(result)
             currentEventSink?(.toolFinished(result))
             let content = result.content.compactMap(\.textForModelInput).joined(separator: "\n")
@@ -142,25 +144,34 @@ extension LuminaAgentRuntimeAdapterBox {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = object["type"] as? String
         else { return }
+        let outerPayload = object["payload"] as? [String: Any]
+        let runtimePayload = (outerPayload?["payload"] as? [String: Any]) ?? outerPayload
         if type == "observation_created",
-           let payload = object["payload"] as? [String: Any],
+           let payload = runtimePayload,
            let observation = Self.observationFromRuntimePayload(payload) {
             if trace.steps.last?.observation != observation {
                 trace.steps.append(.observation(observation))
             }
-            if !toolResults.contains(where: { $0.toolName == observation.toolName && $0.status == observation.status }) {
+            var output: [String: LuminaJSONValue] = [:]
+            if observation.replayed {
+                output["replayed"] = .bool(true)
+            }
+            if let duplicateOf = observation.duplicateOf {
+                output["duplicate_of"] = .string(duplicateOf)
+            }
+            if observation.replayed || !toolResults.contains(where: { $0.toolName == observation.toolName && $0.status == observation.status }) {
                 toolResults.append(LuminaToolResult(
                     callID: UUID(),
                     toolName: observation.toolName,
                     status: observation.status,
-                    output: [:],
+                    output: output,
                     content: [.text(observation.summary)],
                     errorMessage: observation.errorMessage
                 ))
             }
             currentEventSink?(.observationCreated(observation))
         } else if type == "step_produced",
-                  let payload = object["payload"] as? [String: Any],
+                  let payload = runtimePayload,
                   let step = Self.stepFromRuntimePayload(payload) {
             trace.steps.append(step)
             switch step.kind {
@@ -173,6 +184,8 @@ extension LuminaAgentRuntimeAdapterBox {
             case .observation:
                 if let observation = step.observation { currentEventSink?(.observationCreated(observation)) }
             }
+        } else {
+            currentEventSink?(.hookAnnotated("runtime_event.\(type)", .string(eventJSON)))
         }
     }
 
@@ -208,15 +221,16 @@ extension LuminaAgentRuntimeAdapterBox {
             trace: trace,
             loadedContext: loadedContext
         )
-        let compactThreshold = Int(Double(configuration.contextWindowCharacterBudget) * configuration.autoCompactThreshold)
-        if estimatedCharacters > compactThreshold {
+        let estimatedTokens = max(1, estimatedCharacters / 4)
+        let compactThreshold = configuration.compactThresholdTokens
+        if estimatedTokens > compactThreshold {
             let compaction = try await contextCompactor.compact(LuminaReActCompactionRequest(
                 agentRequest: request,
                 trace: trace,
                 loadedContext: loadedContext,
                 availableTools: tools.map(\.schema),
                 estimatedCharacters: estimatedCharacters,
-                characterBudget: configuration.contextWindowCharacterBudget,
+                characterBudget: configuration.contextWindowTokens * 4,
                 preservedStepCount: configuration.preservedStepsAfterCompaction,
                 maximumSummaryCharacters: configuration.maximumObservationCharacters
             ))
@@ -242,6 +256,7 @@ extension LuminaAgentRuntimeAdapterBox {
         let progressSink: (@Sendable (LuminaStepGenerationProgress) -> Void)?
         if let eventSink = currentEventSink {
             progressSink = { progress in
+                self.stepGenerationMilliseconds = max(self.stepGenerationMilliseconds, progress.elapsedMilliseconds)
                 eventSink(.stepGenerationProgress(progress))
                 if streamEmit?(progress) == false {
                     self.requestCancellation()
@@ -250,6 +265,7 @@ extension LuminaAgentRuntimeAdapterBox {
         } else {
             if let streamEmit {
                 progressSink = { progress in
+                    self.stepGenerationMilliseconds = max(self.stepGenerationMilliseconds, progress.elapsedMilliseconds)
                     if streamEmit(progress) == false {
                         self.requestCancellation()
                     }
@@ -327,7 +343,9 @@ extension LuminaAgentRuntimeAdapterBox {
             toolName: toolName,
             status: status,
             summary: payload["summary"] as? String ?? payload["content"] as? String ?? "",
-            errorMessage: payload["errorMessage"] as? String
+            errorMessage: payload["errorMessage"] as? String,
+            replayed: payload["replayed"] as? Bool ?? false,
+            duplicateOf: payload["duplicate_of"] as? String
         )
     }
 
@@ -381,5 +399,10 @@ extension LuminaAgentRuntimeAdapterBox {
         }
         let data = try? JSONSerialization.data(withJSONObject: object)
         return data.flatMap { String(data: $0, encoding: .utf8) } ?? #"{"delta":"","tokenCount":0}"#
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
+        let duration = start.duration(to: ContinuousClock.now)
+        return Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15
     }
 }

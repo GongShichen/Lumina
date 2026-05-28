@@ -19,15 +19,24 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
             sideEffect: .systemWrite,
             sensitivity: .privateData,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 
     func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
         try await requestCalendarAccess()
-        let startDate = Self.date(from: arguments.string("startDateISO")) ?? Date().addingTimeInterval(3_600)
+        guard let startDate = Self.date(from: arguments.string("startDateISO")) else {
+            return Self.failedResult("日程缺少有效的 startDateISO。请先用 device.current_time 获取当前时间，再基于用户的相对时间生成 ISO8601 开始时间。")
+        }
         let endDate = Self.date(from: arguments.string("endDateISO")) ?? startDate.addingTimeInterval(1_800)
+        guard startDate >= Date().addingTimeInterval(-300) else {
+            return Self.failedResult("日程开始时间在过去：\(Self.string(from: startDate))。请基于当前设备时间重新计算未来时间。")
+        }
+        guard endDate > startDate else {
+            return Self.failedResult("日程结束时间必须晚于开始时间。")
+        }
         let event = EKEvent(eventStore: eventStore)
         event.title = arguments.string("title") ?? "Lumina 日程"
         event.notes = arguments.string("notes")
@@ -95,5 +104,16 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
 
     private static func string(from date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "calendar.create",
+            status: .failed,
+            output: ["reason": .string(message)],
+            content: [.markdown("### 日程未创建\n\n\(message)")],
+            errorMessage: message
+        )
     }
 }

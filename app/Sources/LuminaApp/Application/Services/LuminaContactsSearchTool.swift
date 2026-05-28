@@ -55,6 +55,7 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
 
     private func search(query: String, limit: Int, store: CNContactStore) throws -> [LuminaContactSearchResult] {
         let keys: [CNKeyDescriptor] = [
+            CNContactIdentifierKey as CNKeyDescriptor,
             CNContactGivenNameKey as CNKeyDescriptor,
             CNContactFamilyNameKey as CNKeyDescriptor,
             CNContactNicknameKey as CNKeyDescriptor,
@@ -82,12 +83,15 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
     }
 
     private static func result(_ contact: CNContact) -> LuminaContactSearchResult {
-        let fullName = CNContactFormatter.string(from: contact, style: .fullName)
-        let fallback = [contact.familyName, contact.givenName, contact.nickname]
+        let displayName = [contact.familyName, contact.givenName]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let fallback = [displayName, contact.nickname, contact.organizationName]
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         return LuminaContactSearchResult(
-            name: fullName?.isEmpty == false ? fullName! : fallback,
+            identifier: contact.identifier,
+            name: fallback.isEmpty ? "未命名联系人" : fallback,
             phones: contact.phoneNumbers.map { $0.value.stringValue },
             emails: contact.emailAddresses.map { String($0.value) },
             organization: contact.organizationName.isEmpty ? nil : contact.organizationName
@@ -96,6 +100,7 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
 
     private static func jsonObject(_ contact: LuminaContactSearchResult) -> LuminaJSONValue {
         .object([
+            "identifier": contact.identifier.map(LuminaJSONValue.string) ?? .null,
             "name": .string(contact.name),
             "phones": .array(contact.phones.map(LuminaJSONValue.string)),
             "emails": .array(contact.emails.map(LuminaJSONValue.string)),
@@ -106,9 +111,10 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
     private static func markdown(_ contacts: [LuminaContactSearchResult]) -> String {
         guard !contacts.isEmpty else { return "## 联系人\n\n没有找到匹配联系人。" }
         let rows = contacts.map { contact in
+            let identifier = contact.identifier.map { "id=\($0)；" } ?? ""
             let phones = contact.phones.isEmpty ? "无电话" : contact.phones.joined(separator: ", ")
             let emails = contact.emails.isEmpty ? "无邮箱" : contact.emails.joined(separator: ", ")
-            return "- **\(contact.name)**：\(phones)；\(emails)"
+            return "- **\(contact.name)**：\(identifier)\(phones)；\(emails)"
         }
         return "## 联系人\n\n" + rows.joined(separator: "\n")
     }

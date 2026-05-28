@@ -42,38 +42,45 @@ public enum LuminaReActSchema {
         invalidJSON: String,
         parserError: String,
         availableToolNames: [String],
-        originalPrompt: String
+        originalPrompt: String,
+        task: String = "",
+        lastObservation: String = "",
+        focusedToolSchemas: String = ""
     ) -> String {
         """
-        Your previous response was invalid ReAct JSON and was not executed.
-        Rewrite it as exactly one valid standard ReAct JSON object.
-        Do not preserve invalid field names. Do not explain.
+        Repair the previous model response into exactly one valid Lumina ReAct JSON object.
+        Output JSON only. No prose, no markdown fence, no XML tags, no Thought:/Action: labels.
 
-        Parser error:
+        User task:
+        \(task.isEmpty ? originalPrompt : task)
+
+        Latest runtime observation, if any:
+        \(lastObservation.isEmpty ? "none" : lastObservation)
+
+        Parser/validator error:
         \(parserError)
 
-        Invalid JSON:
+        Previous invalid response:
         \(invalidJSON)
 
-        \(promptContract)
+        Valid output shapes:
+        {"type":"tool_use","thought":"short reason","tool_name":"EXACT_TOOL_NAME","parameters":{},"requires_confirmation":false}
+        {"type":"final_answer","thought":"done","content":"concise markdown answer"}
+        {"type":"cannot_complete","thought":"blocked","reason":"short recoverable reason"}
 
-        If the previous response used type=observation, convert its useful content into final_answer.content or choose a valid tool_use.
-        If the previous response used {"type":"some.tool","input":...}, convert it to {"type":"tool_use","tool_name":"some.tool","parameters":...}.
-        If the previous response used targetReference, move that value to tool_name.
-        If the previous response used input or arguments, move that object to parameters.
-        If the previous response used args, move that object to parameters.
-        If the previous response used function like "device.current_time()", remove "()" and put "device.current_time" in tool_name.
-        If the previous response used type=tool_call, change type to tool_use.
-        Never output keys named function, args, arguments, input, targetReference, action, tool_call, or name.
-
-        Required shapes:
-        - Tool: {"type":"tool_use","thought":"short reason","tool_name":"EXACT_TOOL_NAME","parameters":{},"requires_confirmation":false}
-        - Final: {"type":"final_answer","thought":"done","content":"markdown answer"}
+        Repair rules:
+        - If a tool is still needed, use type="tool_use"; put the exact tool name in tool_name; put only tool parameters in parameters.
+        - If the latest runtime observation already satisfies the user task, use final_answer.content as user-facing Markdown.
+        - Never output observation; observations are runtime-owned.
+        - Never repeat an identical tool call that the latest observation says already succeeded or was replayed.
+        - Never output keys named tool_call, tool_use, function, args, arguments, input, targetReference, action, name, duration, or command.
+        - If the invalid response said "Call some.tool" or contained a tool_use field, convert that intention to the valid tool_use shape.
+        - If the invalid response used a date from the past, recompute from the latest device.current_time observation when possible.
 
         Use only these tool names: \(availableToolNames.sorted().joined(separator: ", ")).
 
-        Original prompt:
-        \(originalPrompt)
+        Focused tool schema summary:
+        \(focusedToolSchemas.isEmpty ? "none" : focusedToolSchemas)
         """
     }
 }

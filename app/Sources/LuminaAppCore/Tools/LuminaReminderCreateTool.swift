@@ -21,7 +21,8 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
             sideEffect: .systemWrite,
             sensitivity: .privateData,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 

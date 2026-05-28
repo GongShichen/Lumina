@@ -25,7 +25,8 @@ public struct LuminaMemoryIngestTextTool: LuminaAgentTool {
             sideEffect: .appLocalWrite,
             sensitivity: .sensitive,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 

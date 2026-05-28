@@ -20,7 +20,10 @@ public struct LuminaMessageComposeTool: LuminaAgentTool {
             sideEffect: .externalCommunication,
             sensitivity: .privateData,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            requiresUserInteraction: true,
+            idempotencyPolicy: "caller_keyed",
+            maxResultSize: 1_500
         )
     }
 

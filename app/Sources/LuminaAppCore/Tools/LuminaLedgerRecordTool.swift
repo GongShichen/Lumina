@@ -20,7 +20,8 @@ public struct LuminaLedgerRecordTool: LuminaAgentTool {
             sideEffect: .appLocalWrite,
             sensitivity: .sensitive,
             acceptedInputModalities: [.text, .image, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 

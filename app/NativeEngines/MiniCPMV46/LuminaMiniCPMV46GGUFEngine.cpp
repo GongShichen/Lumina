@@ -79,7 +79,8 @@ std::string make_response(
     double generation_ms,
     double total_ms,
     const std::string & output,
-    const std::string & error
+    const std::string & error,
+    bool schema_step
 ) {
     std::ostringstream json;
     json << "{";
@@ -89,6 +90,7 @@ std::string make_response(
     json << "\"outputTokens\":" << output_tokens << ",";
     json << "\"maxOutputTokens\":" << max_output_tokens << ",";
     json << "\"contextLength\":" << context_length << ",";
+    json << "\"schemaStep\":" << (schema_step ? "true" : "false") << ",";
     if (ttft_ms >= 0) {
         json << "\"timeToFirstTokenMilliseconds\":" << ttft_ms << ",";
     } else {
@@ -253,25 +255,41 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     const std::string raw_prompt = prompt == nullptr ? "" : prompt;
     const std::string model_path = model_path_for_directory(model_directory);
     if (model_path.empty()) {
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V model.gguf was not found."));
+        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V model.gguf was not found.", false));
     }
 
     std::string error;
     if (!ensure_model_loaded(model_path, error)) {
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error));
+        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
     }
 
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     const std::string prompt_text = chat_wrapped_prompt(raw_prompt);
     std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, error);
     if (prompt_tokens.empty()) {
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error));
+        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
     }
 
     const bool schema_step = is_schema_step_generation(raw_prompt);
     const int requested_max_output_tokens = max_output_tokens;
+    if (static_cast<int>(prompt_tokens.size()) >= context_length) {
+        return copy_c_string(make_response(
+            false,
+            backend,
+            static_cast<int>(prompt_tokens.size()),
+            0,
+            max_output_tokens,
+            context_length,
+            -1,
+            0,
+            0,
+            "",
+            "MiniCPM-V prompt tokens exceed the configured context window; compact context before decoding.",
+            schema_step
+        ));
+    }
     const int effective_max_output_tokens = schema_step
-        ? std::min(std::max(max_output_tokens, 96), 384)
+        ? std::min(std::max(max_output_tokens, 128), 768)
         : std::min(max_output_tokens, std::max(256, context_length - static_cast<int>(prompt_tokens.size()) - safety_margin_tokens));
     const int active_context_length = std::min(
         context_length,
@@ -283,8 +301,11 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = static_cast<uint32_t>(active_context_length);
-    ctx_params.n_batch = static_cast<uint32_t>(std::min<int>(std::max<int>(prompt_tokens.size(), 512), 2048));
-    ctx_params.n_ubatch = 512;
+    ctx_params.n_batch = static_cast<uint32_t>(std::min<int>(
+        std::max<int>(static_cast<int>(prompt_tokens.size()), 512),
+        active_context_length
+    ));
+    ctx_params.n_ubatch = ctx_params.n_batch;
     ctx_params.n_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
     ctx_params.n_threads_batch = std::max(2u, std::thread::hardware_concurrency());
     ctx_params.no_perf = false;
@@ -294,7 +315,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
 
     llama_context * ctx = llama_init_from_model(g_model, ctx_params);
     if (ctx == nullptr) {
-        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context."));
+        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context.", schema_step));
     }
 
     llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
@@ -307,7 +328,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     if (decode_result != 0) {
         llama_sampler_free(sampler);
         llama_free(ctx);
-        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V prompt decode failed with code " + std::to_string(decode_result) + "."));
+        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V prompt decode failed with code " + std::to_string(decode_result) + ".", schema_step));
     }
 
     std::string output;
@@ -337,7 +358,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
         if (schema_step && !likely_json_started(output) && output_tokens >= 96) {
             break;
         }
-        if (schema_step && likely_json_started(output) && tokens_after_first_json_char >= 256) {
+        if (schema_step && likely_json_started(output) && tokens_after_first_json_char >= 512) {
             break;
         }
         batch = llama_batch_get_one(&token, 1);
@@ -354,7 +375,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     llama_sampler_free(sampler);
     llama_free(ctx);
 
-    return copy_c_string(make_response(true, backend, static_cast<int>(prompt_tokens.size()), output_tokens, requested_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, ""));
+    return copy_c_string(make_response(true, backend, static_cast<int>(prompt_tokens.size()), output_tokens, requested_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, "", schema_step));
 }
 
 extern "C" void LuminaMiniCPMV46ExternalFreeCString(char * value) {

@@ -138,13 +138,16 @@ typedef void (*LuminaAgentEventCallback)(const char *event_json, void *user_cont
 typedef char *(*LuminaAgentHookCallback)(const char *hook_event_json, void *user_context);
 
 /**
- * Creates a runtime instance from an optional JSON configuration.
+ * Creates a runtime instance from a JSON configuration supplied by the caller.
  *
- * `configuration_json` may be `NULL`. Supported keys include budget controls
- * such as `maximumReActIterations`, `maximumToolCalls`,
- * `maximumObservationCharacters`, `maximumConsecutiveReasoningSteps`, and
- * `stopOnToolFailure`. The returned handle must be destroyed with
- * `LuminaAgentRuntimeDestroy`.
+ * `configuration_json` must include model/runtime budgets such as
+ * `maxIterations`, `maxToolCalls`, `contextWindowTokens`, `maxOutputTokens`,
+ * `reservedOutputTokens`, `maxObservationCharacters`, `toolResultTokenBudget`,
+ * `compactThresholdTokens`, `maxCompactFailures`, `maxReasoningSteps`, and
+ * `maxReplayObservations`.
+ * The runtime never infers these values from a specific model. If required
+ * values are missing, run calls return a configuration error. The returned
+ * handle must be destroyed with `LuminaAgentRuntimeDestroy`.
  */
 LuminaAgentRuntimeRef *LuminaAgentRuntimeCreate(const char *configuration_json);
 

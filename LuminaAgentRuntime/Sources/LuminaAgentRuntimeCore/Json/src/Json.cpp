@@ -366,6 +366,33 @@ bool boolField(const std::map<std::string, JsonField> &fields, const std::string
     return it->second.boolValue;
 }
 
+static std::string canonicalizeJsonValue(const JsonField &field) {
+    if (field.kind == JsonKind::object) {
+        return canonicalizeJsonObject(field.raw);
+    }
+    return trim(field.raw);
+}
+
+std::string canonicalizeJsonObject(const std::string &json) {
+    const std::string text = trim(json.empty() ? "{}" : json);
+    std::map<std::string, JsonField> fields;
+    std::string error;
+    if (!parseTopLevelObject(text, fields, error)) {
+        return text;
+    }
+    std::ostringstream output;
+    output << "{";
+    size_t index = 0;
+    for (const auto &entry : fields) {
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << jsonString(entry.first) << ":" << canonicalizeJsonValue(entry.second);
+    }
+    output << "}";
+    return output.str();
+}
+
 bool hasOnlyKeys(
     const std::map<std::string, JsonField> &fields,
     const std::vector<std::string> &allowed,

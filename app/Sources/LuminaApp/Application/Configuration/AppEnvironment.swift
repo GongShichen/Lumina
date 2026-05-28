@@ -53,12 +53,23 @@ struct AppEnvironment {
             auditLogger: auditLogger,
             auditLogReader: auditLogger,
             stepGenerator: LocalModelBootstrap.makeStepGenerator(readinessStore: modelReadiness, metricsStore: modelMetrics, memoryStore: memoryStore),
-            contextProvider: LuminaAppContextProvider(memoryStore: memoryStore),
+            contextProvider: LuminaEmptyRuntimeContextProvider(),
             runtimeConfiguration: LuminaAgentRuntimeConfiguration(
                 maximumToolCalls: 8,
+                maximumReActIterations: 12,
+                maximumObservationCharacters: 1_500,
+                contextWindowTokens: 12_000,
+                maxOutputTokens: 4_096,
+                reservedOutputTokens: 256,
+                toolResultTokenBudget: 1_024,
+                compactThresholdTokens: 9_000,
+                maximumCompactFailures: 3,
+                maximumConsecutiveReasoningSteps: 3,
+                maximumConsecutiveReplayObservations: 2,
                 stopOnToolFailure: false,
                 rollbackFailedSideEffects: true,
-                emitVerboseEvents: true
+                emitVerboseEvents: true,
+                preservedStepsAfterCompaction: 6
             )
         )
     }

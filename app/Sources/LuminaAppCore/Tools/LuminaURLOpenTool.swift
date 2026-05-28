@@ -22,7 +22,10 @@ public struct LuminaURLOpenTool: LuminaAgentTool {
             sideEffect: .externalCommunication,
             sensitivity: .sensitive,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            requiresUserInteraction: true,
+            idempotencyPolicy: "replay_identical",
+            maxResultSize: 1_500
         )
     }
 

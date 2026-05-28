@@ -6,7 +6,12 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let taskID: String
     let text: String
     let expectedTools: [String]
+    let toolAttempts: [String]
     let actualTools: [String]
+    let toolReplays: [String]
+    let toolAttemptCount: Int
+    let toolExecutionCount: Int
+    let toolReplayCount: Int
     let status: String
     let exactMatch: Bool
     let recall: Double
@@ -24,7 +29,9 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
 
     init(
         task: LuminaBenchmarkTask,
+        toolAttempts: [String],
         actualTools: [String],
+        toolReplays: [String],
         status: String,
         totalMilliseconds: Double,
         observedTimings: LuminaObservedRunTimings,
@@ -37,17 +44,22 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.taskID = task.id
         self.text = task.text
         self.expectedTools = task.expectedTools
+        self.toolAttempts = toolAttempts
         self.actualTools = actualTools
-        self.status = status
-        self.exactMatch = Set(task.expectedTools) == Set(actualTools)
+        self.toolReplays = toolReplays
+        self.toolAttemptCount = toolAttempts.count
+        self.toolExecutionCount = actualTools.count
+        self.toolReplayCount = toolReplays.count
         let expected = Set(task.expectedTools)
         let actual = Set(actualTools)
+        self.exactMatch = expected == actual
         let truePositive = Double(expected.intersection(actual).count)
         let falsePositive = Double(actual.subtracting(expected).count)
         let falseNegative = Double(expected.subtracting(actual).count)
         self.precision = truePositive + falsePositive == 0 ? 0 : truePositive / (truePositive + falsePositive)
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
+        self.status = status == "succeeded" && (expected.isEmpty || exactMatch) ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
         self.totalMilliseconds = totalMilliseconds
         self.activeRuntimeMilliseconds = observedTimings.activeRuntimeMilliseconds
         self.wallClockMilliseconds = observedTimings.wallClockMilliseconds

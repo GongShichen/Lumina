@@ -3,7 +3,7 @@ import Foundation
 extension LuminaAgentRuntimeConfiguration {
     var runtimeJSON: String {
         """
-        {"maximumReActIterations":\(maximumReActIterations),"maximumToolCalls":\(maximumToolCalls),"maximumObservationCharacters":\(maximumObservationCharacters),"maximumContextTokens":\(max(1_024, contextWindowCharacterBudget / 4)),"stopOnToolFailure":\(stopOnToolFailure)}
+        {"maxIterations":\(maximumReActIterations),"maxToolCalls":\(maximumToolCalls),"contextWindowTokens":\(contextWindowTokens),"maxOutputTokens":\(maxOutputTokens),"reservedOutputTokens":\(reservedOutputTokens),"maxObservationCharacters":\(maximumObservationCharacters),"toolResultTokenBudget":\(toolResultTokenBudget),"compactThresholdTokens":\(compactThresholdTokens),"maxCompactFailures":\(maximumCompactFailures),"maxReasoningSteps":\(maximumConsecutiveReasoningSteps),"maxReplayObservations":\(maximumConsecutiveReplayObservations),"stopOnToolFailure":\(stopOnToolFailure)}
         """
     }
 }

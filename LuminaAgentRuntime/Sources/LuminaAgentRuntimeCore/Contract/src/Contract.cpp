@@ -3,7 +3,7 @@
 namespace LuminaAgent {
 
 std::string reactStepSchemaJson() {
-    return R"({"schema_version":"1.0","allowed_step_types":["reasoning","tool_use","multi_tool_use","ask_user","final_answer","cannot_complete"],"rules":["Return exactly one JSON object.","Never emit observations; observations are runtime-owned.","final_answer.content must be Markdown.","tool_use.parameters must be a JSON object.","multi_tool_use may only contain read-only tools."]})";
+    return R"({"schema_version":"1.0","allowed_step_types":["reasoning","tool_discovery","tool_use","multi_tool_use","ask_user","final_answer","cannot_complete"],"rules":["Return exactly one JSON object.","Never emit observations; observations are runtime-owned.","final_answer.content must be Markdown.","tool_use.parameters must be a JSON object.","multi_tool_use may only contain read-only tools.","tool_discovery only returns schema metadata."]})";
 }
 
 std::string taskEnvelopeSchemaJson() {
@@ -15,7 +15,7 @@ std::string responderSchemaJson() {
 }
 
 std::string runtimeConfigurationSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","fields":{"maximumReActIterations":"integer","maximumToolCalls":"integer","maximumObservationCharacters":"integer","maximumConsecutiveReasoningSteps":"integer","stopOnToolFailure":"boolean","contextWindowCharacterBudget":"integer"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer","maxOutputTokens":"integer","reservedOutputTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean"}})";
 }
 
 std::string agentRequestSchemaJson() {
@@ -31,7 +31,7 @@ std::string agentMediaAssetSchemaJson() {
 }
 
 std::string toolSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["name"],"fields":{"name":"string","description":"string","parameters":"ToolParameterSchema","sideEffect":"string","sensitivity":"string","requiresConfirmation":"boolean"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["name"],"fields":{"name":"string","description":"string","aliases":"string[]","category":"string","searchHint":"string","parameters":"ToolParameterSchema","sideEffect":"string","readOnly":"boolean","destructive":"boolean","concurrencySafe":"boolean","requiresUserInteraction":"boolean","interruptBehavior":"string","idempotencyPolicy":"replay_identical|always_execute|caller_keyed","maxResultSize":"integer","strict":"boolean","inputSchema":"object","outputSchema":"object","displaySummary":"string","sensitivity":"string","requiresConfirmation":"boolean"}})";
 }
 
 std::string toolParameterSchemaJson() {

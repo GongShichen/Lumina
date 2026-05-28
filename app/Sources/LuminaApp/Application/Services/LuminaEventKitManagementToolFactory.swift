@@ -94,7 +94,8 @@ enum LuminaEventKitManagementToolFactory {
                 .filter { query.isEmpty || ($0.title ?? "").lowercased().contains(query) }
                 .prefix(limit)
             let values = reminders.map(reminderJSON)
-            return succeeded("reminder.search", reminders.isEmpty ? "没有找到提醒事项。" : "找到 \(reminders.count) 条提醒事项。", ["reminders": .array(Array(values))])
+            let summary = reminderSearchSummary(Array(reminders))
+            return succeeded("reminder.search", summary, ["reminders": .array(Array(values))])
         }
     }
 
@@ -220,6 +221,16 @@ enum LuminaEventKitManagementToolFactory {
             "dueDateISO": reminder.dueDateComponents?.date.map { .string(iso($0)) } ?? .null
         ])
     }
+
+    private static func reminderSearchSummary(_ reminders: [EKReminder]) -> String {
+        guard !reminders.isEmpty else { return "没有找到提醒事项。" }
+        let items = reminders.prefix(5).map { reminder in
+            let status = reminder.isCompleted ? "completed" : "open"
+            let due = reminder.dueDateComponents?.date.map { ", due=\(iso($0))" } ?? ""
+            return "\(reminder.title ?? "Untitled") [id=\(reminder.calendarItemIdentifier), status=\(status)\(due)]"
+        }
+        return "找到 \(reminders.count) 条提醒事项：" + items.joined(separator: "；")
+    }
 }
 
 
@@ -239,7 +250,8 @@ private func configured(
         sideEffect: sideEffect,
         sensitivity: sensitivity,
         acceptedInputModalities: [.text, .structuredData],
-        outputModalities: [.text, .structuredData]
+        outputModalities: [.text, .structuredData],
+        idempotencyPolicy: sideEffect == .readOnly ? "replay_identical" : "replay_identical"
     ), handler: handler)
 }
 

@@ -51,6 +51,7 @@ final class LuminaInAppAgenticRLRunner {
         var latestPromptTokens: Int?
         var latestSampledTokens = 0
         var latestOutputTokens = 0
+        let taskStartedAt = ContinuousClock.now
         observer.start()
         for await event in services.runEvaluationStream(content: [.text(task.instruction)]) {
             if Task.isCancelled { break }
@@ -68,7 +69,7 @@ final class LuminaInAppAgenticRLRunner {
                 let outputText = latestOutputTokens > 0 ? " · output \(latestOutputTokens) tok" : sampledText
                 progress(LuminaAgenticRLSnapshot(
                     state: .running,
-                    currentTask: "\(task.instruction) · 模型生成中 \(Int(stepGenerationProgress.elapsedMilliseconds / 1_000))s\(promptText)\(outputText)",
+                    currentTask: "\(task.instruction) · 模型生成中 \(Self.elapsedText(since: taskStartedAt))\(promptText)\(outputText)",
                     completed: completed,
                     total: total,
                     latestTool: "model.generating"
@@ -124,6 +125,12 @@ final class LuminaInAppAgenticRLRunner {
             status: .cancelled
         )
         return (cancelled, observer.finish(result: cancelled))
+    }
+
+    private static func elapsedText(since start: ContinuousClock.Instant) -> String {
+        let duration = start.duration(to: ContinuousClock.now)
+        let milliseconds = Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15
+        return String(format: "%.1fs", milliseconds / 1_000)
     }
 
     private func makeRecord(

@@ -18,7 +18,8 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
             sideEffect: .systemWrite,
             sensitivity: .privateData,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 
@@ -29,6 +30,9 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
         reminder.title = arguments.string("title") ?? "Agent Reminder"
         reminder.notes = arguments.string("notes")
         if let dueDate = Self.date(from: arguments.string("dueDateISO")) {
+            guard dueDate >= Date().addingTimeInterval(-300) else {
+                return Self.failedResult("提醒时间在过去：\(Self.string(from: dueDate))。请先用 device.current_time 获取当前时间，再重新计算未来提醒时间。")
+            }
             reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
         }
         reminder.calendar = eventStore.defaultCalendarForNewReminders()
@@ -84,5 +88,20 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
     private static func date(from value: String?) -> Date? {
         guard let value else { return nil }
         return ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func string(from date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "reminder.create",
+            status: .failed,
+            output: ["reason": .string(message)],
+            content: [.markdown("### 提醒未创建\n\n\(message)")],
+            errorMessage: message
+        )
     }
 }

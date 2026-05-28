@@ -16,7 +16,7 @@ struct ObservationInput {
     // Whether the human confirmation gate approved execution.
     bool confirmed = false;
     // Maximum size of the observation summary returned to the model.
-    int maximumCharacters = 2400;
+    int maximumCharacters = 0;
 };
 
 class ObservationBuilder {

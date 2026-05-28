@@ -334,7 +334,8 @@ final class LuminaAppCoreTests: XCTestCase {
             tools: [timeTool.eraseToAnyTool()],
             stepGenerator: LuminaFixedReActModel(calls: [
                 LuminaToolCall(toolName: "device.current_time", arguments: [:])
-            ])
+            ]),
+            configuration: luminaAppCoreTestRuntimeConfiguration
         )
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "启动首页时生成问候语，请读取本机时间"))
@@ -537,6 +538,7 @@ final class LuminaAppCoreTests: XCTestCase {
                     requiresConfirmation: true
                 )
             ]),
+            configuration: luminaAppCoreTestRuntimeConfiguration,
             confirmationCoordinator: confirmation
         )
 
@@ -578,6 +580,7 @@ final class LuminaAppCoreTests: XCTestCase {
                     requiresConfirmation: true
                 )
             ]),
+            configuration: luminaAppCoreTestRuntimeConfiguration,
             confirmationCoordinator: confirmation
         )
 
@@ -626,6 +629,24 @@ private enum PerformanceBudget {
         ProcessInfo.processInfo.environment["LUMINA_STRICT_PERF"] == "1"
     }
 }
+
+private let luminaAppCoreTestRuntimeConfiguration = LuminaAgentRuntimeConfiguration(
+    maximumToolCalls: 8,
+    maximumReActIterations: 12,
+    maximumObservationCharacters: 1_500,
+    contextWindowTokens: 12_000,
+    maxOutputTokens: 4_096,
+    reservedOutputTokens: 256,
+    toolResultTokenBudget: 1_024,
+    compactThresholdTokens: 1_800,
+    maximumCompactFailures: 3,
+    maximumConsecutiveReasoningSteps: 3,
+    maximumConsecutiveReplayObservations: 2,
+    stopOnToolFailure: false,
+    rollbackFailedSideEffects: true,
+    emitVerboseEvents: true,
+    preservedStepsAfterCompaction: 6
+)
 
 private enum TestClock {
     static func milliseconds(since start: ContinuousClock.Instant) -> Double {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -8,6 +9,18 @@
 #include "TraceRecorder.hpp"
 
 namespace LuminaAgent {
+
+struct ToolCallLedgerEntry {
+    std::string callId;
+    std::string toolName;
+    std::string dedupKey;
+    std::string canonicalParameters;
+    std::string status;
+    std::string summary;
+    std::string rawResultJson;
+    std::string timestamp;
+    bool replayable = false;
+};
 
 class RuntimeSession {
 public:
@@ -71,11 +84,29 @@ public:
     int actionCount() const;
     int maximumReActIterations() const;
     int maximumToolCalls() const;
+    int maxOutputTokens() const;
+    int reservedOutputTokens() const;
+    int contextWindowTokens() const;
+    int compactThresholdTokens() const;
+    int maximumCompactFailures() const;
     int maximumObservationCharacters() const;
+    int toolResultTokenBudget() const;
     int remainingContextTokensEstimate() const;
     bool hasFinal() const;
     bool isTerminated() const;
     int consecutiveReasoningCount() const;
+    int maximumConsecutiveReasoningSteps() const;
+    int maximumConsecutiveReplayObservations() const;
+    int compactFailureCount() const;
+    void setContextTokenUsageEstimate(int usedTokens);
+    void recordCompactFailure();
+    void resetCompactFailures();
+
+    // Tracks real tool executions inside this session for idempotent replay.
+    std::string nextToolCallId();
+    const ToolCallLedgerEntry *findReplayableToolCall(const std::string &dedupKey) const;
+    void recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry);
+    std::string recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry);
 
     // Terminal state helpers for cancellation and unrecoverable failures.
     void cancel();
@@ -88,6 +119,9 @@ private:
     int reasoningCount_ = 0;
     int consecutiveReasoningCount_ = 0;
     int observationCount_ = 0;
+    int toolCallSequence_ = 0;
+    int contextTokenUsageEstimate_ = 0;
+    int compactFailureCount_ = 0;
     bool hasFinal_ = false;
     bool cancelled_ = false;
     bool hasSucceededTool_ = false;
@@ -101,7 +135,10 @@ private:
     std::string pendingPayloadJson_;
     std::string terminationReason_;
     std::string finalMarkdown_;
+    std::string lastReplayDedupKey_;
+    int consecutiveReplayObservationCount_ = 0;
     std::vector<std::string> observations_;
+    std::map<std::string, ToolCallLedgerEntry> toolCallLedger_;
     TraceRecorder trace_;
 };
 

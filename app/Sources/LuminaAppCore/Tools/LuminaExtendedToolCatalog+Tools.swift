@@ -144,10 +144,17 @@ extension LuminaExtendedToolCatalog {
             ], delegate: contactsOpen),
             tool(name: "email.compose", description: "打开邮件草稿，不能静默发送。", params: [
                 param("to", "收件人邮箱。", required: false, sensitive: true),
+                param("recipient", "收件人邮箱或联系人别名。", required: false, sensitive: true),
                 param("subject", "主题。", required: false, sensitive: true),
                 param("body", "正文。", required: false, sensitive: true)
             ], sideEffect: .externalCommunication, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
+                let hasDraftContent = ["to", "recipient", "subject", "body"].contains { key in
+                    !(arguments.string(key)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                }
+                guard hasDraftContent else {
+                    return failed("email.compose", "邮件草稿缺少收件人、主题或正文，未打开外部邮件 App。")
+                }
                 let url = mailtoURL(arguments)
                 let opened = await openURL(url)
                 return opened ? succeeded("email.compose", "邮件草稿已打开。", ["url": .string(url.absoluteString)]) : failed("email.compose", "系统没有接受邮件草稿打开请求。")
@@ -533,10 +540,33 @@ private func tool(
             sideEffect: sideEffect,
             sensitivity: sensitivity,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            requiresUserInteraction: sideEffect == .externalCommunication,
+            idempotencyPolicy: luminaIdempotencyPolicy(for: name, sideEffect: sideEffect),
+            destructive: name.contains(".delete") || name.contains(".remove"),
+            concurrencySafe: sideEffect == .readOnly,
+            maxResultSize: 1_500
         ),
         handler: handler
     )
+}
+
+private func luminaIdempotencyPolicy(for name: String, sideEffect: LuminaToolSideEffect) -> String {
+    guard sideEffect != .readOnly else { return "replay_identical" }
+    if name.contains(".create") ||
+        name.contains(".compose") ||
+        name.contains(".schedule") ||
+        name.contains(".open") ||
+        name.contains(".prepare") ||
+        name.contains(".record") ||
+        name.contains(".add") ||
+        name.contains(".save") ||
+        name.contains(".write") ||
+        name == "webpage.save_to_memory" ||
+        name == "memory.ingest_text" {
+        return "caller_keyed"
+    }
+    return "replay_identical"
 }
 
 private func delegatedTool(
@@ -620,7 +650,7 @@ private func firstMatch(_ pattern: String, in text: String) -> String? {
 private func mailtoURL(_ arguments: [String: LuminaJSONValue]) -> URL {
     var components = URLComponents()
     components.scheme = "mailto"
-    components.path = arguments.string("to") ?? ""
+    components.path = arguments.string("to") ?? arguments.string("recipient") ?? ""
     components.queryItems = [
         arguments.string("subject").map { URLQueryItem(name: "subject", value: $0) },
         arguments.string("body").map { URLQueryItem(name: "body", value: $0) }

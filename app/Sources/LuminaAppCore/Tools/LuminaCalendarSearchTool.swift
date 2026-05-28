@@ -14,7 +14,9 @@ public struct LuminaCalendarSearchTool: LuminaAgentTool {
             name: "calendar.search",
             description: "查询近期日历事件。",
             parameters: [
-                LuminaToolParameterSchema(name: "query", type: .string, description: "事件关键词。"),
+                LuminaToolParameterSchema(name: "query", type: .string, description: "事件关键词。", required: false),
+                LuminaToolParameterSchema(name: "startDateISO", type: .dateISO8601, description: "可选查询开始时间。", required: false),
+                LuminaToolParameterSchema(name: "endDateISO", type: .dateISO8601, description: "可选查询结束时间。", required: false),
                 LuminaToolParameterSchema(name: "limit", type: .number, description: "返回数量。", required: false)
             ],
             sideEffect: .readOnly,

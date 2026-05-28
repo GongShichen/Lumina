@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "ContextBudgetManager.hpp"
 #include "Session.hpp"
 
 namespace LuminaAgent {
@@ -25,6 +26,12 @@ public:
 
     // Drops or summarizes low-priority context when the context window is tight.
     std::string compactIfNeeded(const std::string &contextJson) const;
+    std::string compactIfNeeded(
+        const std::string &requestJson,
+        const std::string &contextJson,
+        const std::string &progressJson,
+        const std::string &lastObservationJson
+    ) const;
 
 private:
     const RuntimeSession &session_;

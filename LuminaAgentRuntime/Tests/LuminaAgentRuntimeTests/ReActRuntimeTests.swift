@@ -10,7 +10,7 @@ final class ReActRuntimeTests: XCTestCase {
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(callID: UUID(), toolName: "local.search", status: .succeeded, content: [.markdown("### Result\n\n- coffee")])
         }
-        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
+        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model, configuration: luminaTestRuntimeConfiguration)
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "查 coffee"))
 
@@ -26,7 +26,8 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [],
             stepGenerator: model,
-            contextProvider: contextProvider
+            contextProvider: contextProvider,
+            configuration: luminaTestRuntimeConfiguration
         )
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "用我的记忆回答"))
@@ -41,6 +42,7 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [],
             stepGenerator: ScriptedReActModel(steps: [.final("done")]),
+            configuration: luminaTestRuntimeConfiguration,
             hooks: [hook]
         )
 
@@ -56,6 +58,7 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [],
             stepGenerator: ContextAwareReActModel(),
+            configuration: luminaTestRuntimeConfiguration,
             hooks: [AppendingContextHook()]
         )
 
@@ -68,6 +71,7 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [],
             stepGenerator: ScriptedReActModel(steps: [.final("done")]),
+            configuration: luminaTestRuntimeConfiguration,
             hooks: [FailingRuntimeHook()]
         )
 
@@ -107,12 +111,12 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [tool],
             stepGenerator: BudgetAwareReActModel(),
-            configuration: LuminaAgentRuntimeConfiguration(
+            configuration: luminaTestRuntimeConfiguration(
                 maximumToolCalls: 2,
                 maximumReActIterations: 8,
                 maximumObservationCharacters: 900,
-                contextWindowCharacterBudget: 900,
-                autoCompactThreshold: 0.2,
+                contextWindowTokens: 225,
+                compactThresholdTokens: 180,
                 preservedStepsAfterCompaction: 0
             )
         )
@@ -124,6 +128,109 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue((result.reactTrace?.compactionCount ?? 0) > 0)
         XCTAssertTrue(result.reactTrace?.observations.contains(where: { $0.toolName == "runtime.context_compaction" }) == true)
         XCTAssertTrue(result.plan.summary.contains("compactions="))
+    }
+
+    func testValidationFailureCanBeReplayedForIdenticalToolCall() async {
+        let schema = LuminaToolSchema(
+            name: "calendar.delete",
+            description: "Delete event",
+            parameters: [
+                LuminaToolParameterSchema(name: "id", type: .string, description: "Event identifier.")
+            ],
+            sideEffect: .systemWrite
+        )
+        let tool = AnyLuminaAgentTool(schema: schema) { _, _ in
+            XCTFail("Validation failure should happen before the tool callback.")
+            return LuminaToolResult(callID: UUID(), toolName: "calendar.delete", status: .failed)
+        }
+        let model = ScriptedReActModel(steps: [
+            .action(thought: "Try delete.", call: LuminaToolCall(toolName: "calendar.delete", arguments: [:])),
+            .action(thought: "Repeat delete.", call: LuminaToolCall(toolName: "calendar.delete", arguments: [:])),
+            .final("done")
+        ])
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: model,
+            configuration: luminaTestRuntimeConfiguration(maximumConsecutiveReplayObservations: 2)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "delete"))
+        let replayed = result.toolResults.filter { $0.output["replayed"]?.boolValue == true }
+
+        XCTAssertEqual(result.toolResults.count, 2)
+        XCTAssertEqual(replayed.count, 1)
+        XCTAssertEqual(replayed.first?.toolName, "calendar.delete")
+    }
+
+    func testCallerKeyedSideEffectReplaysWithoutExplicitInstanceKey() async {
+        let schema = LuminaToolSchema(
+            name: "reminder.create",
+            description: "Create reminder",
+            parameters: [
+                LuminaToolParameterSchema(name: "title", type: .string, description: "Reminder title."),
+                LuminaToolParameterSchema(name: "dueDateISO", type: .string, description: "Due date.", required: false)
+            ],
+            sideEffect: .systemWrite,
+            idempotencyPolicy: "caller_keyed"
+        )
+        let calls = ActorBox(0)
+        let tool = AnyLuminaAgentTool(schema: schema) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "reminder.create", status: .succeeded, content: [.text("created")])
+        }
+        let model = ScriptedReActModel(steps: [
+            .action(thought: "Create.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "dueDateISO": .string("2026-06-15T08:00:00Z")])),
+            .action(thought: "Try again with drifted date.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "dueDateISO": .string("2026-06-16T08:00:00Z")])),
+            .final("done")
+        ])
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: model,
+            configuration: luminaTestRuntimeConfiguration(maximumConsecutiveReplayObservations: 3)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "create reminder"))
+        let replayed = result.toolResults.filter { $0.output["replayed"]?.boolValue == true }
+        let callCount = await calls.value
+
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(result.toolResults.count, 2)
+        XCTAssertEqual(replayed.count, 1)
+    }
+
+    func testCallerKeyedSideEffectAllowsDistinctInstanceKeys() async {
+        let schema = LuminaToolSchema(
+            name: "reminder.create",
+            description: "Create reminder",
+            parameters: [
+                LuminaToolParameterSchema(name: "title", type: .string, description: "Reminder title."),
+                LuminaToolParameterSchema(name: "instance_id", type: .string, description: "Distinct requested instance.", required: false)
+            ],
+            sideEffect: .systemWrite,
+            idempotencyPolicy: "caller_keyed"
+        )
+        let calls = ActorBox(0)
+        let tool = AnyLuminaAgentTool(schema: schema) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "reminder.create", status: .succeeded, content: [.text("created")])
+        }
+        let model = ScriptedReActModel(steps: [
+            .action(thought: "Create first.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "instance_id": .string("one")])),
+            .action(thought: "Create second.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "instance_id": .string("two")])),
+            .final("done")
+        ])
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: model,
+            configuration: luminaTestRuntimeConfiguration()
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "create two reminders"))
+        let callCount = await calls.value
+
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(result.toolResults.count, 2)
+        XCTAssertFalse(result.toolResults.contains { $0.output["replayed"]?.boolValue == true })
     }
 
     func testReActParserRejectsUnknownTool() throws {
@@ -236,7 +343,7 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [],
             stepGenerator: model,
-            configuration: LuminaAgentRuntimeConfiguration(maximumToolCalls: 2, maximumReActIterations: 1)
+            configuration: luminaTestRuntimeConfiguration(maximumToolCalls: 2, maximumReActIterations: 1)
         )
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "do it"))
@@ -257,7 +364,7 @@ final class ReActRuntimeTests: XCTestCase {
                 content: [.markdown("### 本机时间\n\n- 时间：10:41")]
             )
         }
-        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
+        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model, configuration: luminaTestRuntimeConfiguration)
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "现在几点"))
 
@@ -281,7 +388,7 @@ final class ReActRuntimeTests: XCTestCase {
         let runtime = LuminaAgentRuntime(
             tools: [tool],
             stepGenerator: model,
-            configuration: LuminaAgentRuntimeConfiguration(maximumToolCalls: 3)
+            configuration: luminaTestRuntimeConfiguration(maximumToolCalls: 3)
         )
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "查本地数据"))
@@ -294,7 +401,7 @@ final class ReActRuntimeTests: XCTestCase {
 
 final class AgentRuntimePerformanceTests: XCTestCase {
     func testRunStreamFirstEventLatency() async {
-        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator())
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator(), configuration: luminaTestRuntimeConfiguration)
         let start = ContinuousClock.now
         var firstEventMilliseconds = Double.greatestFiniteMagnitude
 
@@ -307,7 +414,7 @@ final class AgentRuntimePerformanceTests: XCTestCase {
     }
 
     func testNoAvailableModelFailsRunInsteadOfCompleting() async {
-        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator())
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: LuminaUnavailableReActStepGenerator(), configuration: luminaTestRuntimeConfiguration)
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "帮我创建提醒"))
 
@@ -327,7 +434,7 @@ final class AgentRuntimePerformanceTests: XCTestCase {
                 .action(thought: "search", call: LuminaToolCall(toolName: "local.search", arguments: [:])),
                 .final("done")
             ])
-            let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model)
+            let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model, configuration: luminaTestRuntimeConfiguration)
             let start = ContinuousClock.now
             _ = await runtime.run(request: LuminaAgentRequest(text: "查"))
             samples.append(TestClock.milliseconds(since: start))
@@ -337,7 +444,7 @@ final class AgentRuntimePerformanceTests: XCTestCase {
     }
 
     func testCancellationLatencyForSlowModel() async {
-        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: SlowReActModel(delayNanoseconds: 2_000_000_000))
+        let runtime = LuminaAgentRuntime(tools: [], stepGenerator: SlowReActModel(delayNanoseconds: 2_000_000_000), configuration: luminaTestRuntimeConfiguration)
         let task = Task { await runtime.run(request: LuminaAgentRequest(text: "cancel")) }
         try? await Task.sleep(nanoseconds: 50_000_000)
         let start = ContinuousClock.now
@@ -469,6 +576,22 @@ private struct BudgetAwareReActModel: LuminaReActStepGenerator {
             thought: "search",
             call: LuminaToolCall(toolName: "local.search", arguments: ["query": .string("budget")])
         )
+    }
+}
+
+private actor ActorBox {
+    private var storage: Int
+
+    init(_ value: Int) {
+        self.storage = value
+    }
+
+    var value: Int {
+        storage
+    }
+
+    func increment() {
+        storage += 1
     }
 }
 

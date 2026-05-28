@@ -48,7 +48,7 @@ public:
 
 private:
     RuntimeSessionConfig sessionConfig_;
-    int maximumConsecutiveReasoningSteps_ = 3;
+    std::string configurationError_;
     bool cancelled_ = false;
     ToolRegistry tools_;
     RuntimeCallbacks callbacks_;

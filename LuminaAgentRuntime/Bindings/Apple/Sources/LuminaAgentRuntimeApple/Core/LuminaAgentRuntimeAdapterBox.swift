@@ -17,6 +17,8 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     var toolResults: [LuminaToolResult] = []
     var hookContextSections: [LuminaRuntimeContextSection] = []
     var timingStartedAt: ContinuousClock.Instant?
+    var stepGenerationMilliseconds: Double = 0
+    var toolExecutionMilliseconds: Double = 0
     private let cancellationLock = NSLock()
     private var cancellationRequested = false
 
@@ -73,8 +75,8 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
             finalTrace.terminationReason = terminationReason == "iteration-budget" ? "budget" : terminationReason
         }
         let timing = LuminaRuntimeTiming(
-            stepGenerationMilliseconds: 0,
-            toolExecutionMilliseconds: 0,
+            stepGenerationMilliseconds: stepGenerationMilliseconds,
+            toolExecutionMilliseconds: toolExecutionMilliseconds,
             totalMilliseconds: timingStartedAt.map { LuminaRuntimeClock.milliseconds(since: $0) } ?? 0
         )
         return LuminaAgentRunResult(

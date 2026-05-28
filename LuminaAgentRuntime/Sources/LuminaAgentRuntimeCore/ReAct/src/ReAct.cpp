@@ -39,6 +39,7 @@ bool validateReActStepObject(const std::string &json, bool requireKnownType, std
                 "schema_version", "step_id", "type", "thought", "requires_followup",
                 "confidence", "needs_more_context", "tool_name", "parameters",
                 "expected_observation", "requires_confirmation", "tool_calls",
+                "query", "category", "max_results", "include_schemas",
                 "questions", "reason", "sensitivity", "timeout_seconds",
                 "allow_custom_answer", "content", "citations", "completed",
                 "recoverable_actions"
@@ -86,6 +87,14 @@ bool validateReActStepObject(const std::string &json, bool requireKnownType, std
         auto callsIt = fields.find("tool_calls");
         if (callsIt == fields.end() || callsIt->second.kind != JsonKind::array) {
             error = "multi_tool_use requires an array tool_calls field.";
+            return false;
+        }
+        return true;
+    }
+
+    if (type == "tool_discovery") {
+        if (!hasAllowedKeys(fields, {"schema_version", "step_id", "type", "thought", "requires_followup", "query", "category", "max_results", "include_schemas"}, error)) {
+            error = "tool_discovery may only contain schema_version, step_id, type, thought, requires_followup, query, category, max_results, and include_schemas.";
             return false;
         }
         return true;

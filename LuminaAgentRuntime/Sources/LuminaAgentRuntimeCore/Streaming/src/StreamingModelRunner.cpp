@@ -11,6 +11,13 @@ namespace LuminaAgent {
 StreamingModelRunner::StreamingModelRunner(const RuntimeCallbacks &callbacks)
     : callbacks_(callbacks) {}
 
+static std::string excerpt(const std::string &text, size_t limit) {
+    if (text.size() <= limit) {
+        return text;
+    }
+    return text.substr(0, limit) + "...";
+}
+
 std::string StreamingModelRunner::generate(const std::string &plannerInput) const {
     const auto started = std::chrono::steady_clock::now();
     callbacks_.emitEvent("model_generation_started", "{\"input_characters\":" + std::to_string(plannerInput.size()) + "}");
@@ -30,7 +37,9 @@ std::string StreamingModelRunner::generate(const std::string &plannerInput) cons
             ",\"tokens_per_second\":" + std::to_string(tokensPerSecond) +
             ",\"chunk_count\":" + std::to_string(result.chunkCount) +
             ",\"extracted_standard_step\":" + jsonBool(!extracted.empty()) +
-            ",\"output_characters\":" + std::to_string(modelText.size()) + "}"
+            ",\"raw_output_excerpt\":" + jsonString(excerpt(result.text, 1600)) +
+            ",\"output_characters\":" + std::to_string(modelText.size()) +
+            ",\"output_excerpt\":" + jsonString(excerpt(modelText, 1200)) + "}"
     );
     return modelText;
 }

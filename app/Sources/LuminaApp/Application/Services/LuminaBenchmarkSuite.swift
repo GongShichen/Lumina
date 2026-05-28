@@ -2,9 +2,12 @@ import Foundation
 
 enum LuminaBenchmarkSuite {
     static func makeTasks(count: Int = 200) -> [LuminaBenchmarkTask] {
-        (0..<count).map { index in
-            let template = templates[index % templates.count]
-            let suffix = index < templates.count ? "" : "（benchmark #\(index + 1)）"
+        let availableTemplates = templates.filter { template in
+            !template.tools.contains(where: isUnavailableForCurrentBenchmarkPlatform)
+        }
+        return (0..<count).map { index in
+            let template = availableTemplates[index % availableTemplates.count]
+            let suffix = index < availableTemplates.count ? "" : "（benchmark #\(index + 1)）"
             return LuminaBenchmarkTask(
                 id: "task-\(String(format: "%03d", index + 1))",
                 text: template.text + suffix,
@@ -14,6 +17,14 @@ enum LuminaBenchmarkSuite {
                 cleanupPrefixes: template.tools.contains(where: sideEffectTools.contains) ? ["LuminaTest", "test"] : []
             )
         }
+    }
+
+    private static func isUnavailableForCurrentBenchmarkPlatform(_ toolName: String) -> Bool {
+        #if targetEnvironment(macCatalyst)
+        return toolName == "message.compose" || toolName == "phone.call"
+        #else
+        return false
+        #endif
     }
 
     private static let sideEffectTools: Set<String> = [

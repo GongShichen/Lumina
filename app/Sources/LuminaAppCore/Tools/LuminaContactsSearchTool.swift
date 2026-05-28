@@ -44,6 +44,7 @@ public struct LuminaContactsSearchTool: LuminaAgentTool {
 
     private static func jsonObject(_ contact: LuminaContactSearchResult) -> LuminaJSONValue {
         .object([
+            "identifier": contact.identifier.map(LuminaJSONValue.string) ?? .null,
             "name": .string(contact.name),
             "phones": .array(contact.phones.map(LuminaJSONValue.string)),
             "emails": .array(contact.emails.map(LuminaJSONValue.string)),
@@ -54,9 +55,10 @@ public struct LuminaContactsSearchTool: LuminaAgentTool {
     private static func markdown(_ contacts: [LuminaContactSearchResult]) -> String {
         guard !contacts.isEmpty else { return "## 联系人\n\n没有找到匹配联系人。" }
         let rows = contacts.map { contact in
+            let identifier = contact.identifier.map { "id=\($0)；" } ?? ""
             let phones = contact.phones.isEmpty ? "无电话" : contact.phones.joined(separator: ", ")
             let emails = contact.emails.isEmpty ? "无邮箱" : contact.emails.joined(separator: ", ")
-            return "- **\(contact.name)**：\(phones)；\(emails)"
+            return "- **\(contact.name)**：\(identifier)\(phones)；\(emails)"
         }
         return "## 联系人\n\n" + rows.joined(separator: "\n")
     }

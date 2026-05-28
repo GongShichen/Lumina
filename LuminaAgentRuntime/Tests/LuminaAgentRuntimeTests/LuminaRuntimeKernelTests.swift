@@ -94,6 +94,81 @@ private let luminaNeedsContextThenFinalModelCallback: LuminaAgentModelCallback =
     return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
 }
 
+private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Need focused calendar schema.","query":"calendar","category":"pim","max_results":2,"include_schemas":true,"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call <= 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-open","type":"tool_use","thought":"Open the external surface once.","tool_name":"external.open","parameters":{"target":"compose","payload":"Hello"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-a","type":"tool_use","thought":"Lookup A.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}"#)
+    }
+    if call == 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-b","type":"tool_use","thought":"Lookup B.","tool_name":"data.lookup","parameters":{"query":"B"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaDifferentIdempotencyKeysThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-one","type":"tool_use","thought":"Create first instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"one"},"requires_followup":true}"#)
+    }
+    if call == 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-two","type":"tool_use","thought":"Create second instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"two"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaAlwaysExecuteThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call <= 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-status","type":"tool_use","thought":"Read fresh status.","tool_name":"status.read","parameters":{"scope":"live"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-first","type":"tool_use","thought":"Call once.","tool_name":"canonical.action","parameters":{"b":"2","a":"1"},"requires_followup":true}"#)
+    }
+    if call == 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-second","type":"tool_use","thought":"Call duplicate with reordered parameters.","tool_name":"canonical.action","parameters":{"a":"1","b":"2"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
 private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
     let request = contextRequest.map { String(cString: $0) } ?? ""
     if request.contains(#""request_more_context":true"#) {
@@ -122,6 +197,16 @@ private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
 }
 
+private func registerAskUserSchema(on runtime: OpaquePointer) {
+    let pointer = LuminaAgentRuntimeRegisterToolSchema(
+        runtime,
+        #"{"name":"ask_user","description":"Ask the user for missing information.","category":"control","searchHint":"clarify user preference choice question","sideEffect":"readOnly","readOnly":true,"requiresUserInteraction":true,"parameters":[{"name":"questions","type":"array","required":true},{"name":"reason","type":"string","required":false},{"name":"sensitivity","type":"string","required":false},{"name":"timeoutSeconds","type":"number","required":false},{"name":"allow_custom_answer","type":"boolean","required":false}]}"#
+    )
+    if let pointer {
+        LuminaAgentRuntimeReleaseString(pointer)
+    }
+}
+
 final class LuminaRuntimeKernelTests: XCTestCase {
     override func setUp() {
         super.setUp()
@@ -129,7 +214,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     }
 
     func testTaskEnvelopeIsSemanticAndMultimodalWithoutRawRequest() throws {
-        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":1}"#) else {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
             XCTFail("Failed to create runtime")
             return
         }
@@ -167,7 +252,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     }
 
     func testStreamingModelCallbackEmitsGenerationEvents() throws {
-        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":1}"#) else {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
             XCTFail("Failed to create runtime")
             return
         }
@@ -190,12 +275,13 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     }
 
     func testExplicitSessionPausesForAskUserAndExportsTrace() throws {
-        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":2}"#) else {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 2)) else {
             XCTFail("Failed to create runtime")
             return
         }
         defer { LuminaAgentRuntimeDestroy(runtime) }
         LuminaAgentRuntimeSetModelCallback(runtime, luminaAskUserModelCallback, nil)
+        registerAskUserSchema(on: runtime)
 
         guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"ask","text":"帮我规划一下","content":[{"modality":"text","text":"帮我规划一下"}]}"#) else {
             XCTFail("Failed to create session")
@@ -223,12 +309,13 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     }
 
     func testExplicitSessionCanResumeAfterAskUserAnswer() throws {
-        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":3}"#) else {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
             XCTFail("Failed to create runtime")
             return
         }
         defer { LuminaAgentRuntimeDestroy(runtime) }
         LuminaAgentRuntimeSetModelCallback(runtime, luminaAskThenFinalModelCallback, nil)
+        registerAskUserSchema(on: runtime)
 
         guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"ask-resume","text":"帮我规划一下","content":[{"modality":"text","text":"帮我规划一下"}]}"#) else {
             XCTFail("Failed to create session")
@@ -253,7 +340,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     }
 
     func testReasoningCanRequestProgressiveContextDisclosure() throws {
-        guard let runtime = LuminaAgentRuntimeCreate(#"{"maximumReActIterations":3}"#) else {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
             XCTFail("Failed to create runtime")
             return
         }
@@ -270,6 +357,182 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertEqual(inputs.count, 2)
         XCTAssertTrue(inputs[0].contains("首轮摘要"))
         XCTAssertTrue(inputs[1].contains("更深层上下文"))
+    }
+
+    func testToolDiscoveryReturnsFocusedSchemaWithoutExecutingTool() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaToolDiscoveryThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"calendar.search","description":"Search calendar events.","category":"pim","aliases":["find events"],"searchHint":"calendar events schedule","sideEffect":"readOnly","readOnly":true,"concurrencySafe":true,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"discover","text":"有哪些日历工具","content":[{"modality":"text","text":"有哪些日历工具"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[]"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""calendar.search""#))
+    }
+
+    func testIdenticalToolCallReplaysPreviousObservationWithoutExecutingAgain() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaRepeatedIdenticalToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"external.open","description":"Open an external user-visible surface.","category":"external","sideEffect":"externalCommunication","requiresUserInteraction":true,"idempotencyPolicy":"replay_identical","parameters":[{"name":"target","type":"string","required":true},{"name":"payload","type":"string","required":true}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"external","text":"打开外部界面","content":[{"modality":"text","text":"打开外部界面"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().first?.contains(#""toolName":"external.open""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().first?.contains(#""status":"succeeded""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains(#""replayed":true"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains("Runtime 已检测到同一个 tool_name + parameters") == true)
+    }
+
+    func testSameToolDifferentParametersExecuteSeparately() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaDifferentParametersThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"data.lookup","description":"Lookup local data.","category":"data","sideEffect":"readOnly","idempotencyPolicy":"replay_identical","parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"lookup","text":"查询两个值","content":[{"modality":"text","text":"查询两个值"}]}"#)
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        XCTAssertEqual(LuminaRuntimeCaptureStore.shared.snapshot().toolCallCount, 2)
+    }
+
+    func testSameParametersWithDifferentIdempotencyKeysExecuteSeparately() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaDifferentIdempotencyKeysThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"record.create","description":"Create a record.","category":"data","sideEffect":"appLocalWrite","idempotencyPolicy":"caller_keyed","parameters":[{"name":"title","type":"string","required":true},{"name":"idempotency_key","type":"string","required":false}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"records","text":"创建两条记录","content":[{"modality":"text","text":"创建两条记录"}]}"#)
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        XCTAssertEqual(LuminaRuntimeCaptureStore.shared.snapshot().toolCallCount, 2)
+    }
+
+    func testAlwaysExecutePolicyBypassesReplay() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaAlwaysExecuteThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"status.read","description":"Read volatile status.","category":"system","sideEffect":"readOnly","idempotencyPolicy":"always_execute","parameters":[{"name":"scope","type":"string","required":true}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"status","text":"读取两次实时状态","content":[{"modality":"text","text":"读取两次实时状态"}]}"#)
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        XCTAssertEqual(LuminaRuntimeCaptureStore.shared.snapshot().toolCallCount, 2)
+    }
+
+    func testCanonicalParameterOrderingFeedsReplayLedger() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaReorderedParametersThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"canonical.action","description":"Action with canonical parameters.","category":"data","sideEffect":"readOnly","idempotencyPolicy":"replay_identical","parameters":[{"name":"a","type":"string","required":true},{"name":"b","type":"string","required":true}]}"#
+        )
+        if let schemaPointer {
+            LuminaAgentRuntimeReleaseString(schemaPointer)
+        }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"canonical","text":"重复参数顺序不同","content":[{"modality":"text","text":"重复参数顺序不同"}]}"#)
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains(#""duplicate_of":"tool-call-1""#) == true)
+    }
+
+    func testRuntimeRequiresCallerProvidedBudgets() throws {
+        guard let runtime = LuminaAgentRuntimeCreate("{}") else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"missing-budget","text":"hello"}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+
+        XCTAssertTrue(result.contains("Runtime 配置无效"))
+        XCTAssertTrue(result.contains("missing required runtime budget"))
     }
 
     func testToolSchemaValidationRejectsMissingRequiredArgumentsBeforeExecution() async {
@@ -292,7 +555,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
             stepGenerator: ScriptedLuminaReActModel(steps: [
                 .action(thought: "search", call: LuminaToolCall(toolName: "local.search", arguments: [:])),
                 .final("done")
-            ])
+            ]),
+            configuration: luminaTestRuntimeConfiguration
         )
 
         let result = await runtime.run(request: LuminaAgentRequest(text: "查一下"))

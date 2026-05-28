@@ -31,8 +31,8 @@ std::string TaskEnvelopeBuilder::build(
            << "\"available_tools\":{"
            << "\"mode\":\"progressive_disclosure\","
            << "\"capabilities\":" << tools_.capabilityListJson() << ","
-           << "\"focused_schemas\":" << (tools_.toolCount() <= 24 ? tools_.modelFacingSchemasJson() : "[]") << ","
-           << "\"discovery_hint\":\"Use capability names first. Request or use a specific tool only when its parameters are clear from parameter_names or focused_schemas.\""
+           << "\"focused_schemas\":[],"
+           << "\"discovery_hint\":\"Use capability names first. Emit a tool_discovery step when a focused schema is needed before tool_use.\""
            << "},"
            << "\"context\":{"
            << "\"loaded_sections\":" << contextSectionsJson(contextJson)
@@ -181,17 +181,18 @@ std::string TaskEnvelopeBuilder::executionBudgetJson() const {
     const int iteration = session_.stepCount();
     const int remainingIterations = std::max(0, session_.maximumReActIterations() - iteration);
     const int remainingToolCalls = std::max(0, session_.maximumToolCalls() - session_.actionCount());
-    const bool shouldBeConcise = remainingIterations <= 2 || remainingToolCalls <= 1;
-    const bool mustFinalizeSoon = remainingIterations <= 1 || remainingToolCalls <= 0;
     std::ostringstream output;
     output << "{"
            << "\"iteration\":" << iteration << ","
            << "\"remaining_iterations\":" << remainingIterations << ","
            << "\"remaining_tool_calls\":" << remainingToolCalls << ","
+           << "\"context_window_tokens\":" << session_.contextWindowTokens() << ","
            << "\"remaining_context_tokens_estimate\":" << session_.remainingContextTokensEstimate() << ","
+           << "\"max_output_tokens\":" << session_.maxOutputTokens() << ","
+           << "\"reserved_output_tokens\":" << session_.reservedOutputTokens() << ","
            << "\"max_observation_characters\":" << session_.maximumObservationCharacters() << ","
-           << "\"should_be_concise\":" << jsonBool(shouldBeConcise) << ","
-           << "\"must_finalize_soon\":" << jsonBool(mustFinalizeSoon)
+           << "\"tool_result_token_budget\":" << session_.toolResultTokenBudget() << ","
+           << "\"compact_threshold_tokens\":" << session_.compactThresholdTokens()
            << "}";
     return output.str();
 }

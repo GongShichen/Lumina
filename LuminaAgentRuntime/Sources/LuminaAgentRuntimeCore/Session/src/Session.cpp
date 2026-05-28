@@ -23,6 +23,7 @@ RunStatus RuntimeSession::status() const {
     }
     if (terminationReason_ == "cannot-complete" ||
         terminationReason_ == "reasoning-budget" ||
+        terminationReason_ == "replay-loop" ||
         terminationReason_ == "model-empty-output" ||
         terminationReason_ == "invalid-model-output") {
         return RunStatus::failed;
@@ -49,6 +50,7 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"reasoningCount\":" << reasoningCount_ << ","
            << "\"observationCount\":" << observationCount_ << ","
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
+           << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate() << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
            << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
            << "}";
@@ -93,6 +95,10 @@ std::string RuntimeSession::recordStep(const std::string &stepJson) {
         consecutiveReasoningCount_ += 1;
     } else {
         consecutiveReasoningCount_ = 0;
+        if (type != "tool_use" && type != "ask_user" && type != "multi_tool_use") {
+            lastReplayDedupKey_.clear();
+            consecutiveReplayObservationCount_ = 0;
+        }
     }
 
     if (type == "tool_use" || type == "ask_user" || type == "multi_tool_use") {
@@ -170,7 +176,8 @@ std::string RuntimeSession::recordObservation(
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
            << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
            << "}";
-    return output.str();
+    lastObservationJson_ = output.str();
+    return lastObservationJson_;
 }
 
 std::string RuntimeSession::recordFinal(const std::string &markdown) {
@@ -266,11 +273,105 @@ int RuntimeSession::stepCount() const { return stepCount_; }
 int RuntimeSession::actionCount() const { return actionCount_; }
 int RuntimeSession::maximumReActIterations() const { return config_.maximumReActIterations; }
 int RuntimeSession::maximumToolCalls() const { return config_.maximumToolCalls; }
+int RuntimeSession::maxOutputTokens() const { return config_.maxOutputTokens; }
+int RuntimeSession::reservedOutputTokens() const { return config_.reservedOutputTokens; }
+int RuntimeSession::contextWindowTokens() const { return config_.contextWindowTokens; }
+int RuntimeSession::compactThresholdTokens() const { return config_.compactThresholdTokens; }
+int RuntimeSession::maximumCompactFailures() const { return config_.maximumCompactFailures; }
 int RuntimeSession::maximumObservationCharacters() const { return config_.maximumObservationCharacters; }
-int RuntimeSession::remainingContextTokensEstimate() const { return std::max(0, config_.maximumContextTokens - (stepCount_ * 160 + observationCount_ * 240)); }
+int RuntimeSession::toolResultTokenBudget() const { return config_.toolResultTokenBudget; }
+int RuntimeSession::remainingContextTokensEstimate() const { return std::max(0, config_.contextWindowTokens - contextTokenUsageEstimate_); }
 bool RuntimeSession::hasFinal() const { return hasFinal_; }
 bool RuntimeSession::isTerminated() const { return hasFinal_ || !terminationReason_.empty(); }
 int RuntimeSession::consecutiveReasoningCount() const { return consecutiveReasoningCount_; }
+int RuntimeSession::maximumConsecutiveReasoningSteps() const { return config_.maximumConsecutiveReasoningSteps; }
+int RuntimeSession::maximumConsecutiveReplayObservations() const { return config_.maximumConsecutiveReplayObservations; }
+int RuntimeSession::compactFailureCount() const { return compactFailureCount_; }
+
+void RuntimeSession::setContextTokenUsageEstimate(int usedTokens) {
+    contextTokenUsageEstimate_ = std::max(0, usedTokens);
+}
+
+void RuntimeSession::recordCompactFailure() {
+    compactFailureCount_ += 1;
+}
+
+void RuntimeSession::resetCompactFailures() {
+    compactFailureCount_ = 0;
+}
+
+std::string RuntimeSession::nextToolCallId() {
+    toolCallSequence_ += 1;
+    return "tool-call-" + std::to_string(toolCallSequence_);
+}
+
+const ToolCallLedgerEntry *RuntimeSession::findReplayableToolCall(const std::string &dedupKey) const {
+    auto it = toolCallLedger_.find(dedupKey);
+    if (it == toolCallLedger_.end() || !it->second.replayable) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+void RuntimeSession::recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry) {
+    if (!entry.dedupKey.empty()) {
+        toolCallLedger_[entry.dedupKey] = entry;
+    }
+}
+
+std::string RuntimeSession::recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry) {
+    const std::string resultStatus = lowercased(entry.status.empty() ? "succeeded" : entry.status);
+    if (resultStatus == "succeeded") {
+        hasSucceededTool_ = true;
+    } else if (resultStatus == "cancelled") {
+        hasCancelledTool_ = true;
+    } else {
+        hasFailedTool_ = true;
+    }
+
+    const std::string summary =
+        "Runtime 已检测到同一个 tool_name + parameters 在本 session 中执行过，因此没有再次执行工具。"
+        "请基于上一轮结果继续；如果任务已经完成，请输出 final_answer；不要再次调用相同参数。"
+        "上一轮状态：" + resultStatus + "。上一轮摘要：" + entry.summary;
+    observationCount_ += 1;
+    observations_.push_back(summary);
+    if (entry.dedupKey == lastReplayDedupKey_) {
+        consecutiveReplayObservationCount_ += 1;
+    } else {
+        lastReplayDedupKey_ = entry.dedupKey;
+        consecutiveReplayObservationCount_ = 1;
+    }
+    if (config_.maximumConsecutiveReplayObservations > 0 &&
+        consecutiveReplayObservationCount_ >= config_.maximumConsecutiveReplayObservations) {
+        hasFinal_ = true;
+        terminationReason_ = "replay-loop";
+        finalMarkdown_ = "### 无法继续执行\n\n模型连续重复同一个 tool call，runtime 已复用上一轮 observation 并停止重复执行。请根据上一轮 observation 选择下一步工具或输出最终回答。";
+    }
+    appendTrace(
+        "observation_created",
+        "{\"toolName\":" + jsonString(toolName) +
+            ",\"status\":" + jsonString(resultStatus) +
+            ",\"summary\":" + jsonString(summary) +
+            ",\"replayed\":true," +
+            "\"replay_count\":" + std::to_string(consecutiveReplayObservationCount_) + "," +
+            "\"duplicate_of\":" + jsonString(entry.callId) + "}"
+    );
+
+    std::ostringstream output;
+    output << "{\"ok\":true,"
+           << "\"toolName\":" << jsonString(toolName) << ","
+           << "\"status\":" << jsonString(resultStatus) << ","
+           << "\"summary\":" << jsonString(summary) << ","
+           << "\"errorMessage\":\"\","
+           << "\"replayed\":true,"
+           << "\"replay_count\":" << consecutiveReplayObservationCount_ << ","
+           << "\"duplicate_of\":" << jsonString(entry.callId) << ","
+           << "\"terminationReason\":" << jsonString(terminationReason_) << ","
+           << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
+           << "}";
+    lastObservationJson_ = output.str();
+    return lastObservationJson_;
+}
 
 void RuntimeSession::cancel() {
     cancelled_ = true;

@@ -19,7 +19,8 @@ public struct LuminaSubscriptionAddTool: LuminaAgentTool {
             sideEffect: .appLocalWrite,
             sensitivity: .normal,
             acceptedInputModalities: [.text, .file, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            idempotencyPolicy: "caller_keyed"
         )
     }
 
