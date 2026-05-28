@@ -115,6 +115,9 @@ final class AgentHomeViewModel: ObservableObject {
             guard let self else { return }
             await services.waitUntilLoaded()
             guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
+            self.benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "正在一次性申请工具权限", completed: 0, total: 200)
+            await LuminaBenchmarkPermissionWarmup.requestAllNeededPermissions()
+            guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
             let runner = services.makeBenchmarkRunner()
             _ = await runner.run(taskCount: 200) { snapshot in
                 guard self.benchmarkRunID == runID else { return }

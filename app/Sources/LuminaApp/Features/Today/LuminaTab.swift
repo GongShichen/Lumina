@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 enum LuminaTab {
     case agent
     case memory
-    case audit
+    case settings
     case runtime
+}
+
+enum LuminaFeatureFlags {
+    static let showTrustTab = false
 }

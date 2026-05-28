@@ -13,6 +13,7 @@ final class AgentAppServices: ObservableObject {
     let askUser: AskUserCoordinator
     let modelReadiness: LuminaModelReadinessStore
     let modelMetrics: LuminaModelInferenceMetricsStore
+    let remoteInferenceSettings: LuminaRemoteInferenceSettingsStore
     let auditLogger: any LuminaAuditLogger
     let auditLogReader: (any LuminaAuditLogReader)?
     private let environment: AppEnvironment
@@ -82,6 +83,7 @@ final class AgentAppServices: ObservableObject {
         self.askUser = environment.askUser
         self.modelReadiness = environment.modelReadiness
         self.modelMetrics = environment.modelMetrics
+        self.remoteInferenceSettings = environment.remoteInferenceSettings
         self.auditLogger = environment.auditLogger
         self.auditLogReader = environment.auditLogReader
         let memoryStore = environment.memoryStore

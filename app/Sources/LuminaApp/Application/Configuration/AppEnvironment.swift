@@ -11,6 +11,7 @@ struct AppEnvironment {
     var askUser: AskUserCoordinator
     var modelReadiness: LuminaModelReadinessStore
     var modelMetrics: LuminaModelInferenceMetricsStore
+    var remoteInferenceSettings: LuminaRemoteInferenceSettingsStore
     var auditLogger: any LuminaAuditLogger
     var auditLogReader: (any LuminaAuditLogReader)?
     var stepGenerator: any LuminaReActStepGenerator
@@ -26,6 +27,7 @@ struct AppEnvironment {
 
         let modelReadiness = LuminaModelReadinessStore()
         let modelMetrics = LuminaModelInferenceMetricsStore()
+        let remoteInferenceSettings = LuminaRemoteInferenceSettingsStore()
         let memoryRepository = LuminaJSONMemoryRepository(url: appSupport.appendingPathComponent("memory-index.json"))
         let memoryStore = LuminaMemoryStore(
             embeddingProvider: LocalModelBootstrap.makeEmbeddingProvider(readinessStore: modelReadiness),
@@ -50,9 +52,15 @@ struct AppEnvironment {
             askUser: AskUserCoordinator(),
             modelReadiness: modelReadiness,
             modelMetrics: modelMetrics,
+            remoteInferenceSettings: remoteInferenceSettings,
             auditLogger: auditLogger,
             auditLogReader: auditLogger,
-            stepGenerator: LocalModelBootstrap.makeStepGenerator(readinessStore: modelReadiness, metricsStore: modelMetrics, memoryStore: memoryStore),
+            stepGenerator: LocalModelBootstrap.makeStepGenerator(
+                readinessStore: modelReadiness,
+                metricsStore: modelMetrics,
+                memoryStore: memoryStore,
+                remoteSettings: remoteInferenceSettings
+            ),
             contextProvider: LuminaEmptyRuntimeContextProvider(),
             runtimeConfiguration: LuminaAgentRuntimeConfiguration(
                 maximumToolCalls: 8,

@@ -1,6 +1,9 @@
 import LuminaAgentRuntime
+import Contacts
+import CoreLocation
 @preconcurrency import EventKit
 import Foundation
+import UserNotifications
 
 @MainActor
 final class LuminaInAppBenchmarkRunner {
@@ -660,5 +663,46 @@ private enum LuminaBenchmarkSemanticEvaluator {
         case .null:
             return ""
         }
+    }
+}
+
+@MainActor
+enum LuminaBenchmarkPermissionWarmup {
+    static func requestAllNeededPermissions() async {
+        async let calendar: Void = requestCalendarAccess()
+        async let reminders: Void = requestReminderAccess()
+        async let contacts: Void = requestContactsAccess()
+        async let notifications: Void = requestNotificationAccess()
+        async let location: Void = requestLocationAccess()
+        _ = await (calendar, reminders, contacts, notifications, location)
+    }
+
+    private static func requestCalendarAccess() async {
+        let store = EKEventStore()
+        guard EKEventStore.authorizationStatus(for: .event) == .notDetermined else { return }
+        _ = try? await store.requestFullAccessToEvents()
+    }
+
+    private static func requestReminderAccess() async {
+        let store = EKEventStore()
+        guard EKEventStore.authorizationStatus(for: .reminder) == .notDetermined else { return }
+        _ = try? await store.requestFullAccessToReminders()
+    }
+
+    private static func requestContactsAccess() async {
+        let store = CNContactStore()
+        guard CNContactStore.authorizationStatus(for: .contacts) == .notDetermined else { return }
+        _ = try? await store.requestAccess(for: .contacts)
+    }
+
+    private static func requestNotificationAccess() async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .notDetermined else { return }
+        _ = try? await center.requestAuthorization(options: [.alert, .sound])
+    }
+
+    private static func requestLocationAccess() async {
+        _ = try? await LuminaLocationRequestCoordinator().currentLocation()
     }
 }
