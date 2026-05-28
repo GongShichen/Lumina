@@ -50,15 +50,20 @@ final class LuminaInAppBenchmarkRunner {
             let actualSet = Set(actualTools)
             let missingTools = expectedSet.subtracting(actualSet).sorted()
             let unexpectedTools = actualSet.subtracting(expectedSet).sorted()
+            let semanticFailures = LuminaBenchmarkSemanticEvaluator.evaluate(task: task, result: result)
             let toolMismatchSummary = missingTools.isEmpty && unexpectedTools.isEmpty
                 ? nil
                 : "Expected tools did not match executions. missing=\(missingTools.joined(separator: ",")); unexpected=\(unexpectedTools.joined(separator: ","))"
-            let failure = result.status == .succeeded ? toolMismatchSummary : result.plan.summary
+            let semanticSummary = semanticFailures.isEmpty ? nil : "Semantic validation failed: \(semanticFailures.joined(separator: "; "))"
+            let failure = [result.status == .succeeded ? nil : result.plan.summary, toolMismatchSummary, semanticSummary]
+                .compactMap { $0 }
+                .joined(separator: "\n")
             let taskResult = LuminaBenchmarkTaskResult(
                 task: task,
                 toolAttempts: toolAttempts,
                 actualTools: actualTools,
                 toolReplays: toolReplays,
+                semanticFailures: semanticFailures,
                 status: result.status.rawValue,
                 totalMilliseconds: result.timing.totalMilliseconds,
                 observedTimings: observedTimings,
@@ -74,6 +79,8 @@ final class LuminaInAppBenchmarkRunner {
                 "status": taskResult.status,
                 "missingTools": missingTools.joined(separator: ","),
                 "unexpectedTools": unexpectedTools.joined(separator: ","),
+                "semanticPassed": "\(semanticFailures.isEmpty)",
+                "semanticFailures": semanticFailures.joined(separator: "; "),
                 "attempts": toolAttempts.joined(separator: ","),
                 "executions": actualTools.joined(separator: ","),
                 "replays": toolReplays.joined(separator: ","),
@@ -275,7 +282,8 @@ final class LuminaInAppBenchmarkRunner {
 
     private func markdown(_ report: LuminaBenchmarkReport) -> String {
         let rows = report.results.prefix(200).map { result in
-            "| \(result.taskID) | \(result.status) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(Int(result.systemPermissionWaitMilliseconds))ms | \(result.toolAttemptCount) | \(result.toolExecutionCount) | \(result.toolReplayCount) | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
+            let semantic = result.semanticPassed ? "pass" : result.semanticFailures.joined(separator: "; ").truncated(to: 120)
+            return "| \(result.taskID) | \(result.status) | \(result.semanticPassed ? "yes" : "no") | \(semantic) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(Int(result.systemPermissionWaitMilliseconds))ms | \(result.toolAttemptCount) | \(result.toolExecutionCount) | \(result.toolReplayCount) | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
         }.joined(separator: "\n")
         return """
         # Lumina In-App Benchmark Report
@@ -286,6 +294,7 @@ final class LuminaInAppBenchmarkRunner {
         - Tasks: \(report.completedCount)/\(report.taskCount)
         - Succeeded: \(report.succeededCount)
         - Failed: \(report.failedCount)
+        - Semantic pass: \(report.semanticPassedCount)/\(report.completedCount) (\(format(report.semanticPassRate)))
         - Exact tool match: \(format(report.exactToolMatch))
         - Micro precision: \(format(report.microPrecision))
         - Micro recall: \(format(report.microRecall))
@@ -307,8 +316,8 @@ final class LuminaInAppBenchmarkRunner {
         - Output tokens p95: \(optionalNumber(report.modelOutputTokensP95))
 
         ## Tasks
-        | Task | Status | Tool F1 | Active latency | Wall clock | Permission wait | Attempts | Executions | Replays | Executed tools | Model calls |
-        | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+        | Task | Status | Semantic | Semantic detail | Tool F1 | Active latency | Wall clock | Permission wait | Attempts | Executions | Replays | Executed tools | Model calls |
+        | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
         \(rows)
         """
     }
@@ -398,5 +407,258 @@ final class LuminaInAppBenchmarkRunner {
             reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
         }
         try eventStore.save(reminder, commit: true)
+    }
+}
+
+private enum LuminaBenchmarkSemanticEvaluator {
+    static func evaluate(task: LuminaBenchmarkTask, result: LuminaAgentRunResult) -> [String] {
+        var failures: [String] = []
+        let executedResults = result.toolResults.filter { $0.output["replayed"]?.boolValue != true }
+        for toolResult in executedResults where toolResult.status != .succeeded {
+            failures.append("\(toolResult.toolName) status=\(toolResult.status.rawValue)")
+        }
+        let text = task.text
+        for toolName in Set(task.expectedTools) where Set(executedResults.map(\.toolName)).contains(toolName) {
+            failures.append(contentsOf: validate(toolName: toolName, taskText: text, result: result, toolResults: executedResults))
+        }
+        return failures
+    }
+
+    private static func validate(
+        toolName: String,
+        taskText: String,
+        result: LuminaAgentRunResult,
+        toolResults: [LuminaToolResult]
+    ) -> [String] {
+        let calls = result.plan.toolCalls.filter { $0.toolName == toolName }
+        guard !calls.isEmpty else { return ["\(toolName) had no recorded call arguments"] }
+        let lastCall = calls.last
+        let lastOutput = toolResults.last { $0.toolName == toolName }?.output ?? [:]
+        var failures: [String] = []
+
+        func requireArgument(_ key: String, contains needle: String, label: String? = nil) {
+            guard let value = lastCall?.arguments.string(key), value.localizedCaseInsensitiveContains(needle) else {
+                failures.append("\(toolName).\(key) should contain \(label ?? needle)")
+                return
+            }
+        }
+
+        func requireAnyArgument(_ key: String, contains needles: [String]) {
+            guard let value = lastCall?.arguments.string(key),
+                  needles.contains(where: { value.localizedCaseInsensitiveContains($0) }) else {
+                failures.append("\(toolName).\(key) should contain one of \(needles.joined(separator: ","))")
+                return
+            }
+        }
+
+        func requireOutput(_ key: String, contains needle: String) {
+            guard valueText(lastOutput[key]).localizedCaseInsensitiveContains(needle) else {
+                failures.append("\(toolName) output.\(key) should contain \(needle)")
+                return
+            }
+        }
+
+        func requireDateArgument(_ key: String, hour: Int? = nil, minute: Int? = nil, future: Bool = false) {
+            guard let raw = lastCall?.arguments.string(key), let date = parseDate(raw) else {
+                failures.append("\(toolName).\(key) should be a valid ISO-8601 date")
+                return
+            }
+            let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+            if let hour, components.hour != hour {
+                failures.append("\(toolName).\(key) hour should be \(hour)")
+            }
+            if let minute, components.minute != minute {
+                failures.append("\(toolName).\(key) minute should be \(minute)")
+            }
+            if future && date < Date().addingTimeInterval(-300) {
+                failures.append("\(toolName).\(key) should be in the future")
+            }
+        }
+
+        switch toolName {
+        case "device.current_time", "device.power_status", "network.status", "storage.status", "location.current":
+            break
+        case "calendar.search":
+            if taskText.contains("会议") {
+                requireArgument("query", contains: "会议")
+            } else if taskText.contains("LuminaTest") {
+                requireArgument("query", contains: "LuminaTest")
+            }
+        case "calendar.create":
+            requireArgument("title", contains: "LuminaTest")
+            if taskText.contains("上厕所") { requireArgument("title", contains: "上厕所") }
+            requireDateArgument("startDateISO", hour: 7, minute: 0, future: true)
+        case "calendar.update":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+            requireDateArgument("startDateISO", hour: 7, minute: 30, future: true)
+        case "calendar.delete":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+        case "calendar.availability":
+            requireDateArgument("startDateISO", hour: 15, minute: 0, future: true)
+            requireDateArgument("endDateISO", hour: 16, minute: 0, future: true)
+        case "reminder.search":
+            if taskText.contains("带伞") {
+                requireArgument("query", contains: "带伞")
+            }
+        case "reminder.create":
+            requireArgument("title", contains: "LuminaTest")
+            requireArgument("title", contains: "带伞")
+            requireDateArgument("dueDateISO", hour: 8, minute: 0, future: true)
+        case "reminder.update":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+            requireDateArgument("dueDateISO", hour: 8, minute: 30, future: true)
+        case "reminder.complete", "reminder.delete":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+        case "contacts.search", "contacts.open":
+            requireAnyArgument("query", contains: ["test", "LuminaTest"])
+        case "contacts.create":
+            requireArgument("name", contains: "LuminaTest")
+            requireArgument("name", contains: "test")
+            requireArgument("phone", contains: "10086")
+        case "contacts.update":
+            if lastCall?.arguments.string("id") == nil {
+                requireArgument("name", contains: "LuminaTest")
+            }
+            requireArgument("email", contains: "test@example.com")
+        case "message.compose":
+            requireArgument("recipient", contains: "test")
+            requireArgument("body", contains: "十分钟后到")
+        case "email.compose":
+            requireArgument("recipient", contains: "test")
+            requireArgument("subject", contains: "LuminaTest")
+            requireArgument("subject", contains: "周报")
+        case "maps.search":
+            requireAnyArgument("query", contains: ["咖啡", "coffee"])
+        case "maps.route":
+            requireAnyArgument("destination", contains: ["Apple Park", "apple"])
+        case "notification.schedule":
+            requireAnyArgument("title", contains: ["LuminaTest", "喝水"])
+            requireAnyArgument("body", contains: ["LuminaTest", "喝水"])
+            requireScheduleArgument(taskText: taskText, call: lastCall, toolName: toolName, failures: &failures)
+        case "clipboard.write":
+            requireArgument("text", contains: "LuminaTest")
+            requireArgument("text", contains: "benchmark")
+        case "file.save_note":
+            if taskText.contains("LuminaTest") {
+                requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest", toolName: toolName, failures: &failures)
+            }
+        case "file.read_note", "file.update_note", "file.delete_note":
+            requireAnyArgument("filename", contains: ["LuminaTest-daily.md", "LuminaTest-daily"])
+        case "ledger.record":
+            requireNumberArgument("amount", expected: 42, toolName: toolName, call: lastCall, failures: &failures)
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest", toolName: toolName, failures: &failures)
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "咖啡", toolName: toolName, failures: &failures)
+        case "ledger.search", "ledger.summary":
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest", toolName: toolName, failures: &failures)
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "咖啡", toolName: toolName, failures: &failures)
+        case "ledger.update":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+            requireNumberArgument("amount", expected: 40, toolName: toolName, call: lastCall, failures: &failures)
+        case "ledger.delete":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+        case "subscription.add":
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "https://example.com/feed.xml", toolName: toolName, failures: &failures)
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest", toolName: toolName, failures: &failures)
+        case "subscription.remove":
+            requireNonEmptyID(lastCall, toolName: toolName, failures: &failures)
+        case "webpage.fetch_text":
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "https://example.com", toolName: toolName, failures: &failures)
+        case "document.read_text":
+            requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest-report.md", toolName: toolName, failures: &failures)
+        case "calculator.evaluate":
+            requireAnyArgument("expression", contains: ["12*(8+3)-5", "12 * (8 + 3) - 5"])
+            if !valueText(lastOutput["result"]).contains("127") && !valueText(lastOutput["summary"]).contains("127") {
+                failures.append("calculator.evaluate output should contain result 127")
+            }
+        case "text.transform":
+            if taskText.contains("LuminaTest") {
+                requireAnyText(in: lastCall?.arguments ?? [:], contains: "LuminaTest", toolName: toolName, failures: &failures)
+            }
+        default:
+            break
+        }
+        if toolName != "share.prepare" && toolName != "app.open_settings" && toolName != "image.extract_text" && toolName != "image.describe_metadata",
+           let toolResult = toolResults.last(where: { $0.toolName == toolName }),
+           toolResult.status == .succeeded,
+           lastOutput.isEmpty {
+            failures.append("\(toolName) returned empty output")
+        }
+        return failures
+    }
+
+    private static func requireNonEmptyID(_ call: LuminaToolCall?, toolName: String, failures: inout [String]) {
+        guard let id = call?.arguments.string("id"), !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            failures.append("\(toolName).id is required for semantic correctness")
+            return
+        }
+    }
+
+    private static func requireScheduleArgument(
+        taskText: String,
+        call: LuminaToolCall?,
+        toolName: String,
+        failures: inout [String]
+    ) {
+        if let raw = call?.arguments.string("dateISO"), let date = parseDate(raw) {
+            if date < Date().addingTimeInterval(-300) {
+                failures.append("\(toolName).dateISO should be in the future")
+            }
+            return
+        }
+        if let seconds = call?.arguments.number("timeIntervalSeconds") {
+            if seconds <= 0 {
+                failures.append("\(toolName).timeIntervalSeconds should be positive")
+            }
+            if taskText.contains("半小时") && !(1_500...2_100).contains(seconds) {
+                failures.append("\(toolName).timeIntervalSeconds should be about 1800 for 半小时")
+            }
+            return
+        }
+        failures.append("\(toolName) should provide future dateISO or positive timeIntervalSeconds")
+    }
+
+    private static func requireAnyArgument(_ key: String, contains needles: [String], toolName: String? = nil, call: LuminaToolCall? = nil, failures: inout [String]) {
+        guard let value = call?.arguments.string(key),
+              needles.contains(where: { value.localizedCaseInsensitiveContains($0) }) else {
+            failures.append("\(toolName.map { "\($0)." } ?? "")\(key) should contain one of \(needles.joined(separator: ","))")
+            return
+        }
+    }
+
+    private static func requireNumberArgument(_ key: String, expected: Double, toolName: String, call: LuminaToolCall?, failures: inout [String]) {
+        guard let value = call?.arguments.number(key), abs(value - expected) < 0.001 else {
+            failures.append("\(toolName).\(key) should be \(expected)")
+            return
+        }
+    }
+
+    private static func requireAnyText(in arguments: [String: LuminaJSONValue], contains needle: String, toolName: String, failures: inout [String]) {
+        let text = arguments.values.map(valueText).joined(separator: " ")
+        guard text.localizedCaseInsensitiveContains(needle) else {
+            failures.append("\(toolName) arguments should contain \(needle)")
+            return
+        }
+    }
+
+    private static func parseDate(_ raw: String) -> Date? {
+        ISO8601DateFormatter().date(from: raw)
+    }
+
+    private static func valueText(_ value: LuminaJSONValue?) -> String {
+        guard let value else { return "" }
+        switch value {
+        case let .string(string):
+            return string
+        case let .number(number):
+            return String(number)
+        case let .bool(bool):
+            return String(bool)
+        case let .object(object):
+            return object.values.map(valueText).joined(separator: " ")
+        case let .array(array):
+            return array.map(valueText).joined(separator: " ")
+        case .null:
+            return ""
+        }
     }
 }

@@ -6,6 +6,8 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let completedCount: Int
     let succeededCount: Int
     let failedCount: Int
+    let semanticPassedCount: Int
+    let semanticPassRate: Double
     let exactToolMatch: Double
     let microPrecision: Double
     let microRecall: Double
@@ -33,6 +35,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let completed = results.count
         let succeeded = results.filter { $0.status == "succeeded" }.count
         let failed = results.filter { $0.status != "succeeded" }.count
+        let semanticPassed = results.filter(\.semanticPassed).count
         let exact = ratio(results.filter(\.exactMatch).count, completed)
         let modelMetrics = results.flatMap(\.modelMetrics)
         let ttft = modelMetrics.compactMap(\.timeToFirstTokenMilliseconds)
@@ -56,6 +59,8 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             completedCount: completed,
             succeededCount: succeeded,
             failedCount: failed,
+            semanticPassedCount: semanticPassed,
+            semanticPassRate: ratio(semanticPassed, completed),
             exactToolMatch: exact,
             microPrecision: precision,
             microRecall: recall,

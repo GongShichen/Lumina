@@ -14,6 +14,8 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let toolReplayCount: Int
     let status: String
     let exactMatch: Bool
+    let semanticPassed: Bool
+    let semanticFailures: [String]
     let recall: Double
     let precision: Double
     let f1: Double
@@ -32,6 +34,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         toolAttempts: [String],
         actualTools: [String],
         toolReplays: [String],
+        semanticFailures: [String],
         status: String,
         totalMilliseconds: Double,
         observedTimings: LuminaObservedRunTimings,
@@ -53,13 +56,15 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         let expected = Set(task.expectedTools)
         let actual = Set(actualTools)
         self.exactMatch = expected == actual
+        self.semanticFailures = semanticFailures
+        self.semanticPassed = semanticFailures.isEmpty
         let truePositive = Double(expected.intersection(actual).count)
         let falsePositive = Double(actual.subtracting(expected).count)
         let falseNegative = Double(expected.subtracting(actual).count)
         self.precision = truePositive + falsePositive == 0 ? 0 : truePositive / (truePositive + falsePositive)
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
-        self.status = status == "succeeded" && (expected.isEmpty || exactMatch) ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
+        self.status = status == "succeeded" && (expected.isEmpty || exactMatch) && semanticFailures.isEmpty ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
         self.totalMilliseconds = totalMilliseconds
         self.activeRuntimeMilliseconds = observedTimings.activeRuntimeMilliseconds
         self.wallClockMilliseconds = observedTimings.wallClockMilliseconds

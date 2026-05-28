@@ -222,7 +222,8 @@ std::string unavailableResponse(
     const char *modelDirectory,
     const char *prompt,
     int maxOutputTokens,
-    int safetyMarginTokens
+    int safetyMarginTokens,
+    const std::string &engineError
 ) {
     const int promptTokens = approximateTokenCount(prompt);
     std::ostringstream json;
@@ -241,7 +242,9 @@ std::string unavailableResponse(
     json << "\"generationMilliseconds\":0,";
     json << "\"totalMilliseconds\":0,";
     json << "\"tokensPerSecond\":0,";
-    json << "\"error\":\"MiniCPM-V 4.6 native GGUF decoder is unavailable. Set LUMINA_MINICPMV46_ENGINE to a built libLuminaMiniCPMV46GGUFEngine.dylib or place it beside model.gguf.\"";
+    json << "\"error\":\"MiniCPM-V 4.6 native GGUF decoder is unavailable. "
+         << escapeJSON(engineError)
+         << "\"";
     json << "}";
     return json.str();
 }
@@ -306,7 +309,8 @@ extern "C" char *LuminaMiniCPMV46GenerateReActJSON(
         modelDirectory,
         prompt,
         maxOutputTokens,
-        safetyMarginTokens
+        safetyMarginTokens,
+        external.error
     ));
 }
 

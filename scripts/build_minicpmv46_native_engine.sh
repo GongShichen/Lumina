@@ -56,4 +56,21 @@ if command -v install_name_tool >/dev/null 2>&1; then
   install_name_tool -id @rpath/libLuminaMiniCPMV46GGUFEngine.dylib "$OUTPUT_DYLIB" || true
 fi
 
+SIGN_IDENTITY="${LUMINA_CODESIGN_IDENTITY:-${EXPANDED_CODE_SIGN_IDENTITY_NAME:-${CODE_SIGN_IDENTITY:-}}}"
+if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
+  SIGN_IDENTITY="$(
+    security find-identity -v -p codesigning 2>/dev/null \
+      | awk -F'"' '/Apple Development/ { print $2; exit }'
+  )"
+fi
+
+if [[ -n "$SIGN_IDENTITY" && "$SIGN_IDENTITY" != "-" ]]; then
+  echo "[Lumina] Signing MiniCPM-V 4.6 native engine dylibs with $SIGN_IDENTITY"
+  for dylib in "$MODEL_DIR"/*.dylib; do
+    codesign --force --sign "$SIGN_IDENTITY" --timestamp=none "$dylib"
+  done
+else
+  echo "[Lumina] Skipping native engine dylib signing; set LUMINA_CODESIGN_IDENTITY to enable hardened-runtime loading." >&2
+fi
+
 echo "[Lumina] Native engine ready: $OUTPUT_DYLIB"
