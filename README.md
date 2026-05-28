@@ -2,7 +2,7 @@
 
 Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它负责 ReAct 执行循环、工具注册与调度、权限检查、用户确认、审计记录和运行时事件。
 
-![Lumina Agent Runtime 架构](docs/runtime-architecture.png)
+Lumina Agent Runtime 架构
 
 ## Runtime 概览
 
@@ -147,9 +147,3 @@ xcodebuild -project app/Lumina.xcodeproj \
 ```bash
 swift test --package-path LuminaAgentRuntime
 ```
-
-## 开发说明
-
-- Runtime API 尽量保持平台无关。
-- 通过共享 contract 和 conformance tests 保持宿主接入行为一致。
-- 不要在 Runtime 代码中写入密钥、本机路径或 app 专属假设。
