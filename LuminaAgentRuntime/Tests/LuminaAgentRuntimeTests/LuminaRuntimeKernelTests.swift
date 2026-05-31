@@ -284,9 +284,9 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         LuminaRuntimeCaptureStore.shared.reset()
     }
 
-    func testCanonicalContractRejectsLegacyFinalAnswerType() {
-        let legacy = #"{"type":"final_answer","content":"done"}"#
-        let result = legacy.withCString { LuminaReActValidateStepJSON($0) }
+    func testCanonicalContractRejectsFinalAnswerType() {
+        let unsupportedStep = #"{"type":"final_answer","content":"done"}"#
+        let result = unsupportedStep.withCString { LuminaReActValidateStepJSON($0) }
         defer { LuminaAgentRuntimeReleaseString(result) }
         let text = result.map { String(cString: $0) } ?? ""
         XCTAssertTrue(text.contains(#""ok":false"#))

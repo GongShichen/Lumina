@@ -548,7 +548,7 @@ char *LuminaAgentRuntimeExportSessionTrace(LuminaAgentRuntimeSessionRef *session
 char *LuminaAgentRuntimeExportContracts(void);
 
 /**
- * Backward-compatible alias for `LuminaAgentRuntimeReleaseString`.
+ * Alias for `LuminaAgentRuntimeReleaseString`.
  */
 void LuminaReActFreeCString(char *value);
 
