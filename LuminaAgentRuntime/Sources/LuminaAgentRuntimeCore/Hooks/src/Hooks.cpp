@@ -52,6 +52,7 @@ static void mergeDirective(RuntimeHookDirectives &target, const std::string &jso
         target.hasRewriteToolCall = true;
         target.rewrittenToolName = stringField(fields, "tool_name", stringField(fields, "toolName"));
         target.rewrittenParametersJson = rawField(fields, "parameters", "{}");
+        target.requiresConfirmation = boolField(fields, "requires_confirmation", boolField(fields, "requiresConfirmation", target.requiresConfirmation));
         return;
     }
     if (type == "require_confirmation") {

@@ -2,6 +2,7 @@ import Foundation
 
 public struct LuminaAgentRuntimeHookContext: Sendable {
     public var request: LuminaAgentRequest
+    public var lifecyclePayload: [String: LuminaJSONValue]
     public var availableTools: [LuminaToolSchema]
     public var trace: LuminaReActTrace
     public var loadedContext: LuminaRuntimeContext
@@ -16,6 +17,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
 
     public init(
         request: LuminaAgentRequest,
+        lifecyclePayload: [String: LuminaJSONValue] = [:],
         availableTools: [LuminaToolSchema] = [],
         trace: LuminaReActTrace = LuminaReActTrace(),
         loadedContext: LuminaRuntimeContext = .empty,
@@ -29,6 +31,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
         errorMessage: String? = nil
     ) {
         self.request = request
+        self.lifecyclePayload = lifecyclePayload
         self.availableTools = availableTools
         self.trace = trace
         self.loadedContext = loadedContext

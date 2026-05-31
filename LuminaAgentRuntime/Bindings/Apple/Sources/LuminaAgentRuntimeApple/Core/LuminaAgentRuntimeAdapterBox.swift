@@ -12,6 +12,8 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     let auditLogger: any LuminaAuditLogger
     let hooks: [any LuminaAgentRuntimeHook]
     let observabilitySinks: LuminaRuntimeObservabilitySinks
+    let guardrails: LuminaRuntimeGuardrails
+    let runtimeState: LuminaRuntimeState
     var currentEventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     var currentRequest: LuminaAgentRequest?
     var trace = LuminaReActTrace()
@@ -33,7 +35,9 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         confirmationCoordinator: any LuminaConfirmationCoordinator,
         auditLogger: any LuminaAuditLogger,
         hooks: [any LuminaAgentRuntimeHook],
-        observabilitySinks: LuminaRuntimeObservabilitySinks
+        observabilitySinks: LuminaRuntimeObservabilitySinks,
+        guardrails: LuminaRuntimeGuardrails,
+        runtimeState: LuminaRuntimeState
     ) {
         self.tools = tools
         self.toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.schema.name, $0) })
@@ -46,6 +50,8 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         self.auditLogger = auditLogger
         self.hooks = hooks
         self.observabilitySinks = observabilitySinks
+        self.guardrails = guardrails
+        self.runtimeState = runtimeState
     }
 
     func requestCancellation() {

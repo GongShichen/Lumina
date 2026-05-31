@@ -4,6 +4,8 @@ import LuminaAgentRuntimeCore
 public final class LuminaAgentRuntime: @unchecked Sendable {
     private let box: LuminaAgentRuntimeAdapterBox
     private let runtimeHandle: LuminaAgentRuntimeHandle?
+    private let sessionStore: (any LuminaRuntimeSessionStore)?
+    private let checkpointPolicy: LuminaRuntimeCheckpointPolicy
 
     public init(
         tools: [AnyLuminaAgentTool],
@@ -15,8 +17,14 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         confirmationCoordinator: any LuminaConfirmationCoordinator = LuminaAlwaysConfirmCoordinator(),
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
         hooks: [any LuminaAgentRuntimeHook] = [],
-        observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled
+        observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
+        guardrails: LuminaRuntimeGuardrails = .empty,
+        runtimeState: LuminaRuntimeState = LuminaRuntimeState(),
+        sessionStore: (any LuminaRuntimeSessionStore)? = nil,
+        checkpointPolicy: LuminaRuntimeCheckpointPolicy = .none
     ) {
+        self.sessionStore = sessionStore
+        self.checkpointPolicy = checkpointPolicy
         self.box = LuminaAgentRuntimeAdapterBox(
             tools: tools,
             stepGenerator: stepGenerator,
@@ -27,7 +35,9 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             confirmationCoordinator: confirmationCoordinator,
             auditLogger: auditLogger,
             hooks: hooks,
-            observabilitySinks: observabilitySinks
+            observabilitySinks: observabilitySinks,
+            guardrails: guardrails,
+            runtimeState: runtimeState
         )
         self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
         configureRuntime()
@@ -35,6 +45,13 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
 
     public func availableToolSchemas() async -> [LuminaToolSchema] {
         box.tools.map(\.schema)
+    }
+
+    public func createSession(request: LuminaAgentRequest) -> LuminaAgentRuntimeSession? {
+        guard let runtimeHandle else { return nil }
+        let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
+        guard let handle = runtimeHandle.createSession(requestJSON: requestJSON) else { return nil }
+        return LuminaAgentRuntimeSession(handle: handle)
     }
 
     public func run(request: LuminaAgentRequest) async -> LuminaAgentRunResult {
@@ -72,18 +89,70 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.currentEventSink = eventSink
         box.currentRequest = request
         box.resetCancellation()
+        var guardedRequest = request
+        do {
+            guardedRequest = try await box.applyInputGuardrails(to: request)
+        } catch {
+            box.currentEventSink = nil
+            box.currentRequest = nil
+            box.resetCancellation()
+            return LuminaAgentRunResult(
+                requestID: request.id,
+                plan: LuminaAgentPlan(summary: "### 已拒绝\n\n\(error.localizedDescription)", toolCalls: []),
+                toolResults: [],
+                status: .failed
+            )
+        }
+        box.currentRequest = guardedRequest
         box.trace = LuminaReActTrace()
         box.toolResults = []
         box.hookContextSections = []
         box.stepGenerationMilliseconds = 0
         box.toolExecutionMilliseconds = 0
         box.timingStartedAt = ContinuousClock.now
-        let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
+        let requestJSON = (try? String(data: JSONEncoder().encode(guardedRequest), encoding: .utf8)) ?? "{}"
         let resultJSON = runtimeHandle.run(requestJSON: requestJSON)
-        let result = box.makeRunResult(fromRuntimeResultJSON: resultJSON, request: request)
+        var result = box.makeRunResult(fromRuntimeResultJSON: resultJSON, request: guardedRequest)
+        result = await box.applyResultGuardrails(to: result, request: guardedRequest)
+        await saveCheckpointIfNeeded(result: result)
         box.currentEventSink = nil
         box.resetCancellation()
         return result
+    }
+
+    private func saveCheckpointIfNeeded(result: LuminaAgentRunResult) async {
+        guard checkpointPolicy != .none,
+              checkpointPolicy == .onExit || checkpointPolicy == .onStep || checkpointPolicy == .onPause,
+              let sessionStore
+        else { return }
+        let state = await box.runtimeState.snapshot()
+        let traceSummary = result.reactTrace?.steps.prefix(12).map { step in
+            switch step.kind {
+            case .thought:
+                return "thought"
+            case .action:
+                return "tool:\(step.action?.toolName ?? "")"
+            case .observation:
+                return "observation:\(step.observation?.toolName ?? "")"
+            case .result:
+                return "result"
+            }
+        }.joined(separator: " -> ") ?? ""
+        let checkpoint = LuminaRuntimeCheckpoint(
+            sessionID: result.requestID.uuidString,
+            runID: UUID().uuidString,
+            requestID: result.requestID,
+            stepIndex: result.reactTrace?.steps.count ?? 0,
+            status: result.status,
+            traceSummary: traceSummary,
+            runtimeState: state,
+            budget: [
+                "maximumToolCalls": .number(Double(box.configuration.maximumToolCalls)),
+                "maximumReActIterations": .number(Double(box.configuration.maximumReActIterations))
+            ],
+            lastObservation: result.reactTrace?.observations.last
+        )
+        try? await sessionStore.save(checkpoint)
     }
 
     private nonisolated func cancelCurrentRun() {
