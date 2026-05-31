@@ -16,6 +16,7 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
     public var rollbackFailedSideEffects: Bool
     public var emitVerboseEvents: Bool
     public var preservedStepsAfterCompaction: Int
+    public var toolSchemaDisclosureProfile: LuminaToolSchemaDisclosureProfile
 
     public init(
         maximumToolCalls: Int,
@@ -32,7 +33,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         stopOnToolFailure: Bool,
         rollbackFailedSideEffects: Bool,
         emitVerboseEvents: Bool,
-        preservedStepsAfterCompaction: Int
+        preservedStepsAfterCompaction: Int,
+        toolSchemaDisclosureProfile: LuminaToolSchemaDisclosureProfile = .compact
     ) {
         self.maximumToolCalls = maximumToolCalls
         self.maximumReActIterations = maximumReActIterations
@@ -49,5 +51,6 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         self.rollbackFailedSideEffects = rollbackFailedSideEffects
         self.emitVerboseEvents = emitVerboseEvents
         self.preservedStepsAfterCompaction = preservedStepsAfterCompaction
+        self.toolSchemaDisclosureProfile = toolSchemaDisclosureProfile
     }
 }
