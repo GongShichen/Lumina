@@ -15,7 +15,7 @@ std::string responderSchemaJson() {
 }
 
 std::string runtimeConfigurationSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer","maxOutputTokens":"integer","reservedOutputTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean","toolSchemaProfile":"full|compact|name-only"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer","maxOutputTokens":"integer","reservedOutputTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean","toolSchemaProfile":"full|compact|name-only","checkpointPolicy":"none|onPause|onStep|onExit"}})";
 }
 
 std::string agentRequestSchemaJson() {
@@ -118,6 +118,10 @@ std::string checkpointSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
 }
 
+std::string replayScriptSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","fields":{"mode":"mixed|model|tools|all|live","model_outputs":"ReActStep[]","tool_observations":"ToolResult[]"},"rules":["Replay is caller-owned input to Runtime Core.","Replay does not change the canonical ReAct schema.","Mode all/model/tools can disable live model or tool callbacks for deterministic debug and benchmark regression."]})";
+}
+
 std::string externalToolProviderSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","fields":{"namespace":"string","allowed_tools":"string[]","schemas":"ToolSchema[]","health":"object","token_redaction":"required"},"rules":["Transport is implemented by the provider or binding, not by Runtime Core.","Provider tools are registered as normal runtime tools.","Secrets and tokens must never enter trace, audit, events, or benchmark reports."]})";
 }
@@ -159,6 +163,7 @@ std::string allContractsJson() {
         R"("guardrail_decision":)" + guardrailDecisionSchemaJson() + ","
         R"("runtime_state":)" + runtimeStateSchemaJson() + ","
         R"("runtime_checkpoint":)" + checkpointSchemaJson() + ","
+        R"("runtime_replay":)" + replayScriptSchemaJson() + ","
         R"("external_tool_provider":)" + externalToolProviderSchemaJson() +
         "}}";
 }

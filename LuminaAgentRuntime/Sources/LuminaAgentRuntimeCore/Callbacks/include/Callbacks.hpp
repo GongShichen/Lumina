@@ -50,6 +50,8 @@ public:
     void setRollback(LuminaAgentRollbackCallback callback, void *context);
     void setEvent(LuminaAgentEventCallback callback, void *context);
     void setHook(LuminaAgentHookCallback callback, void *context);
+    void setCorrelationContext(const std::string &sessionId, const std::string &runId);
+    void clearCorrelationContext();
 
     // Lightweight availability checks used by runtime guards and fallback paths.
     bool hasModel() const;
@@ -103,6 +105,10 @@ private:
     CallbackSlot event_;
     CallbackSlot hook_;
     std::vector<RuntimeHookRoute> hookRoutes_;
+    std::string currentSessionId_;
+    std::string currentRunId_;
+    mutable long long telemetrySequence_ = 0;
+    mutable std::vector<std::pair<std::string, std::string>> spanStack_;
 };
 
 } // namespace LuminaAgent

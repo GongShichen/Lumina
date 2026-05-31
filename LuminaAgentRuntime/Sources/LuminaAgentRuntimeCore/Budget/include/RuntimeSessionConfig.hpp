@@ -51,6 +51,11 @@ struct RuntimeSessionConfig {
     // Tool schema disclosure profile for model-facing planner input:
     // full, compact, or name-only.
     std::string toolSchemaProfile = "compact";
+
+    // Core checkpoint emission policy. The core never persists checkpoints;
+    // callers receive checkpoint_created events and decide where to store them.
+    // Supported values: none, on_pause, on_step, on_exit.
+    std::string checkpointPolicy = "none";
 };
 
 } // namespace LuminaAgent

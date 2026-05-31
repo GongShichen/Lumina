@@ -209,6 +209,20 @@ void LuminaAgentRuntimeDestroy(LuminaAgentRuntimeRef *runtime);
 char *LuminaAgentRuntimeRegisterToolSchema(LuminaAgentRuntimeRef *runtime, const char *tool_schema_json);
 
 /**
+ * Registers schemas from a generic external tool provider.
+ *
+ * `provider_json` is a JSON object containing optional `provider_id`,
+ * `namespace`, `allowed_tools`, and `schemas`/`tools`. The core runtime does
+ * not open MCP/HTTP/stdio connections; adapters own transport and provide
+ * already-discovered schemas here. Secrets in provider config are ignored and
+ * never emitted by runtime observability.
+ */
+char *LuminaAgentRuntimeRegisterExternalToolProvider(
+    LuminaAgentRuntimeRef *runtime,
+    const char *provider_json
+);
+
+/**
  * Installs the model callback used to produce structured ReAct steps.
  *
  * The callback and `user_context` are stored without ownership transfer. Set a
@@ -395,6 +409,19 @@ void LuminaAgentRuntimeClearHookRoutes(LuminaAgentRuntimeRef *runtime);
 char *LuminaAgentRuntimeRun(LuminaAgentRuntimeRef *runtime, const char *request_json);
 
 /**
+ * Runs one complete task using caller-provided replay data.
+ *
+ * `replay_json` may contain `mode`, `model_outputs`, and `tool_observations`.
+ * Replay is executed by the core loop and can replace model outputs, tool
+ * observations, or both without changing the ReAct schema.
+ */
+char *LuminaAgentRuntimeRunReplay(
+    LuminaAgentRuntimeRef *runtime,
+    const char *request_json,
+    const char *replay_json
+);
+
+/**
  * Creates an explicit pausable task session.
  *
  * `request_json` is copied by the runtime session and should contain caller
@@ -415,6 +442,15 @@ LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSession(
 char *LuminaAgentRuntimeRunSession(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentRuntimeSessionRef *session
+);
+
+/**
+ * Runs or continues an explicit session using caller-provided replay data.
+ */
+char *LuminaAgentRuntimeRunSessionReplay(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *replay_json
 );
 
 /**

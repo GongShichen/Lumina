@@ -4,6 +4,7 @@
 #include <chrono>
 #include <sstream>
 #include <set>
+#include <cctype>
 
 #include "Json.hpp"
 
@@ -68,6 +69,20 @@ void RuntimeCallbacks::setEvent(LuminaAgentEventCallback callback, void *context
 
 void RuntimeCallbacks::setHook(LuminaAgentHookCallback callback, void *context) {
     hook_ = {reinterpret_cast<void *>(callback), context};
+}
+
+void RuntimeCallbacks::setCorrelationContext(const std::string &sessionId, const std::string &runId) {
+    currentSessionId_ = sessionId;
+    currentRunId_ = runId;
+    telemetrySequence_ = 0;
+    spanStack_.clear();
+}
+
+void RuntimeCallbacks::clearCorrelationContext() {
+    currentSessionId_.clear();
+    currentRunId_.clear();
+    telemetrySequence_ = 0;
+    spanStack_.clear();
 }
 
 bool RuntimeCallbacks::hasModel() const { return model_.function != nullptr; }
@@ -365,8 +380,12 @@ void RuntimeCallbacks::emitEvent(const std::string &type, const std::string &pay
     if (callback == nullptr) {
         return;
     }
+    const long long sequence = ++telemetrySequence_;
     const std::string event = "{\"type\":" + jsonString(type) +
+        ",\"sequence\":" + std::to_string(sequence) +
         ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"session_id\":" + jsonString(currentSessionId_) +
+        ",\"run_id\":" + jsonString(currentRunId_) +
         ",\"payload\":" + payload + "}";
     callback(event.c_str(), event_.context);
 }
@@ -376,8 +395,12 @@ void RuntimeCallbacks::audit(const std::string &type, const std::string &payload
     if (callback == nullptr) {
         return;
     }
+    const long long sequence = ++telemetrySequence_;
     const std::string record = "{\"type\":" + jsonString(type) +
+        ",\"sequence\":" + std::to_string(sequence) +
         ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"session_id\":" + jsonString(currentSessionId_) +
+        ",\"run_id\":" + jsonString(currentRunId_) +
         ",\"payload\":" + payload + "}";
     callback(record.c_str(), audit_.context);
 }
@@ -387,8 +410,12 @@ void RuntimeCallbacks::trace(const std::string &type, const std::string &payload
     if (callback == nullptr) {
         return;
     }
+    const long long sequence = ++telemetrySequence_;
     const std::string record = "{\"type\":" + jsonString(type) +
+        ",\"sequence\":" + std::to_string(sequence) +
         ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"session_id\":" + jsonString(currentSessionId_) +
+        ",\"run_id\":" + jsonString(currentRunId_) +
         ",\"payload\":" + payload + "}";
     callback(record.c_str(), trace_.context);
 }
@@ -398,10 +425,14 @@ void RuntimeCallbacks::metric(const std::string &name, double value, const std::
     if (callback == nullptr) {
         return;
     }
+    const long long sequence = ++telemetrySequence_;
     std::ostringstream output;
     output << "{\"name\":" << jsonString(name)
            << ",\"value\":" << value
+           << ",\"sequence\":" << sequence
            << ",\"timestamp\":" << timestampMilliseconds()
+           << ",\"session_id\":" << jsonString(currentSessionId_)
+           << ",\"run_id\":" << jsonString(currentRunId_)
            << ",\"payload\":" << (trim(payload).empty() ? "{}" : payload)
            << "}";
     const std::string record = output.str();
@@ -413,9 +444,39 @@ void RuntimeCallbacks::span(const std::string &phase, const std::string &name, c
     if (callback == nullptr) {
         return;
     }
+    const long long sequence = ++telemetrySequence_;
+    auto makeSpanId = [&](const std::string &spanName) {
+        std::string normalized;
+        for (char c : spanName) {
+            normalized += std::isalnum(static_cast<unsigned char>(c)) ? c : '-';
+        }
+        return normalized + "-" + std::to_string(sequence);
+    };
+    std::string spanId = makeSpanId(name);
+    std::string parentSpanId = spanStack_.empty() ? "" : spanStack_.back().second;
+    if (phase == "end") {
+        for (auto it = spanStack_.rbegin(); it != spanStack_.rend(); ++it) {
+            if (it->first == name) {
+                spanId = it->second;
+                auto base = it.base();
+                auto eraseIt = base;
+                --eraseIt;
+                parentSpanId = eraseIt == spanStack_.begin() ? "" : std::prev(eraseIt)->second;
+                spanStack_.erase(eraseIt);
+                break;
+            }
+        }
+    } else if (phase == "start") {
+        spanStack_.push_back({name, spanId});
+    }
     const std::string record = "{\"phase\":" + jsonString(phase) +
         ",\"name\":" + jsonString(name) +
+        ",\"span_id\":" + jsonString(spanId) +
+        ",\"parent_span_id\":" + jsonString(parentSpanId) +
+        ",\"sequence\":" + std::to_string(sequence) +
         ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"session_id\":" + jsonString(currentSessionId_) +
+        ",\"run_id\":" + jsonString(currentRunId_) +
         ",\"payload\":" + (trim(payload).empty() ? "{}" : payload) + "}";
     callback(record.c_str(), span_.context);
 }

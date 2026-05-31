@@ -18,6 +18,7 @@ public:
 
     // Parses, validates, and caches a caller-provided tool schema.
     std::string registerToolSchema(const char *toolSchemaJson);
+    std::string registerExternalToolProvider(const char *providerJson);
 
     // Callback setters store function pointers and caller-owned contexts.
     void setModelCallback(LuminaAgentModelCallback callback, void *context);
@@ -39,9 +40,10 @@ public:
 
     // Runs a single isolated task from request JSON to runtime result.
     std::string run(const char *requestJson);
+    std::string runReplay(const char *requestJson, const char *replayJson);
 
     // Advances an explicit session until completion, failure, cancellation, or pause.
-    std::string runSession(RuntimeSession &session, const char *requestJson, bool allowPause);
+    std::string runSession(RuntimeSession &session, const char *requestJson, bool allowPause, const char *replayJson = nullptr);
 
     // Adds an external observation to a paused session and continues execution.
     std::string resumeSession(RuntimeSession &session, const char *resumeJson);

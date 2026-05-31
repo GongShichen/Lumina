@@ -11,6 +11,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var events: [String] = []
     private var traces: [String] = []
     private var metrics: [String] = []
+    private var spans: [String] = []
     private var toolCalls: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
@@ -21,6 +22,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         events = []
         traces = []
         metrics = []
+        spans = []
         toolCalls = []
         toolCallCount = 0
         modelCallCount = 0
@@ -51,6 +53,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendSpan(_ value: String) {
+        lock.lock()
+        spans.append(value)
+        lock.unlock()
+    }
+
     func incrementToolCallCount() {
         lock.lock()
         toolCallCount += 1
@@ -72,10 +80,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -92,6 +100,12 @@ private let luminaTraceCallback: LuminaAgentTraceCallback = { record, _ in
 private let luminaMetricsCallback: LuminaAgentMetricsCallback = { metric, _ in
     if let metric {
         LuminaRuntimeCaptureStore.shared.appendMetric(String(cString: metric))
+    }
+}
+
+private let luminaSpanCallback: LuminaAgentSpanCallback = { span, _ in
+    if let span {
+        LuminaRuntimeCaptureStore.shared.appendSpan(String(cString: span))
     }
 }
 
@@ -215,6 +229,17 @@ private let luminaUnsafeToolThenFinalModelCallback: LuminaAgentModelCallback = {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-unsafe","type":"tool_use","thought":"Use proposed tool.","tool_name":"unsafe.write","parameters":{"query":"secret"},"requires_followup":true}"#)
     }
     return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaExternalProviderThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-provider","type":"tool_use","thought":"Use provider tool.","tool_name":"mcp.echo","parameters":{"text":"hello"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## Provider done","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
@@ -817,6 +842,108 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(getText.contains(#""value":{"value":"core"}"#))
     }
 
+    func testCoreReplayRunsModelAndToolObservationsWithoutLiveCallbacks() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"data.lookup","description":"Lookup data.","category":"data","sideEffect":"readOnly","parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let replay = #"""
+        {
+          "mode":"all",
+          "model_outputs":[
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Replay complete","completed":true,"requires_followup":false}}
+          ],
+          "tool_observations":[
+            {"tool_name":"data.lookup","parameters":{"query":"A"},"result":{"status":"succeeded","content":"from replay"}}
+          ]
+        }
+        """#
+        let resultPointer = LuminaAgentRuntimeRunReplay(runtime, #"{"id":"replay","text":"replay"}"#, replay)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue(result.contains("Replay complete"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("model_output_replayed"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("tool_observation_replayed"))
+    }
+
+    func testCheckpointPolicyEmitsCoreCheckpointEvent() throws {
+        let configuration = luminaKernelRuntimeConfigurationJSON(maxIterations: 2)
+            .replacingOccurrences(of: #"stopOnToolFailure":false"#, with: #"stopOnToolFailure":false,"checkpointPolicy":"onStep""#)
+        guard let runtime = LuminaAgentRuntimeCreate(configuration) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"checkpoint","text":"checkpoint"}"#)
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let events = LuminaRuntimeCaptureStore.shared.snapshot().events.joined(separator: "\n")
+        XCTAssertTrue(events.contains("checkpoint_created"))
+        XCTAssertTrue(events.contains("runtime_checkpoint"))
+        XCTAssertTrue(events.contains(#""policy":"on_step""#))
+    }
+
+    func testSpanSinkReceivesCorrelationAndSpanIds() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetSpanCallback(runtime, luminaSpanCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"span","text":"span"}"#)
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let spans = LuminaRuntimeCaptureStore.shared.snapshot().spans.joined(separator: "\n")
+        XCTAssertTrue(spans.contains(#""name":"runtime.run""#))
+        XCTAssertTrue(spans.contains(#""span_id":"#))
+        XCTAssertTrue(spans.contains(#""parent_span_id":"#))
+        XCTAssertTrue(spans.contains(#""session_id":"session-"#))
+        XCTAssertTrue(spans.contains(#""run_id":"run-"#))
+    }
+
+    func testExternalToolProviderRegistersNamespacedSchemaThroughCABI() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaExternalProviderThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaRecordingToolCallback, nil)
+
+        let providerPointer = LuminaAgentRuntimeRegisterExternalToolProvider(
+            runtime,
+            #"{"provider_id":"mcp-test","namespace":"mcp","allowed_tools":["echo"],"schemas":[{"name":"echo","description":"Echo input.","category":"external","sideEffect":"readOnly","parameters":[{"name":"text","type":"string","required":true,"sensitive":true}],"sensitivity":"normal"}],"api_token":"must-not-leak"}"#
+        )
+        let providerResult = providerPointer.map { String(cString: $0) } ?? "{}"
+        if let providerPointer { LuminaAgentRuntimeReleaseString(providerPointer) }
+        XCTAssertTrue(providerResult.contains(#""registered_tools":1"#))
+        XCTAssertFalse(providerResult.contains("must-not-leak"))
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"provider","text":"provider"}"#)
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.toolCalls.first?.contains(#""tool_name":"mcp.echo""#) == true)
+        XCTAssertTrue(snapshot.toolCalls.first?.contains(#""text":"hello""#) == true)
+    }
+
     func testContractExportContainsReusableRuntimeSchemas() throws {
         let pointer = LuminaAgentRuntimeExportContracts()
         let json = pointer.map { String(cString: $0) } ?? ""
@@ -832,6 +959,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(json.contains("cannot_complete"))
         XCTAssertTrue(json.contains("guardrail_decision"))
         XCTAssertTrue(json.contains("runtime_checkpoint"))
+        XCTAssertTrue(json.contains("runtime_replay"))
         XCTAssertTrue(json.contains("external_tool_provider"))
     }
 }

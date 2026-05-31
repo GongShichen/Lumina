@@ -12,6 +12,7 @@
 #include "ContextBudgetManager.hpp"
 #include "ExecutionContext.hpp"
 #include "RuntimeEventQueue.hpp"
+#include "Replay.hpp"
 #include "StreamingModelRunner.hpp"
 
 namespace LuminaAgent {
@@ -96,6 +97,122 @@ static std::string rewrittenResultMarkdown(const std::string &payloadJson) {
     return stringField(fields, "resultMarkdown", stringField(fields, "content"));
 }
 
+static std::string normalizedCheckpointPolicy(const std::string &policy) {
+    const std::string value = lowercased(policy);
+    if (value == "onpause" || value == "on_pause") {
+        return "on_pause";
+    }
+    if (value == "onstep" || value == "on_step") {
+        return "on_step";
+    }
+    if (value == "onexit" || value == "on_exit") {
+        return "on_exit";
+    }
+    return "none";
+}
+
+static void emitCheckpointIfNeeded(
+    const RuntimeSessionConfig &config,
+    RuntimeSession &session,
+    RuntimeCallbacks &callbacks,
+    RuntimeEventQueue &events,
+    const std::string &point
+) {
+    if (config.checkpointPolicy != point) {
+        return;
+    }
+    const std::string payload = "{\"policy\":" + jsonString(point) +
+        ",\"checkpoint\":" + session.checkpointJson() + "}";
+    events.emitControl("checkpoint_created", payload);
+    callbacks.trace("checkpoint_created", payload);
+}
+
+static std::vector<std::string> stringArrayFromRaw(const std::string &arrayJson) {
+    std::vector<std::string> values;
+    const std::string text = trim(arrayJson);
+    size_t index = 0;
+    while (index < text.size()) {
+        while (index < text.size() && text[index] != '"') {
+            index += 1;
+        }
+        if (index >= text.size()) {
+            break;
+        }
+        index += 1;
+        std::string value;
+        bool escaped = false;
+        while (index < text.size()) {
+            const char c = text[index++];
+            if (escaped) {
+                value += c;
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                values.push_back(value);
+                break;
+            } else {
+                value += c;
+            }
+        }
+    }
+    return values;
+}
+
+static bool stringVectorContains(const std::vector<std::string> &values, const std::string &candidate) {
+    if (values.empty()) {
+        return true;
+    }
+    for (const std::string &value : values) {
+        if (value == candidate) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::string schemaWithProviderNamespace(
+    const std::string &schema,
+    const std::string &providerNamespace,
+    const std::vector<std::string> &allowedTools
+) {
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(schema, fields)) {
+        return "";
+    }
+    const std::string originalName = stringField(fields, "name");
+    if (originalName.empty() || !stringVectorContains(allowedTools, originalName)) {
+        return "";
+    }
+    const std::string prefix = providerNamespace.empty() ? "" : providerNamespace + ".";
+    const bool alreadyNamespaced = !prefix.empty() && originalName.rfind(prefix, 0) == 0;
+    const std::string name = prefix.empty() || alreadyNamespaced ? originalName : prefix + originalName;
+    std::ostringstream output;
+    output << "{"
+           << "\"name\":" << jsonString(name) << ","
+           << "\"description\":" << jsonString(stringField(fields, "description")) << ","
+           << "\"category\":" << jsonString(stringField(fields, "category", "external")) << ","
+           << "\"searchHint\":" << jsonString(stringField(fields, "searchHint", stringField(fields, "search_hint"))) << ","
+           << "\"sideEffect\":" << jsonString(stringField(fields, "sideEffect", stringField(fields, "side_effect", "readOnly"))) << ","
+           << "\"sensitivity\":" << jsonString(stringField(fields, "sensitivity", "normal")) << ","
+           << "\"idempotencyPolicy\":" << jsonString(stringField(fields, "idempotencyPolicy", stringField(fields, "idempotency_policy", "replay_identical"))) << ","
+           << "\"readOnly\":" << rawField(fields, "readOnly", "false") << ","
+           << "\"destructive\":" << rawField(fields, "destructive", "false") << ","
+           << "\"concurrencySafe\":" << rawField(fields, "concurrencySafe", rawField(fields, "concurrency_safe", "false")) << ","
+           << "\"requiresUserInteraction\":" << rawField(fields, "requiresUserInteraction", rawField(fields, "requires_user_interaction", "false")) << ","
+           << "\"parameters\":" << rawField(fields, "parameters", "[]");
+    const std::string inputSchema = rawField(fields, "inputSchema", rawField(fields, "input_schema", ""));
+    const std::string outputSchema = rawField(fields, "outputSchema", rawField(fields, "output_schema", ""));
+    if (!inputSchema.empty()) {
+        output << ",\"inputSchema\":" << inputSchema;
+    }
+    if (!outputSchema.empty()) {
+        output << ",\"outputSchema\":" << outputSchema;
+    }
+    output << "}";
+    return output.str();
+}
+
 Runtime::Runtime(const char *configurationJson) {
     if (configurationJson == nullptr || trim(configurationJson).empty()) {
         configurationError_ = "runtime configuration JSON is required.";
@@ -147,12 +264,56 @@ Runtime::Runtime(const char *configurationJson) {
     const std::string profile = lowercased(stringField(fields, "toolSchemaProfile", sessionConfig_.toolSchemaProfile));
     sessionConfig_.toolSchemaProfile =
         (profile == "full" || profile == "compact" || profile == "name-only") ? profile : "compact";
+    sessionConfig_.checkpointPolicy = normalizedCheckpointPolicy(
+        stringField(fields, "checkpointPolicy", stringField(fields, "checkpoint_policy", sessionConfig_.checkpointPolicy))
+    );
     sessionConfig_.isConfigured = true;
     sessionConfig_.configurationError.clear();
 }
 
 std::string Runtime::registerToolSchema(const char *toolSchemaJson) {
     return tools_.registerSchema(toolSchemaJson);
+}
+
+std::string Runtime::registerExternalToolProvider(const char *providerJson) {
+    if (providerJson == nullptr || trim(providerJson).empty()) {
+        return "{\"ok\":false,\"error\":\"missing external provider JSON\"}";
+    }
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(providerJson, fields)) {
+        return "{\"ok\":false,\"error\":\"external provider must be a JSON object\"}";
+    }
+    const std::string providerId = stringField(fields, "provider_id", stringField(fields, "id", "external"));
+    const std::string providerNamespace = stringField(fields, "namespace");
+    const std::vector<std::string> allowedTools = stringArrayFromRaw(rawField(fields, "allowed_tools", rawField(fields, "allowedTools", "[]")));
+    const std::string schemasRaw = rawField(fields, "schemas", rawField(fields, "tools", "[]"));
+    int registered = 0;
+    std::string lastError;
+    for (const std::string &schema : extractObjectArrayItems(schemasRaw)) {
+        const std::string namespacedSchema = schemaWithProviderNamespace(schema, providerNamespace, allowedTools);
+        if (namespacedSchema.empty()) {
+            continue;
+        }
+        const std::string result = tools_.registerSchema(namespacedSchema.c_str());
+        if (result.find("\"ok\":true") != std::string::npos) {
+            registered += 1;
+        } else {
+            lastError = result;
+        }
+    }
+    callbacks_.emitEvent(
+        "external_tool_provider_registered",
+        "{\"provider_id\":" + jsonString(providerId) +
+            ",\"namespace\":" + jsonString(providerNamespace) +
+            ",\"registered_tools\":" + std::to_string(registered) + "}"
+    );
+    if (registered == 0 && !lastError.empty()) {
+        return "{\"ok\":false,\"provider_id\":" + jsonString(providerId) +
+            ",\"registered_tools\":0,\"error\":\"no provider tools registered\",\"last_error\":" + lastError + "}";
+    }
+    return "{\"ok\":true,\"provider_id\":" + jsonString(providerId) +
+        ",\"namespace\":" + jsonString(providerNamespace) +
+        ",\"registered_tools\":" + std::to_string(registered) + "}";
 }
 
 void Runtime::setModelCallback(LuminaAgentModelCallback callback, void *context) {
@@ -227,18 +388,33 @@ std::string Runtime::run(const char *requestJson) {
     return runSession(session, requestJson, false);
 }
 
-std::string Runtime::runSession(RuntimeSession &session, const char *requestJson, bool allowPause) {
+std::string Runtime::runReplay(const char *requestJson, const char *replayJson) {
+    if (!sessionConfig_.isConfigured) {
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
+    }
+    RuntimeSession session(sessionConfig_);
+    return runSession(session, requestJson, false, replayJson);
+}
+
+std::string Runtime::runSession(RuntimeSession &session, const char *requestJson, bool allowPause, const char *replayJson) {
     if (!sessionConfig_.isConfigured) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
     }
     if (requestJson == nullptr) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\n缺少请求 JSON。\"}";
     }
-    if (!callbacks_.hasModel() && !callbacks_.hasStreamingModel()) {
+    RuntimeReplayController replay = RuntimeReplayController::fromJson(replayJson == nullptr ? "{}" : replayJson);
+    RuntimeReplayController *replayController = replay.isConfigured() ? &replay : nullptr;
+    if (!callbacks_.hasModel() && !callbacks_.hasStreamingModel() && !replay.hasModelReplay()) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\n没有可用的模型回调。\"}";
     }
 
     cancelled_ = false;
+    callbacks_.setCorrelationContext(session.sessionId(), session.runId());
+    struct CorrelationScope {
+        RuntimeCallbacks &callbacks;
+        ~CorrelationScope() { callbacks.clearCorrelationContext(); }
+    } correlationScope{callbacks_};
     RuntimeEventQueue events(callbacks_, session.sessionId(), session.runId());
     ExecutionContext execution(session, sessionConfig_, tools_, callbacks_, events);
     std::string request = session.requestJson().empty() ? trim(requestJson) : session.requestJson();
@@ -255,6 +431,10 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     events.emitEvent("run_started", request.empty() ? "{}" : request);
     callbacks_.audit("run_started", request.empty() ? "{}" : request);
     callbacks_.trace("run_started", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"request\":" + (request.empty() ? "{}" : request) + "}");
+    if (replay.isConfigured()) {
+        events.emitControl("replay_started", replay.summaryJson());
+        callbacks_.trace("replay_started", replay.summaryJson());
+    }
     if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("run_started", request.empty() ? "{}" : request))) {
         return session.finishIfNeeded();
     }
@@ -304,7 +484,17 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         if (contextJson != contextBeforeHook) {
             plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
         }
-        const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
+        std::string stepJson;
+        if (replayController != nullptr && replayController->hasModelReplay()) {
+            stepJson = replayController->nextModelStep();
+            events.emitEvent("model_output_replayed", "{\"iteration\":" + std::to_string(session.stepCount()) + "}");
+        } else if (replayController != nullptr && !replayController->allowsLiveModel()) {
+            events.emitEvent("model_generation_failed", "{\"reason\":\"replay-missing-model-output\"}");
+            session.failWithResult("replay-missing-model-output", "### 无法执行\n\nReplay script did not provide a matching model output.");
+            break;
+        } else {
+            stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
+        }
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
             break;
         }
@@ -344,6 +534,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         const std::string recordJson = session.recordStep(stepJson);
         callbacks_.audit("step_recorded", recordJson);
         callbacks_.trace("step_recorded", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
+        emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_step");
 
         if (type == "result" || type == "cannot_complete") {
             break;
@@ -380,7 +571,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             continue;
         }
         if (type == "tool_use") {
-            ToolExecutor(tools_, callbacks_).runToolCall(
+            ToolExecutor(tools_, callbacks_, replayController).runToolCall(
                 session,
                 stringField(fields, "tool_name"),
                 rawField(fields, "parameters", "{}"),
@@ -407,13 +598,13 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 events.emitControl("ask_user_pending", session.pendingJson());
                 break;
             }
-            ToolExecutor(tools_, callbacks_).runToolCall(session, "ask_user", askParameters, false);
+            ToolExecutor(tools_, callbacks_, replayController).runToolCall(session, "ask_user", askParameters, false);
             lastObservation = session.lastObservationJson();
             execution.setLastObservationJson(lastObservation);
             continue;
         }
         if (type == "multi_tool_use") {
-            ToolExecutor(tools_, callbacks_).runMultiToolCall(session, rawField(fields, "tool_calls", "[]"));
+            ToolExecutor(tools_, callbacks_, replayController).runMultiToolCall(session, rawField(fields, "tool_calls", "[]"));
             lastObservation = session.lastObservationJson();
             execution.setLastObservationJson(lastObservation);
             continue;
@@ -426,6 +617,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
 
     if (session.isPaused()) {
         const std::string snapshot = session.snapshotJson();
+        emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_pause");
         events.emitControl("run_paused", snapshot);
         callbacks_.audit("run_paused", snapshot);
         HookDispatcher(callbacks_).dispatch("run_paused", snapshot);
@@ -444,6 +636,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     } else if (applyTerminalGuardrailDecision(session, callbacks_, "result", resultGuardrail)) {
         finished = Responder().finalize(session);
     }
+    emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_exit");
     events.emitEvent(
         "run_termination",
         "{\"status\":" + jsonString(runStatusName(session.status())) +

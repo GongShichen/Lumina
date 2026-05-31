@@ -93,8 +93,8 @@ static std::string guardrailRewritePayload(const RuntimeGuardrailDecision &decis
     return decision.payloadJson;
 }
 
-ToolExecutor::ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks)
-    : tools_(tools), callbacks_(callbacks) {}
+ToolExecutor::ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks, RuntimeReplayController *replay)
+    : tools_(tools), callbacks_(callbacks), replay_(replay) {}
 
 std::string ToolExecutor::runToolCall(
     RuntimeSession &session,
@@ -223,6 +223,44 @@ std::string ToolExecutor::runToolCall(
             ",\"dedup_key\":" + jsonString(dedupKey) +
             ",\"canonical_parameters\":" + jsonString(excerpt(canonicalParameters, 800)) + "}"
     );
+
+    if (replay_ != nullptr && replay_->shouldReplayTools()) {
+        const std::string replayedResult = replay_->consumeToolResult(activeToolName, canonicalParameters);
+        if (!replayedResult.empty()) {
+            std::map<std::string, JsonField> replayFields;
+            const bool parsedReplay = parseFieldsOrEmpty(replayedResult, replayFields);
+            const std::string status = parsedReplay ? stringField(replayFields, "status", "succeeded") : "succeeded";
+            const std::string content = parsedReplay ? stringField(replayFields, "content", replayedResult) : replayedResult;
+            const std::string error = parsedReplay ? stringField(replayFields, "errorMessage", "") : "";
+            const std::string observation = session.recordObservation(
+                activeToolName,
+                status,
+                content,
+                error,
+                confirmationRequired,
+                true
+            );
+            callbacks_.emitEvent(
+                "tool_observation_replayed",
+                "{\"tool_name\":" + jsonString(activeToolName) +
+                    ",\"call_id\":" + jsonString(callId) +
+                    ",\"canonical_parameters\":" + jsonString(excerpt(canonicalParameters, 800)) +
+                    ",\"result_excerpt\":" + jsonString(excerpt(replayedResult, 1200)) + "}"
+            );
+            callbacks_.emitEvent("observation_created", observation);
+            callbacks_.trace("tool_observation_replayed", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"observation\":" + observation + "}");
+            HookDispatcher(callbacks_).dispatch("observation_created", observation);
+            return replayedResult;
+        }
+        if (!replay_->allowsLiveTool()) {
+            const std::string error = "replay script did not provide a matching tool observation";
+            const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
+            const std::string observation = session.recordObservation(activeToolName, "failed", "", error, confirmationRequired, false);
+            callbacks_.emitEvent("observation_created", observation);
+            return result;
+        }
+    }
+
     if (idempotencyPolicy != "always_execute") {
         if (const ToolCallLedgerEntry *entry = session.findReplayableToolCall(dedupKey)) {
             const std::string observation = session.recordReplayObservation(activeToolName, *entry);

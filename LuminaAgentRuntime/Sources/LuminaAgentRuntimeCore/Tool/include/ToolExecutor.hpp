@@ -3,6 +3,7 @@
 #include <string>
 
 #include "Callbacks.hpp"
+#include "Replay.hpp"
 #include "Session.hpp"
 #include "ToolRegistry.hpp"
 
@@ -11,7 +12,7 @@ namespace LuminaAgent {
 class ToolExecutor {
 public:
     // Binds one execution pass to the immutable tool registry and callback set.
-    ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks);
+    ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks, RuntimeReplayController *replay = nullptr);
 
     // Executes one validated tool call, including permission, confirmation, audit, and observation.
     std::string runToolCall(
@@ -27,6 +28,7 @@ public:
 private:
     const ToolRegistry &tools_;
     const RuntimeCallbacks &callbacks_;
+    RuntimeReplayController *replay_;
 };
 
 } // namespace LuminaAgent

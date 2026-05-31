@@ -42,6 +42,13 @@ extern "C" char *LuminaAgentRuntimeRegisterToolSchema(LuminaAgentRuntimeRef *run
     return LuminaAgent::copyCString(runtime->runtime.registerToolSchema(tool_schema_json));
 }
 
+extern "C" char *LuminaAgentRuntimeRegisterExternalToolProvider(LuminaAgentRuntimeRef *runtime, const char *provider_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.registerExternalToolProvider(provider_json));
+}
+
 extern "C" void LuminaAgentRuntimeSetModelCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentModelCallback callback,
@@ -202,6 +209,17 @@ extern "C" char *LuminaAgentRuntimeRun(LuminaAgentRuntimeRef *runtime, const cha
     return LuminaAgent::copyCString(runtime->runtime.run(request_json));
 }
 
+extern "C" char *LuminaAgentRuntimeRunReplay(
+    LuminaAgentRuntimeRef *runtime,
+    const char *request_json,
+    const char *replay_json
+) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.runReplay(request_json, replay_json));
+}
+
 extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSession(
     LuminaAgentRuntimeRef *runtime,
     const char *request_json
@@ -220,6 +238,22 @@ extern "C" char *LuminaAgentRuntimeRunSession(
         return LuminaAgent::failureResponse("missing runtime or session.");
     }
     return LuminaAgent::copyCString(runtime->runtime.runSession(session->session, session->session.requestJson().c_str(), true));
+}
+
+extern "C" char *LuminaAgentRuntimeRunSessionReplay(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *replay_json
+) {
+    if (runtime == nullptr || session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime or session.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.runSession(
+        session->session,
+        session->session.requestJson().c_str(),
+        true,
+        replay_json
+    ));
 }
 
 extern "C" char *LuminaAgentRuntimeResumeSession(
