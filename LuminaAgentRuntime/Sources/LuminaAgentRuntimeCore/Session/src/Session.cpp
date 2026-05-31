@@ -301,6 +301,7 @@ int RuntimeSession::compactThresholdTokens() const { return config_.compactThres
 int RuntimeSession::maximumCompactFailures() const { return config_.maximumCompactFailures; }
 int RuntimeSession::maximumObservationCharacters() const { return config_.maximumObservationCharacters; }
 int RuntimeSession::toolResultTokenBudget() const { return config_.toolResultTokenBudget; }
+std::string RuntimeSession::toolSchemaProfile() const { return config_.toolSchemaProfile; }
 int RuntimeSession::remainingContextTokensEstimate() const { return std::max(0, config_.contextWindowTokens - contextTokenUsageEstimate_); }
 bool RuntimeSession::hasResult() const { return hasResult_; }
 bool RuntimeSession::isTerminated() const { return hasResult_ || !terminationReason_.empty(); }

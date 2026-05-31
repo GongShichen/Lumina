@@ -8,6 +8,11 @@
 
 namespace LuminaAgent {
 
+static long long timestampMilliseconds() {
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+}
+
 void RuntimeCallbacks::setModel(LuminaAgentModelCallback callback, void *context) {
     model_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -171,7 +176,9 @@ void RuntimeCallbacks::emitEvent(const std::string &type, const std::string &pay
     if (callback == nullptr) {
         return;
     }
-    const std::string event = "{\"type\":" + jsonString(type) + ",\"payload\":" + payload + "}";
+    const std::string event = "{\"type\":" + jsonString(type) +
+        ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"payload\":" + payload + "}";
     callback(event.c_str(), event_.context);
 }
 
@@ -180,7 +187,9 @@ void RuntimeCallbacks::audit(const std::string &type, const std::string &payload
     if (callback == nullptr) {
         return;
     }
-    const std::string record = "{\"type\":" + jsonString(type) + ",\"payload\":" + payload + "}";
+    const std::string record = "{\"type\":" + jsonString(type) +
+        ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"payload\":" + payload + "}";
     callback(record.c_str(), audit_.context);
 }
 
@@ -189,7 +198,9 @@ void RuntimeCallbacks::trace(const std::string &type, const std::string &payload
     if (callback == nullptr) {
         return;
     }
-    const std::string record = "{\"type\":" + jsonString(type) + ",\"payload\":" + payload + "}";
+    const std::string record = "{\"type\":" + jsonString(type) +
+        ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"payload\":" + payload + "}";
     callback(record.c_str(), trace_.context);
 }
 
@@ -201,6 +212,7 @@ void RuntimeCallbacks::metric(const std::string &name, double value, const std::
     std::ostringstream output;
     output << "{\"name\":" << jsonString(name)
            << ",\"value\":" << value
+           << ",\"timestamp\":" << timestampMilliseconds()
            << ",\"payload\":" << (trim(payload).empty() ? "{}" : payload)
            << "}";
     const std::string record = output.str();
@@ -214,6 +226,7 @@ void RuntimeCallbacks::span(const std::string &phase, const std::string &name, c
     }
     const std::string record = "{\"phase\":" + jsonString(phase) +
         ",\"name\":" + jsonString(name) +
+        ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
         ",\"payload\":" + (trim(payload).empty() ? "{}" : payload) + "}";
     callback(record.c_str(), span_.context);
 }

@@ -24,15 +24,22 @@ static std::string excerpt(const std::string &text, size_t limit) {
 }
 
 static bool applyHookDirective(RuntimeSession &session, const std::string &directiveJson) {
-    std::map<std::string, JsonField> fields;
-    if (!parseFieldsOrEmpty(directiveJson, fields) || !boolField(fields, "terminate", false)) {
-        return false;
+    const RuntimeHookDirectives directives = parseRuntimeHookDirectives(directiveJson);
+    if (directives.hasFail) {
+        session.failWithResult(
+            directives.reason.empty() ? "hook terminated run" : directives.reason,
+            directives.markdown.empty() ? "### 已终止\n\nRuntime hook terminated this run." : directives.markdown
+        );
+        return true;
     }
-    session.failWithResult(
-        stringField(fields, "reason", "hook terminated run"),
-        stringField(fields, "markdown", "### 已终止\n\nRuntime hook terminated this run.")
-    );
-    return true;
+    if (directives.hasPause) {
+        session.pause(
+            directives.pauseKind.empty() ? "hook" : directives.pauseKind,
+            directives.pausePayloadJson.empty() ? "{}" : directives.pausePayloadJson
+        );
+        return true;
+    }
+    return false;
 }
 
 Runtime::Runtime(const char *configurationJson) {
@@ -83,6 +90,9 @@ Runtime::Runtime(const char *configurationJson) {
     requireInt({"maximumConsecutiveReplayObservations", "maxReplayObservations"}, "maxReplayObservations", 1, sessionConfig_.maximumConsecutiveReplayObservations);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     sessionConfig_.stopOnToolFailure = boolField(fields, "stopOnToolFailure", sessionConfig_.stopOnToolFailure);
+    const std::string profile = lowercased(stringField(fields, "toolSchemaProfile", sessionConfig_.toolSchemaProfile));
+    sessionConfig_.toolSchemaProfile =
+        (profile == "full" || profile == "compact" || profile == "name-only") ? profile : "compact";
     sessionConfig_.isConfigured = true;
     sessionConfig_.configurationError.clear();
 }
@@ -167,7 +177,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     ExecutionContext execution(session, sessionConfig_, tools_, callbacks_, events);
     const std::string request = session.requestJson().empty() ? trim(requestJson) : session.requestJson();
     execution.setRequestJson(request);
-    callbacks_.span("start", "run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
+    callbacks_.span("start", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     events.emitEvent("run_started", request.empty() ? "{}" : request);
     callbacks_.audit("run_started", request.empty() ? "{}" : request);
     callbacks_.trace("run_started", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"request\":" + (request.empty() ? "{}" : request) + "}");
@@ -209,7 +219,13 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("planner_input_ready", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"))) {
             break;
         }
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_model", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"))) {
+            break;
+        }
         const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"))) {
+            break;
+        }
         if (trim(stepJson).empty()) {
             events.emitEvent("model_generation_failed", "{\"reason\":\"empty-or-invalid-step\"}");
             session.failWithResult("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
@@ -217,13 +233,22 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         }
 
         std::string error;
+        callbacks_.span("start", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"iteration\":" + std::to_string(session.stepCount()) + "}");
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_normalization", "{\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"))) {
+            break;
+        }
         if (!validateReActStepObject(stepJson, true, error)) {
+            callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"failed\",\"error\":" + jsonString(error) + "}");
             events.emitEvent(
                 "model_generation_failed",
                 "{\"reason\":\"invalid-step\",\"error\":" + jsonString(error) +
                     ",\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"
             );
             session.failWithResult("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
+            break;
+        }
+        callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"succeeded\"}");
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_normalization", stepJson))) {
             break;
         }
 
@@ -331,11 +356,13 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         "{\"status\":" + jsonString(runStatusName(session.status())) +
             ",\"snapshot\":" + session.snapshotJson() + "}"
     );
+    callbacks_.span("start", "runtime.result", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     HookDispatcher(callbacks_).dispatch("result_generated", finished);
     events.emitEvent("run_finished", finished);
     callbacks_.audit("run_finished", finished);
     callbacks_.trace("run_finished", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"result\":" + finished + "}");
-    callbacks_.span("end", "run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
+    callbacks_.span("end", "runtime.result", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
+    callbacks_.span("end", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
     HookDispatcher(callbacks_).dispatch("run_finished", finished);
     return finished;
 }

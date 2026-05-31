@@ -50,7 +50,17 @@ final class ReActRuntimeTests: XCTestCase {
         let events = await hook.events
 
         XCTAssertEqual(result.status, .succeeded)
-        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .stepContextReady, .stepProduced, .resultGenerated]))
+        XCTAssertTrue(events.starts(with: [
+            .runStarted,
+            .contextLoaded,
+            .stepContextReady,
+            .beforeModel,
+            .afterModel,
+            .beforeNormalization,
+            .afterNormalization,
+            .stepProduced,
+            .resultGenerated
+        ]))
         XCTAssertEqual(events.last, .runEnded)
     }
 

@@ -47,6 +47,10 @@ struct RuntimeSessionConfig {
 
     // When true, the first non-success tool result terminates the session.
     bool stopOnToolFailure = false;
+
+    // Tool schema disclosure profile for model-facing planner input:
+    // full, compact, or name-only.
+    std::string toolSchemaProfile = "compact";
 };
 
 } // namespace LuminaAgent

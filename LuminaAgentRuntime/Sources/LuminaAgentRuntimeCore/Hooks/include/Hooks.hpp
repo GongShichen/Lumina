@@ -6,6 +6,20 @@
 
 namespace LuminaAgent {
 
+struct RuntimeHookDirectives {
+    bool hasFail = false;
+    bool hasPause = false;
+    bool hasRejectToolCall = false;
+    bool hasRewriteToolCall = false;
+    bool requiresConfirmation = false;
+    std::string reason;
+    std::string markdown;
+    std::string pauseKind;
+    std::string pausePayloadJson;
+    std::string rewrittenToolName;
+    std::string rewrittenParametersJson;
+};
+
 class HookDispatcher {
 public:
     // Binds dispatch to the caller-installed hook callback set.
@@ -17,5 +31,9 @@ public:
 private:
     const RuntimeCallbacks &callbacks_;
 };
+
+// Parses hook directive JSON returned by the caller. Supports either one
+// directive object or a `{"directives":[...]}` envelope.
+RuntimeHookDirectives parseRuntimeHookDirectives(const std::string &directiveJson);
 
 } // namespace LuminaAgent

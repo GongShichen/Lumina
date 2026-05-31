@@ -21,6 +21,11 @@ std::string TaskEnvelopeBuilder::build(
     std::map<std::string, JsonField> requestFields;
     parseFieldsOrEmpty(requestJson, requestFields);
     std::ostringstream output;
+    const std::string schemaProfile = session_.toolSchemaProfile();
+    const bool includeFocusedSchemas = schemaProfile == "full";
+    const std::string capabilities = schemaProfile == "name-only"
+        ? tools_.nameOnlyListJson()
+        : tools_.capabilityListJson();
     output << "{"
            << "\"schema_version\":\"1.0\","
            << "\"instructions\":{"
@@ -30,8 +35,9 @@ std::string TaskEnvelopeBuilder::build(
            << "\"task\":" << taskJson(requestJson) << ","
            << "\"available_tools\":{"
            << "\"mode\":\"progressive_disclosure\","
-           << "\"capabilities\":" << tools_.capabilityListJson() << ","
-           << "\"focused_schemas\":[],"
+           << "\"profile\":" << jsonString(schemaProfile) << ","
+           << "\"capabilities\":" << capabilities << ","
+           << "\"focused_schemas\":" << (includeFocusedSchemas ? tools_.modelFacingSchemasJson() : "[]") << ","
            << "\"discovery_hint\":\"Use capability names first. Emit a tool_discovery step when a focused schema is needed before tool_use.\""
            << "},"
            << "\"context\":{"

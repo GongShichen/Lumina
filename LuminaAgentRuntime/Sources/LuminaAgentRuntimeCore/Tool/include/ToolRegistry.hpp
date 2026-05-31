@@ -19,6 +19,9 @@ public:
     bool isReadOnly(const std::string &toolName) const;
     bool isConcurrencySafe(const std::string &toolName) const;
     bool requiresUserInteraction(const std::string &toolName) const;
+    std::string sideEffect(const std::string &toolName) const;
+    std::string sensitivity(const std::string &toolName) const;
+    bool isDestructive(const std::string &toolName) const;
     std::string interruptBehavior(const std::string &toolName) const;
     std::string idempotencyPolicy(const std::string &toolName) const;
     int maxResultSizeCharacters(const std::string &toolName) const;
@@ -28,6 +31,7 @@ public:
     std::string schemasJson() const;
     std::string modelFacingSchemasJson() const;
     std::string capabilityListJson() const;
+    std::string nameOnlyListJson() const;
     std::string discoverToolsJson(const std::string &query, const std::string &category, int maxResults, bool includeSchemas) const;
 
     // Validates model-provided parameters against required fields and basic types.

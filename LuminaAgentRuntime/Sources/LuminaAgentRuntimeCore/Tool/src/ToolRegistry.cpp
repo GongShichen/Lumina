@@ -102,6 +102,21 @@ bool ToolRegistry::requiresUserInteraction(const std::string &toolName) const {
     return it != records_.end() && it->second.requiresUserInteraction;
 }
 
+std::string ToolRegistry::sideEffect(const std::string &toolName) const {
+    auto it = records_.find(toolName);
+    return it == records_.end() ? "" : it->second.sideEffect;
+}
+
+std::string ToolRegistry::sensitivity(const std::string &toolName) const {
+    auto it = records_.find(toolName);
+    return it == records_.end() ? "" : it->second.sensitivity;
+}
+
+bool ToolRegistry::isDestructive(const std::string &toolName) const {
+    auto it = records_.find(toolName);
+    return it != records_.end() && it->second.destructive;
+}
+
 std::string ToolRegistry::interruptBehavior(const std::string &toolName) const {
     auto it = records_.find(toolName);
     return it == records_.end() ? "" : it->second.interruptBehavior;
@@ -232,6 +247,26 @@ std::string ToolRegistry::capabilityListJson() const {
             output << jsonString(record.parameters[parameterIndex].name);
         }
         output << "]"
+               << "}";
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string ToolRegistry::nameOnlyListJson() const {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const auto &entry : records_) {
+        const ToolSchemaRecord &record = entry.second;
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << "{"
+               << "\"name\":" << jsonString(record.name) << ","
+               << "\"category\":" << jsonString(record.category) << ","
+               << "\"side_effect\":" << jsonString(record.sideEffect) << ","
+               << "\"sensitivity\":" << jsonString(record.sensitivity)
                << "}";
     }
     output << "]";

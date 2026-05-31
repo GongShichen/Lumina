@@ -72,20 +72,83 @@ std::string ToolExecutor::runToolCall(
     const std::string &parameters,
     bool requiresConfirmation
 ) const {
-    if (!tools_.contains(toolName)) {
+    std::string activeToolName = toolName;
+    std::string activeParameters = parameters.empty() ? "{}" : parameters;
+    bool confirmationRequired = requiresConfirmation;
+
+    if (!tools_.contains(activeToolName)) {
         const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool is not registered\"}";
-        const std::string observation = session.recordObservation(toolName, "failed", "", "tool is not registered", false, false);
+        const std::string observation = session.recordObservation(activeToolName, "failed", "", "tool is not registered", false, false);
         callbacks_.emitEvent("observation_created", observation);
         return result;
     }
 
     const std::string callId = session.nextToolCallId();
-    const std::string canonicalParameters = canonicalizeJsonObject(parameters.empty() ? "{}" : parameters);
-    const std::string idempotencyPolicy = tools_.idempotencyPolicy(toolName);
-    const std::string dedupKey = makeDedupKey(toolName, canonicalParameters, idempotencyPolicy, parameters);
+    std::string canonicalParameters = canonicalizeJsonObject(activeParameters);
+    std::string idempotencyPolicy = tools_.idempotencyPolicy(activeToolName);
+    std::string dedupKey = makeDedupKey(activeToolName, canonicalParameters, idempotencyPolicy, activeParameters);
+    const std::string initialHookPayload = "{\"tool_name\":" + jsonString(activeToolName) +
+        ",\"call_id\":" + jsonString(callId) +
+        ",\"parameters\":" + activeParameters +
+        ",\"requires_confirmation\":" + jsonBool(confirmationRequired) +
+        ",\"side_effect\":" + jsonString(tools_.sideEffect(activeToolName)) +
+        ",\"sensitivity\":" + jsonString(tools_.sensitivity(activeToolName)) +
+        ",\"destructive\":" + jsonBool(tools_.isDestructive(activeToolName)) + "}";
+    const RuntimeHookDirectives beforeToolDirectives = parseRuntimeHookDirectives(
+        HookDispatcher(callbacks_).dispatch("before_tool", initialHookPayload)
+    );
+    if (beforeToolDirectives.hasFail) {
+        session.failWithResult(
+            beforeToolDirectives.reason.empty() ? "hook failed tool call" : beforeToolDirectives.reason,
+            beforeToolDirectives.markdown.empty() ? "### 已终止\n\nRuntime hook stopped this tool call." : beforeToolDirectives.markdown
+        );
+        return "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"hook failed run\"}";
+    }
+    if (beforeToolDirectives.hasPause) {
+        session.pause(
+            beforeToolDirectives.pauseKind.empty() ? "hook" : beforeToolDirectives.pauseKind,
+            beforeToolDirectives.pausePayloadJson.empty() ? "{}" : beforeToolDirectives.pausePayloadJson
+        );
+        return "{\"status\":\"cancelled\",\"content\":\"\",\"errorMessage\":\"hook paused run\"}";
+    }
+    if (beforeToolDirectives.hasRejectToolCall) {
+        const std::string error = beforeToolDirectives.reason.empty() ? "tool call rejected by hook" : beforeToolDirectives.reason;
+        const std::string result = "{\"status\":\"denied\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
+        const std::string observation = session.recordObservation(activeToolName, "denied", "", error, false, false);
+        callbacks_.emitEvent("observation_created", observation);
+        return result;
+    }
+    if (beforeToolDirectives.hasRewriteToolCall) {
+        if (!beforeToolDirectives.rewrittenToolName.empty()) {
+            activeToolName = beforeToolDirectives.rewrittenToolName;
+        }
+        if (!beforeToolDirectives.rewrittenParametersJson.empty()) {
+            activeParameters = beforeToolDirectives.rewrittenParametersJson;
+        }
+        confirmationRequired = confirmationRequired || beforeToolDirectives.requiresConfirmation;
+        if (!tools_.contains(activeToolName)) {
+            const std::string error = "rewritten tool is not registered";
+            const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
+            const std::string observation = session.recordObservation(activeToolName, "failed", "", error, false, false);
+            callbacks_.emitEvent("observation_created", observation);
+            return result;
+        }
+        canonicalParameters = canonicalizeJsonObject(activeParameters);
+        idempotencyPolicy = tools_.idempotencyPolicy(activeToolName);
+        dedupKey = makeDedupKey(activeToolName, canonicalParameters, idempotencyPolicy, activeParameters);
+        callbacks_.emitEvent(
+            "tool_call_rewritten",
+            "{\"tool_name\":" + jsonString(activeToolName) +
+                ",\"call_id\":" + jsonString(callId) +
+                ",\"canonical_parameters\":" + jsonString(excerpt(canonicalParameters, 800)) + "}"
+        );
+    } else if (beforeToolDirectives.requiresConfirmation) {
+        confirmationRequired = true;
+    }
+
     callbacks_.emitEvent(
         "tool_call_resolved",
-        "{\"tool_name\":" + jsonString(toolName) +
+        "{\"tool_name\":" + jsonString(activeToolName) +
             ",\"call_id\":" + jsonString(callId) +
             ",\"idempotency_policy\":" + jsonString(idempotencyPolicy) +
             ",\"dedup_key\":" + jsonString(dedupKey) +
@@ -93,11 +156,11 @@ std::string ToolExecutor::runToolCall(
     );
     if (idempotencyPolicy != "always_execute") {
         if (const ToolCallLedgerEntry *entry = session.findReplayableToolCall(dedupKey)) {
-            const std::string observation = session.recordReplayObservation(toolName, *entry);
+            const std::string observation = session.recordReplayObservation(activeToolName, *entry);
             callbacks_.emitEvent("observation_created", observation);
             callbacks_.emitEvent(
                 "tool_call_replayed",
-                "{\"tool_name\":" + jsonString(toolName) +
+                "{\"tool_name\":" + jsonString(activeToolName) +
                     ",\"call_id\":" + jsonString(callId) +
                     ",\"duplicate_of\":" + jsonString(entry->callId) +
                     ",\"dedup_key\":" + jsonString(dedupKey) +
@@ -106,7 +169,7 @@ std::string ToolExecutor::runToolCall(
             );
             callbacks_.audit(
                 "tool_replayed",
-                "{\"tool_name\":" + jsonString(toolName) +
+                "{\"tool_name\":" + jsonString(activeToolName) +
                     ",\"call_id\":" + jsonString(callId) +
                     ",\"duplicate_of\":" + jsonString(entry->callId) +
                     ",\"dedup_key\":" + jsonString(dedupKey) + "}"
@@ -119,25 +182,25 @@ std::string ToolExecutor::runToolCall(
         }
     }
 
-    const std::string validation = tools_.validateCallJson(toolName, parameters);
+    const std::string validation = tools_.validateCallJson(activeToolName, activeParameters);
     std::map<std::string, JsonField> validationFields;
     if (parseFieldsOrEmpty(validation, validationFields) && !boolField(validationFields, "ok", false)) {
         const std::string error = stringField(validationFields, "error", "tool parameters failed validation");
         const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
-        const std::string observation = session.recordObservation(toolName, "failed", "", error, false, false);
+        const std::string observation = session.recordObservation(activeToolName, "failed", "", error, false, false);
         callbacks_.emitEvent(
             "tool_parameter_validation_failed",
-            "{\"tool_name\":" + jsonString(toolName) +
+            "{\"tool_name\":" + jsonString(activeToolName) +
                 ",\"call_id\":" + jsonString(callId) +
                 ",\"error\":" + jsonString(error) +
-                ",\"parameters\":" + jsonString(excerpt(parameters, 800)) + "}"
+                ",\"parameters\":" + jsonString(excerpt(activeParameters, 800)) + "}"
         );
         std::map<std::string, JsonField> observationFields;
         parseFieldsOrEmpty(observation, observationFields);
         if (idempotencyPolicy != "always_execute") {
             ToolCallLedgerEntry entry;
             entry.callId = callId;
-            entry.toolName = toolName;
+            entry.toolName = activeToolName;
             entry.dedupKey = dedupKey;
             entry.canonicalParameters = canonicalParameters;
             entry.status = "failed";
@@ -151,25 +214,28 @@ std::string ToolExecutor::runToolCall(
         return result;
     }
 
-    const std::string callJson = "{\"tool_name\":" + jsonString(toolName) +
+    std::string callJson = "{\"tool_name\":" + jsonString(activeToolName) +
         ",\"call_id\":" + jsonString(callId) +
-        ",\"parameters\":" + parameters +
-        ",\"requires_confirmation\":" + jsonBool(requiresConfirmation) + "}";
-    const std::string redactedCallJson = "{\"tool_name\":" + jsonString(toolName) +
+        ",\"parameters\":" + activeParameters +
+        ",\"requires_confirmation\":" + jsonBool(confirmationRequired) + "}";
+    std::string redactedCallJson = "{\"tool_name\":" + jsonString(activeToolName) +
         ",\"call_id\":" + jsonString(callId) +
-        ",\"parameters\":" + tools_.redactedParametersJson(toolName, parameters) +
-        ",\"requires_confirmation\":" + jsonBool(requiresConfirmation) + "}";
+        ",\"parameters\":" + tools_.redactedParametersJson(activeToolName, activeParameters) +
+        ",\"requires_confirmation\":" + jsonBool(confirmationRequired) + "}";
 
-    bool confirmationRequired = requiresConfirmation;
     if (callbacks_.hasPermission()) {
+        callbacks_.span("start", "runtime.permission.check", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
+        HookDispatcher(callbacks_).dispatch("before_permission", redactedCallJson);
         const std::string permissionJson = callbacks_.decidePermission(callJson);
+        HookDispatcher(callbacks_).dispatch("after_permission", "{\"call\":" + redactedCallJson + ",\"decision\":" + (trim(permissionJson).empty() ? "{}" : permissionJson) + "}");
+        callbacks_.span("end", "runtime.permission.check", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
         std::map<std::string, JsonField> permissionFields;
         if (parseFieldsOrEmpty(permissionJson, permissionFields)) {
             const std::string decision = lowercased(stringField(permissionFields, "decision"));
             if (decision == "denied") {
                 const std::string error = stringField(permissionFields, "reason", "permission denied");
                 const std::string result = "{\"status\":\"denied\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
-                const std::string observation = session.recordObservation(toolName, "denied", "", error, false, false);
+                const std::string observation = session.recordObservation(activeToolName, "denied", "", error, false, false);
                 callbacks_.emitEvent("observation_created", observation);
                 return result;
             }
@@ -182,18 +248,22 @@ std::string ToolExecutor::runToolCall(
         if (!callbacks_.hasConfirmation()) {
             const std::string error = "confirmation callback is not registered";
             const std::string result = "{\"status\":\"denied\",\"content\":\"\",\"errorMessage\":\"confirmation callback is not registered\"}";
-            const std::string observation = session.recordObservation(toolName, "denied", "", error, true, false);
+            const std::string observation = session.recordObservation(activeToolName, "denied", "", error, true, false);
             callbacks_.emitEvent("observation_created", observation);
             return result;
         }
+        callbacks_.span("start", "runtime.confirmation.wait", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
+        HookDispatcher(callbacks_).dispatch("before_confirmation", redactedCallJson);
         const std::string confirmationJson = callbacks_.confirm(callJson);
+        HookDispatcher(callbacks_).dispatch("after_confirmation", "{\"call\":" + redactedCallJson + ",\"decision\":" + (trim(confirmationJson).empty() ? "{}" : confirmationJson) + "}");
+        callbacks_.span("end", "runtime.confirmation.wait", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
         std::map<std::string, JsonField> confirmationFields;
         if (parseFieldsOrEmpty(confirmationJson, confirmationFields)) {
             confirmed = boolField(confirmationFields, "confirmed", false);
         }
         if (!confirmed) {
             const std::string result = "{\"status\":\"denied\",\"content\":\"\",\"errorMessage\":\"user did not confirm\"}";
-            const std::string observation = session.recordObservation(toolName, "denied", "", "user did not confirm", true, false);
+            const std::string observation = session.recordObservation(activeToolName, "denied", "", "user did not confirm", true, false);
             callbacks_.emitEvent("observation_created", observation);
             return result;
         }
@@ -201,13 +271,13 @@ std::string ToolExecutor::runToolCall(
 
     if (!callbacks_.hasTool()) {
         const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool callback is not registered\"}";
-        const std::string observation = session.recordObservation(toolName, "failed", "", "tool callback is not registered", confirmationRequired, confirmed);
+        const std::string observation = session.recordObservation(activeToolName, "failed", "", "tool callback is not registered", confirmationRequired, confirmed);
         callbacks_.emitEvent("observation_created", observation);
         return result;
     }
     callbacks_.emitEvent("tool_will_execute", redactedCallJson);
     HookDispatcher(callbacks_).dispatch("tool_will_execute", redactedCallJson);
-    callbacks_.span("start", "tool_execution", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + "}");
+    callbacks_.span("start", "runtime.tool.execute", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
     const auto toolStartedAt = std::chrono::steady_clock::now();
     std::string result = callbacks_.callTool(callJson);
     const auto toolElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -218,7 +288,7 @@ std::string ToolExecutor::runToolCall(
     }
 
     std::map<std::string, JsonField> resultFields;
-    std::string resultValidation = tools_.validateResultJson(toolName, result);
+    std::string resultValidation = tools_.validateResultJson(activeToolName, result);
     std::map<std::string, JsonField> resultValidationFields;
     bool parsed = parseFieldsOrEmpty(result, resultFields);
     if (parseFieldsOrEmpty(resultValidation, resultValidationFields) && !boolField(resultValidationFields, "ok", false)) {
@@ -231,20 +301,20 @@ std::string ToolExecutor::runToolCall(
     HookDispatcher(callbacks_).dispatch("tool_did_execute", "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}");
     callbacks_.emitEvent(
         "tool_callback_returned",
-        "{\"tool_name\":" + jsonString(toolName) +
+        "{\"tool_name\":" + jsonString(activeToolName) +
             ",\"call_id\":" + jsonString(callId) +
             ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) +
             ",\"raw_result_excerpt\":" + jsonString(excerpt(result, 1200)) + "}"
     );
-    callbacks_.metric("tool_latency_ms", static_cast<double>(toolElapsedMs), "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + "}");
-    callbacks_.trace("tool_result", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + ",\"result_excerpt\":" + jsonString(excerpt(result, 1200)) + "}");
-    callbacks_.span("end", "tool_execution", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + "}");
+    callbacks_.metric("tool_latency_ms", static_cast<double>(toolElapsedMs), "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
+    callbacks_.trace("tool_result", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + ",\"result_excerpt\":" + jsonString(excerpt(result, 1200)) + "}");
+    callbacks_.span("end", "runtime.tool.execute", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + "}");
 
     const std::string status = parsed ? stringField(resultFields, "status", "succeeded") : "succeeded";
-    const std::string content = tools_.truncateResultContent(toolName, parsed ? stringField(resultFields, "content", result) : result);
+    const std::string content = tools_.truncateResultContent(activeToolName, parsed ? stringField(resultFields, "content", result) : result);
     const std::string error = parsed ? stringField(resultFields, "errorMessage", "") : "";
     const std::string observation = session.recordObservation(
-        toolName,
+        activeToolName,
         status,
         content,
         error,
@@ -256,7 +326,7 @@ std::string ToolExecutor::runToolCall(
     if (parsed && shouldRecordForReplay(idempotencyPolicy, resultFields)) {
         ToolCallLedgerEntry entry;
         entry.callId = callId;
-        entry.toolName = toolName;
+        entry.toolName = activeToolName;
         entry.dedupKey = dedupKey;
         entry.canonicalParameters = canonicalParameters;
         entry.status = lowercased(status.empty() ? "succeeded" : status);
@@ -267,7 +337,7 @@ std::string ToolExecutor::runToolCall(
         session.recordToolCallLedgerEntry(entry);
     }
     callbacks_.emitEvent("observation_created", observation);
-    callbacks_.trace("observation_created", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"observation\":" + observation + "}");
+    callbacks_.trace("observation_created", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"observation\":" + observation + "}");
     HookDispatcher(callbacks_).dispatch("observation_created", observation);
     return result;
 }

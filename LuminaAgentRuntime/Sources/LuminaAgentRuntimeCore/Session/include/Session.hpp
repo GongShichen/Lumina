@@ -95,6 +95,7 @@ public:
     int maximumCompactFailures() const;
     int maximumObservationCharacters() const;
     int toolResultTokenBudget() const;
+    std::string toolSchemaProfile() const;
     int remainingContextTokensEstimate() const;
     bool hasResult() const;
     bool isTerminated() const;

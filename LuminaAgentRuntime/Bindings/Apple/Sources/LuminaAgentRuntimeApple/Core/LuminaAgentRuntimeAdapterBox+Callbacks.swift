@@ -354,6 +354,10 @@ extension LuminaAgentRuntimeAdapterBox {
         case "run_started": return .runStarted
         case "context_loaded": return .contextLoaded
         case "planner_input_ready": return .stepContextReady
+        case "before_model": return .beforeModel
+        case "after_model": return .afterModel
+        case "before_normalization": return .beforeNormalization
+        case "after_normalization": return .afterNormalization
         case "step_produced": return .stepProduced
         case "tool_will_execute": return .toolWillExecute
         case "tool_did_execute": return .toolDidExecute
