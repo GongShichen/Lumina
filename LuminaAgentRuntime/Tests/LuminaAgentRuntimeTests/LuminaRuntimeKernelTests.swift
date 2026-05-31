@@ -11,6 +11,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var events: [String] = []
     private var traces: [String] = []
     private var metrics: [String] = []
+    private var toolCalls: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
 
@@ -20,6 +21,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         events = []
         traces = []
         metrics = []
+        toolCalls = []
         toolCallCount = 0
         modelCallCount = 0
         lock.unlock()
@@ -55,6 +57,13 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendToolCall(_ value: String) {
+        lock.lock()
+        toolCalls.append(value)
+        toolCallCount += 1
+        lock.unlock()
+    }
+
     func incrementModelCallCount() -> Int {
         lock.lock()
         modelCallCount += 1
@@ -63,10 +72,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -197,6 +206,17 @@ private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCal
     return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
+private let luminaUnsafeToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-unsafe","type":"tool_use","thought":"Use proposed tool.","tool_name":"unsafe.write","parameters":{"query":"secret"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
 private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
     let request = contextRequest.map { String(cString: $0) } ?? ""
     if request.contains(#""request_more_context":true"#) {
@@ -223,6 +243,29 @@ private let luminaEventCallback: LuminaAgentEventCallback = { event, _ in
 private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
+}
+
+private let luminaRecordingToolCallback: LuminaAgentToolCallback = { call, _ in
+    if let call {
+        LuminaRuntimeCaptureStore.shared.appendToolCall(String(cString: call))
+    }
+    return luminaRuntimeCString(#"{"status":"succeeded","content":"rewritten tool ran"}"#)
+}
+
+private let luminaRejectRequestGuardrailCallback: LuminaAgentGuardrailCallback = { request, _ in
+    let text = request.map { String(cString: $0) } ?? ""
+    if text.contains(#""stage":"request""#) {
+        return luminaRuntimeCString(#"{"decision":"reject","message":"blocked by core guardrail"}"#)
+    }
+    return luminaRuntimeCString(#"{"decision":"allow"}"#)
+}
+
+private let luminaRewriteToolHookCallback: LuminaAgentHookCallback = { event, _ in
+    let text = event.map { String(cString: $0) } ?? ""
+    if text.contains(#""route_id":"rewrite-unsafe""#) {
+        return luminaRuntimeCString(#"{"directives":[{"type":"rewrite_tool_call","tool_name":"data.lookup","parameters":{"query":"safe"},"requires_confirmation":false}]}"#)
+    }
+    return luminaRuntimeCString("{}")
 }
 
 private func registerAskUserSchema(on runtime: OpaquePointer) {
@@ -678,6 +721,100 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertEqual(invocationCount, 0)
         XCTAssertEqual(result.toolResults.first?.status, .failed)
         XCTAssertTrue(result.reactTrace?.observations.first?.summary.contains("missing required parameter") == true)
+    }
+
+    func testCoreGuardrailRejectsRequestBeforeModelGeneration() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetGuardrailCallback(runtime, luminaRejectRequestGuardrailCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"blocked","text":"stop"}"#)
+        let result = pointer.map { String(cString: $0) } ?? ""
+        if let pointer {
+            LuminaAgentRuntimeReleaseString(pointer)
+        }
+
+        XCTAssertTrue(result.contains(#""status":"failed""#))
+        XCTAssertTrue(result.contains("blocked by core guardrail"))
+        XCTAssertTrue(LuminaRuntimeCaptureStore.shared.snapshot().plannerInputs.isEmpty)
+    }
+
+    func testCoreHookRouteRewritesToolCallBeforePermissionAndExecution() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaUnsafeToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaRecordingToolCallback, nil)
+        LuminaAgentRuntimeSetHookCallback(runtime, luminaRewriteToolHookCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let unsafeSchema = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"unsafe.write","description":"Unsafe write.","category":"test","sideEffect":"systemWrite","sensitivity":"sensitive","parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let unsafeSchema { LuminaAgentRuntimeReleaseString(unsafeSchema) }
+        let safeSchema = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"data.lookup","description":"Lookup data.","category":"test","sideEffect":"readOnly","sensitivity":"normal","parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let safeSchema { LuminaAgentRuntimeReleaseString(safeSchema) }
+        let route = LuminaAgentRuntimeRegisterHookRoute(
+            runtime,
+            #"{"id":"rewrite-unsafe","events":["before_tool"],"tool_name_patterns":["unsafe.*"],"sensitivities":["sensitive"],"side_effects":["systemWrite"]}"#
+        )
+        if let route { LuminaAgentRuntimeReleaseString(route) }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"rewrite","text":"rewrite tool"}"#)
+        if let resultPointer {
+            LuminaAgentRuntimeReleaseString(resultPointer)
+        }
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.toolCalls.first?.contains(#""tool_name":"data.lookup""#) == true)
+        XCTAssertTrue(snapshot.toolCalls.first?.contains(#""query":"safe""#) == true)
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("tool_call_rewritten"))
+    }
+
+    func testCoreStateAndCheckpointRoundTripThroughCABI() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 2)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"state","text":"remember"}"#) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+
+        let setPointer = LuminaAgentRuntimeSessionSetState(runtime, session, "session", "topic", #"{"value":"core"}"#)
+        let setText = setPointer.map { String(cString: $0) } ?? ""
+        if let setPointer { LuminaAgentRuntimeReleaseString(setPointer) }
+        XCTAssertTrue(setText.contains(#""ok":true"#))
+
+        let checkpointPointer = LuminaAgentRuntimeExportSessionCheckpoint(session)
+        let checkpoint = checkpointPointer.map { String(cString: $0) } ?? ""
+        if let checkpointPointer { LuminaAgentRuntimeReleaseString(checkpointPointer) }
+        XCTAssertTrue(checkpoint.contains("runtime_checkpoint"))
+        XCTAssertTrue(checkpoint.contains("runtime_state"))
+
+        guard let restored = checkpoint.withCString({ LuminaAgentRuntimeCreateSessionFromCheckpoint(runtime, $0) }) else {
+            XCTFail("Failed to restore session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(restored) }
+        let getPointer = LuminaAgentRuntimeSessionGetState(restored, "session", "topic")
+        let getText = getPointer.map { String(cString: $0) } ?? ""
+        if let getPointer { LuminaAgentRuntimeReleaseString(getPointer) }
+
+        XCTAssertTrue(getText.contains(#""value":{"value":"core"}"#))
     }
 
     func testContractExportContainsReusableRuntimeSchemas() throws {
