@@ -281,7 +281,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             session.failWithResult("context-budget", "### 无法继续\n\n上下文超过调用方配置的窗口，且 auto compact 已达到失败上限。");
             break;
         }
-        const std::string plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+        std::string plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
         events.emitEvent(
             "planner_input_ready",
             "{\"tokens_estimate\":" + std::to_string(static_cast<int>(plannerInput.size() / 4)) +
@@ -290,11 +290,19 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 ",\"last_observation_excerpt\":" + jsonString(excerpt(lastObservation, 1200)) +
                 ",\"input_excerpt\":" + jsonString(excerpt(plannerInput, 2400)) + "}"
         );
+        std::string contextBeforeHook = contextJson;
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("planner_input_ready", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"), &contextJson, request)) {
             break;
         }
+        if (contextJson != contextBeforeHook) {
+            plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+        }
+        contextBeforeHook = contextJson;
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_model", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"), &contextJson, request)) {
             break;
+        }
+        if (contextJson != contextBeforeHook) {
+            plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
         }
         const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {

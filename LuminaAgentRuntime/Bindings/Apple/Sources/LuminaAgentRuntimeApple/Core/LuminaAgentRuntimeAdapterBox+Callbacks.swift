@@ -14,50 +14,6 @@ extension LuminaAgentRuntimeAdapterBox {
         }
     }
 
-    func applyInputGuardrails(to request: LuminaAgentRequest) async throws -> LuminaAgentRequest {
-        var current = request
-        for guardrail in guardrails.input {
-            switch await guardrail.evaluate(request: current) {
-            case .allow:
-                continue
-            case let .rewrite(rewritten):
-                current = rewritten
-                currentEventSink?(.hookAnnotated("guardrail.input.rewrite", .string("request")))
-            case let .reject(message):
-                currentEventSink?(.hookAnnotated("guardrail.input.reject", .string(message)))
-                throw LuminaGuardrailFailure.rejected(message)
-            case let .tripwireFailure(message):
-                currentEventSink?(.hookAnnotated("guardrail.input.tripwire", .string(message)))
-                throw LuminaGuardrailFailure.tripwire(message)
-            }
-        }
-        return current
-    }
-
-    func applyResultGuardrails(to result: LuminaAgentRunResult, request: LuminaAgentRequest) async -> LuminaAgentRunResult {
-        var guarded = result
-        var markdown = result.plan.summary
-        for guardrail in guardrails.result {
-            switch await guardrail.evaluate(markdown: markdown, request: request) {
-            case .allow:
-                continue
-            case let .rewrite(rewritten):
-                markdown = rewritten
-                currentEventSink?(.hookAnnotated("guardrail.result.rewrite", .string("result")))
-            case let .reject(message):
-                guarded.status = .failed
-                markdown = "### 已拒绝\n\n\(message)"
-                currentEventSink?(.hookAnnotated("guardrail.result.reject", .string(message)))
-            case let .tripwireFailure(message):
-                guarded.status = .failed
-                markdown = "### 已终止\n\n\(message)"
-                currentEventSink?(.hookAnnotated("guardrail.result.tripwire", .string(message)))
-            }
-        }
-        guarded.plan = LuminaAgentPlan(summary: markdown, toolCalls: guarded.plan.toolCalls)
-        return guarded
-    }
-
     func executeTool(callJSON: String) async -> String {
         do {
             let parsed = try Self.parseToolCall(callJSON)
@@ -66,44 +22,11 @@ extension LuminaAgentRuntimeAdapterBox {
             }
             let request = currentRequest ?? LuminaAgentRequest(text: "")
             let schema = tool.schema
-            var call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: parsed.requiresConfirmation)
-            for guardrail in guardrails.toolInput {
-                switch await guardrail.evaluate(call: call, schema: schema, request: request) {
-                case .allow:
-                    continue
-                case let .rewrite(rewritten):
-                    guard rewritten.toolName == call.toolName else {
-                        return Self.toolResultJSON(status: "failed", content: "", errorMessage: "tool input guardrail cannot rewrite tool_name after permission")
-                    }
-                    call = rewritten
-                    currentEventSink?(.hookAnnotated("guardrail.tool_input.rewrite", .string(call.toolName)))
-                case let .reject(message):
-                    currentEventSink?(.hookAnnotated("guardrail.tool_input.reject", .string(message)))
-                    return Self.toolResultJSON(status: "denied", content: "", errorMessage: message)
-                case let .tripwireFailure(message):
-                    currentEventSink?(.hookAnnotated("guardrail.tool_input.tripwire", .string(message)))
-                    return Self.toolResultJSON(status: "failed", content: "", errorMessage: message)
-                }
-            }
+            let call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: parsed.requiresConfirmation)
             let context = LuminaToolExecutionContext(request: request, call: call, schema: schema)
             let startedAt = ContinuousClock.now
             currentEventSink?(.toolStarted(call))
-            var result = try await tool.call(context: context, cancellation: LuminaCancellationToken())
-            for guardrail in guardrails.toolOutput {
-                switch await guardrail.evaluate(result: result, call: call, schema: schema, request: request) {
-                case .allow:
-                    continue
-                case let .rewrite(rewritten):
-                    result = rewritten
-                    currentEventSink?(.hookAnnotated("guardrail.tool_output.rewrite", .string(call.toolName)))
-                case let .reject(message):
-                    currentEventSink?(.hookAnnotated("guardrail.tool_output.reject", .string(message)))
-                    result = LuminaToolResult(callID: result.callID, toolName: result.toolName, status: .failed, errorMessage: message)
-                case let .tripwireFailure(message):
-                    currentEventSink?(.hookAnnotated("guardrail.tool_output.tripwire", .string(message)))
-                    result = LuminaToolResult(callID: result.callID, toolName: result.toolName, status: .failed, errorMessage: message)
-                }
-            }
+            let result = try await tool.call(context: context, cancellation: LuminaCancellationToken())
             toolExecutionMilliseconds += Self.milliseconds(since: startedAt)
             toolResults.append(result)
             currentEventSink?(.toolFinished(result))
@@ -111,6 +34,123 @@ extension LuminaAgentRuntimeAdapterBox {
             return Self.toolResultJSON(status: result.status.rawValue, content: content, errorMessage: result.errorMessage)
         } catch {
             return Self.toolResultJSON(status: "failed", content: "", errorMessage: error.localizedDescription)
+        }
+    }
+
+    func evaluateGuardrail(guardrailJSON: String) async -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(guardrailJSON.utf8)) as? [String: Any],
+              let stage = object["stage"] as? String
+        else { return Self.guardrailDecisionJSON("reject", message: "invalid guardrail request") }
+        let payload = object["payload"] as? [String: Any] ?? [:]
+        do {
+            switch stage {
+            case "request":
+                guard !guardrails.input.isEmpty else { return Self.guardrailDecisionJSON("allow") }
+                let request = try Self.decodeRequest(fromObject: payload) ?? (currentRequest ?? LuminaAgentRequest(text: ""))
+                currentRequest = request
+                var current = request
+                var rewritten = false
+                for guardrail in guardrails.input {
+                    switch await guardrail.evaluate(request: current) {
+                    case .allow:
+                        continue
+                    case let .rewrite(value):
+                        current = value
+                        rewritten = true
+                    case let .reject(message):
+                        return Self.guardrailDecisionJSON("reject", message: message)
+                    case let .tripwireFailure(message):
+                        return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                    }
+                }
+                guard rewritten,
+                      let data = try? JSONEncoder().encode(current),
+                      let payload = try? JSONSerialization.jsonObject(with: data)
+                else { return Self.guardrailDecisionJSON("allow") }
+                currentRequest = current
+                return Self.guardrailDecisionJSON("rewrite", payload: payload)
+
+            case "tool_input":
+                guard !guardrails.toolInput.isEmpty else { return Self.guardrailDecisionJSON("allow") }
+                let call = try Self.toolCallFromObject(payload)
+                guard let tool = toolsByName[call.toolName] else {
+                    return Self.guardrailDecisionJSON("reject", message: "tool is not registered")
+                }
+                let request = currentRequest ?? LuminaAgentRequest(text: "")
+                var current = call
+                var rewritten = false
+                for guardrail in guardrails.toolInput {
+                    switch await guardrail.evaluate(call: current, schema: tool.schema, request: request) {
+                    case .allow:
+                        continue
+                    case let .rewrite(value):
+                        current = value
+                        rewritten = true
+                    case let .reject(message):
+                        return Self.guardrailDecisionJSON("reject", message: message)
+                    case let .tripwireFailure(message):
+                        return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                    }
+                }
+                return rewritten
+                    ? Self.guardrailDecisionJSON("rewrite", payload: Self.foundationObject(from: current))
+                    : Self.guardrailDecisionJSON("allow")
+
+            case "tool_output":
+                guard !guardrails.toolOutput.isEmpty else { return Self.guardrailDecisionJSON("allow") }
+                let callObject = payload["call"] as? [String: Any] ?? [:]
+                let resultObject = payload["result"] as? [String: Any] ?? [:]
+                let call = try Self.toolCallFromObject(callObject)
+                guard let tool = toolsByName[call.toolName] else {
+                    return Self.guardrailDecisionJSON("reject", message: "tool is not registered")
+                }
+                let request = currentRequest ?? LuminaAgentRequest(text: "")
+                var result = Self.toolResultFromObject(resultObject, fallbackToolName: call.toolName)
+                var rewritten = false
+                for guardrail in guardrails.toolOutput {
+                    switch await guardrail.evaluate(result: result, call: call, schema: tool.schema, request: request) {
+                    case .allow:
+                        continue
+                    case let .rewrite(value):
+                        result = value
+                        rewritten = true
+                    case let .reject(message):
+                        return Self.guardrailDecisionJSON("reject", message: message)
+                    case let .tripwireFailure(message):
+                        return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                    }
+                }
+                return rewritten
+                    ? Self.guardrailDecisionJSON("rewrite", payload: ["result": Self.foundationObject(from: result)])
+                    : Self.guardrailDecisionJSON("allow")
+
+            case "result":
+                guard !guardrails.result.isEmpty else { return Self.guardrailDecisionJSON("allow") }
+                let request = currentRequest ?? LuminaAgentRequest(text: "")
+                var markdown = payload["resultMarkdown"] as? String ?? payload["content"] as? String ?? ""
+                var rewritten = false
+                for guardrail in guardrails.result {
+                    switch await guardrail.evaluate(markdown: markdown, request: request) {
+                    case .allow:
+                        continue
+                    case let .rewrite(value):
+                        markdown = value
+                        rewritten = true
+                    case let .reject(message):
+                        return Self.guardrailDecisionJSON("reject", message: message)
+                    case let .tripwireFailure(message):
+                        return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                    }
+                }
+                return rewritten
+                    ? Self.guardrailDecisionJSON("rewrite", payload: ["resultMarkdown": markdown])
+                    : Self.guardrailDecisionJSON("allow")
+
+            default:
+                return Self.guardrailDecisionJSON("allow")
+            }
+        } catch {
+            return Self.guardrailDecisionJSON("reject", message: error.localizedDescription)
         }
     }
 
@@ -189,6 +229,7 @@ extension LuminaAgentRuntimeAdapterBox {
         currentEventSink?(.hookAnnotated("runtime", .string(hookJSON)))
         guard !hooks.isEmpty else { return "{}" }
         let object = (try? JSONSerialization.jsonObject(with: Data(hookJSON.utf8))) as? [String: Any]
+        let routeID = object?["route_id"] as? String
         let event = Self.hookEvent(from: object?["lifecycle"] as? String)
         let payload = object?["payload"] as? [String: Any]
         let lifecyclePayload = Self.jsonObject(fromAny: payload ?? [:])
@@ -204,8 +245,15 @@ extension LuminaAgentRuntimeAdapterBox {
         )
         do {
             var directiveObjects: [[String: Any]] = []
-            for hook in hooks {
-                if let matchingHook = hook as? any LuminaMatchingAgentRuntimeHook,
+            let selectedHooks: [(Int, any LuminaAgentRuntimeHook)]
+            if let routeID, let index = Self.hookIndex(fromRouteID: routeID), hooks.indices.contains(index) {
+                selectedHooks = [(index, hooks[index])]
+            } else {
+                selectedHooks = Array(hooks.enumerated())
+            }
+            for (_, hook) in selectedHooks {
+                if routeID == nil,
+                   let matchingHook = hook as? any LuminaMatchingAgentRuntimeHook,
                    !matchingHook.matcher.matches(event: event, context: context) {
                     continue
                 }
@@ -214,8 +262,10 @@ extension LuminaAgentRuntimeAdapterBox {
                     case .proceed:
                         directiveObjects.append(["type": "proceed"])
                     case let .appendContextSection(section):
-                        hookContextSections.append(section)
-                        directiveObjects.append(["type": "append_context"])
+                        directiveObjects.append([
+                            "type": "append_context",
+                            "context": ["sections": [Self.foundationObject(fromEncodable: section) ?? [:]]]
+                        ])
                     case let .terminate(markdown, reason):
                         directiveObjects.append(["type": "fail", "markdown": markdown, "reason": reason])
                     case let .fail(markdown, reason):
@@ -257,6 +307,21 @@ extension LuminaAgentRuntimeAdapterBox {
         } catch {
             return "{\"terminate\":true,\"markdown\":\"### Hook failed\\n\\n\(Self.escape(error.localizedDescription))\",\"reason\":\"hook failed\"}"
         }
+    }
+
+    func hookRouteJSON(index: Int) -> String {
+        var object: [String: Any] = ["id": Self.hookRouteID(index: index)]
+        if hooks.indices.contains(index),
+           let hook = hooks[index] as? any LuminaMatchingAgentRuntimeHook {
+            object["events"] = hook.matcher.events.map { Self.lifecycleName(for: $0) }
+            object["tool_name_patterns"] = hook.matcher.toolNamePatterns
+            object["sensitivities"] = hook.matcher.sensitivities.map(\.rawValue)
+            object["side_effects"] = hook.matcher.sideEffects.map(\.rawValue)
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let json = String(data: data, encoding: .utf8)
+        else { return #"{"id":"swift-hook"}"# }
+        return json
     }
 
     func consumeRuntimeEvent(eventJSON: String) {
@@ -331,23 +396,6 @@ extension LuminaAgentRuntimeAdapterBox {
            let contextData = try? JSONSerialization.data(withJSONObject: contextObject),
            let context = try? JSONDecoder().decode(LuminaRuntimeContext.self, from: contextData) {
             loadedContext = context
-        }
-        if !hookContextSections.isEmpty {
-            loadedContext.sections.append(contentsOf: hookContextSections)
-        }
-        let stateSnapshot = await runtimeState.snapshot()
-        if !stateSnapshot.isEmpty,
-           let data = try? JSONEncoder().encode(stateSnapshot),
-           let stateJSON = String(data: data, encoding: .utf8) {
-            loadedContext.sections.append(LuminaRuntimeContextSection(
-                id: "runtime.state",
-                title: "Runtime State",
-                summary: "Scoped runtime state exposed by host policy.",
-                content: stateJSON,
-                source: "runtime_state",
-                sensitivity: .normal,
-                disclosureLevel: 1
-            ))
         }
         let estimatedCharacters = LuminaReActContextWindowEstimator.estimateCharacters(
             request: request,
@@ -529,7 +577,13 @@ extension LuminaAgentRuntimeAdapterBox {
     static func toolCallFromHookPayload(_ payload: [String: Any]?) -> LuminaToolCall? {
         guard let payload else { return nil }
         let callObject = payload["call"] as? [String: Any] ?? payload
-        guard let toolName = callObject["tool_name"] as? String ?? callObject["toolName"] as? String else { return nil }
+        return try? toolCallFromObject(callObject)
+    }
+
+    static func toolCallFromObject(_ callObject: [String: Any]) throws -> LuminaToolCall {
+        guard let toolName = callObject["tool_name"] as? String ?? callObject["toolName"] as? String else {
+            throw NSError(domain: "LuminaAgentRuntimeApple", code: 1, userInfo: [NSLocalizedDescriptionKey: "missing tool_name"])
+        }
         let parameters = callObject["parameters"] ?? callObject["arguments"] ?? [:]
         let parameterData = try? JSONSerialization.data(withJSONObject: parameters)
         let arguments = parameterData.flatMap { try? JSONDecoder().decode([String: LuminaJSONValue].self, from: $0) } ?? [:]
@@ -558,6 +612,20 @@ extension LuminaAgentRuntimeAdapterBox {
         )
     }
 
+    static func toolResultFromObject(_ object: [String: Any], fallbackToolName: String) -> LuminaToolResult {
+        let outputData = try? JSONSerialization.data(withJSONObject: object["output"] ?? [:])
+        let output = outputData.flatMap { try? JSONDecoder().decode([String: LuminaJSONValue].self, from: $0) } ?? [:]
+        let status = LuminaToolResultStatus(rawValue: object["status"] as? String ?? "") ?? .failed
+        return LuminaToolResult(
+            callID: UUID(),
+            toolName: object["toolName"] as? String ?? object["tool_name"] as? String ?? fallbackToolName,
+            status: status,
+            output: output,
+            content: (object["content"] as? String).map { [.text($0)] } ?? [],
+            errorMessage: object["errorMessage"] as? String
+        )
+    }
+
     static func jsonObject(fromAny value: Any) -> [String: LuminaJSONValue] {
         guard let data = try? JSONSerialization.data(withJSONObject: value),
               let decoded = try? JSONDecoder().decode([String: LuminaJSONValue].self, from: data)
@@ -573,6 +641,86 @@ extension LuminaAgentRuntimeAdapterBox {
         case let .object(value): return value.mapValues(foundationObject(from:))
         case let .array(value): return value.map(foundationObject(from:))
         case .null: return NSNull()
+        }
+    }
+
+    static func foundationObject(from call: LuminaToolCall) -> [String: Any] {
+        [
+            "tool_name": call.toolName,
+            "parameters": foundationObject(from: .object(call.arguments)),
+            "requires_confirmation": call.requiresConfirmation
+        ]
+    }
+
+    static func foundationObject(from result: LuminaToolResult) -> [String: Any] {
+        var object: [String: Any] = [
+            "status": result.status.rawValue,
+            "content": result.content.compactMap(\.textForModelInput).joined(separator: "\n"),
+            "output": foundationObject(from: .object(result.output))
+        ]
+        if let errorMessage = result.errorMessage {
+            object["errorMessage"] = errorMessage
+        }
+        return object
+    }
+
+    static func foundationObject<T: Encodable>(fromEncodable value: T) -> Any? {
+        guard let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    static func guardrailDecisionJSON(_ decision: String, message: String? = nil, payload: Any? = nil) -> String {
+        var object: [String: Any] = ["decision": decision]
+        if let message {
+            object["message"] = message
+        }
+        if let payload {
+            object["payload"] = payload
+        }
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let json = String(data: data, encoding: .utf8)
+        else { return #"{"decision":"reject","message":"failed to encode guardrail decision"}"# }
+        return json
+    }
+
+    static func hookRouteID(index: Int) -> String {
+        "swift-hook-\(index)"
+    }
+
+    static func hookIndex(fromRouteID routeID: String) -> Int? {
+        guard routeID.hasPrefix("swift-hook-") else { return nil }
+        return Int(routeID.dropFirst("swift-hook-".count))
+    }
+
+    static func lifecycleName(for event: LuminaAgentRuntimeHookEvent) -> String {
+        switch event {
+        case .runStarted: return "run_started"
+        case .sessionStarted: return "session_started"
+        case .contextLoaded: return "context_loaded"
+        case .contextUpdated: return "context_updated"
+        case .stepContextReady: return "planner_input_ready"
+        case .beforeModel: return "before_model"
+        case .afterModel: return "after_model"
+        case .beforeNormalization: return "before_normalization"
+        case .afterNormalization: return "after_normalization"
+        case .stepProduced: return "step_produced"
+        case .beforeTool: return "before_tool"
+        case .toolWillExecute: return "tool_will_execute"
+        case .toolDidExecute: return "tool_did_execute"
+        case .afterTool: return "after_tool"
+        case .beforePermission: return "before_permission"
+        case .afterPermission: return "after_permission"
+        case .beforeConfirmation: return "before_confirmation"
+        case .afterConfirmation: return "after_confirmation"
+        case .beforeCompaction: return "before_compaction"
+        case .observationCreated: return "observation_created"
+        case .resultGenerated: return "result_generated"
+        case .runEnded: return "run_finished"
+        case .sessionEnded: return "session_ended"
+        case .paused: return "run_paused"
+        case .cancelled: return "cancelled"
+        case .failed: return "failed"
         }
     }
 

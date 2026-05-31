@@ -30,6 +30,7 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetContextCallback(handle, luminaAgentSwiftAdapterContextCallback, context)
         LuminaAgentRuntimeSetPermissionCallback(handle, luminaAgentSwiftAdapterPermissionCallback, context)
         LuminaAgentRuntimeSetConfirmationCallback(handle, luminaAgentSwiftAdapterConfirmationCallback, context)
+        LuminaAgentRuntimeSetGuardrailCallback(handle, luminaAgentSwiftAdapterGuardrailCallback, context)
         LuminaAgentRuntimeSetAuditCallback(handle, luminaAgentSwiftAdapterAuditCallback, context)
         LuminaAgentRuntimeSetTraceCallback(handle, luminaAgentSwiftAdapterTraceCallback, context)
         LuminaAgentRuntimeSetMetricsCallback(handle, luminaAgentSwiftAdapterMetricsCallback, context)
@@ -37,6 +38,15 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetRollbackCallback(handle, luminaAgentSwiftAdapterRollbackCallback, context)
         LuminaAgentRuntimeSetEventCallback(handle, luminaAgentSwiftAdapterEventCallback, context)
         LuminaAgentRuntimeSetHookCallback(handle, luminaAgentSwiftAdapterHookCallback, context)
+    }
+
+    func registerHookRoute(_ routeJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return routeJSON.withCString { routePointer in
+            consumeRuntimeString(LuminaAgentRuntimeRegisterHookRoute(handle, routePointer))
+        }
     }
 
     func registerToolSchema(_ schemaJSON: String) -> String {
@@ -61,6 +71,14 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         guard let handle = currentHandle() else { return nil }
         return requestJSON.withCString { requestPointer in
             guard let session = LuminaAgentRuntimeCreateSession(handle, requestPointer) else { return nil }
+            return LuminaAgentRuntimeSessionHandle(runtime: self, session: session)
+        }
+    }
+
+    func createSession(checkpointJSON: String) -> LuminaAgentRuntimeSessionHandle? {
+        guard let handle = currentHandle() else { return nil }
+        return checkpointJSON.withCString { checkpointPointer in
+            guard let session = LuminaAgentRuntimeCreateSessionFromCheckpoint(handle, checkpointPointer) else { return nil }
             return LuminaAgentRuntimeSessionHandle(runtime: self, session: session)
         }
     }
@@ -90,6 +108,46 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
 
     func snapshot(session: OpaquePointer) -> String {
         consumeRuntimeString(LuminaAgentRuntimeSnapshotSession(session))
+    }
+
+    func exportCheckpoint(session: OpaquePointer) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeExportSessionCheckpoint(session))
+    }
+
+    func stateSnapshot(session: OpaquePointer) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeSessionStateSnapshot(session))
+    }
+
+    func setState(session: OpaquePointer, scope: String, key: String, valueJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return scope.withCString { scopePointer in
+            key.withCString { keyPointer in
+                valueJSON.withCString { valuePointer in
+                    consumeRuntimeString(LuminaAgentRuntimeSessionSetState(handle, session, scopePointer, keyPointer, valuePointer))
+                }
+            }
+        }
+    }
+
+    func getState(session: OpaquePointer, scope: String, key: String) -> String {
+        scope.withCString { scopePointer in
+            key.withCString { keyPointer in
+                consumeRuntimeString(LuminaAgentRuntimeSessionGetState(session, scopePointer, keyPointer))
+            }
+        }
+    }
+
+    func deleteState(session: OpaquePointer, scope: String, key: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return scope.withCString { scopePointer in
+            key.withCString { keyPointer in
+                consumeRuntimeString(LuminaAgentRuntimeSessionDeleteState(handle, session, scopePointer, keyPointer))
+            }
+        }
     }
 
     func exportTrace(session: OpaquePointer, format: String) -> String {
@@ -140,6 +198,26 @@ public final class LuminaAgentRuntimeSession: @unchecked Sendable {
     public func exportTrace(format: String = "json") -> String {
         handle.exportTrace(format: format)
     }
+
+    public func exportCheckpoint() -> String {
+        handle.exportCheckpoint()
+    }
+
+    public func stateSnapshot() -> String {
+        handle.stateSnapshot()
+    }
+
+    public func setState(scope: String, key: String, valueJSON: String) -> String {
+        handle.setState(scope: scope, key: key, valueJSON: valueJSON)
+    }
+
+    public func getState(scope: String, key: String) -> String {
+        handle.getState(scope: scope, key: key)
+    }
+
+    public func deleteState(scope: String, key: String) -> String {
+        handle.deleteState(scope: scope, key: key)
+    }
 }
 
 final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
@@ -180,6 +258,31 @@ final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
     func snapshot() -> String {
         guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
         return runtime.snapshot(session: session)
+    }
+
+    func exportCheckpoint() -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.exportCheckpoint(session: session)
+    }
+
+    func stateSnapshot() -> String {
+        guard let session = currentSession() else { return "{}" }
+        return runtime.stateSnapshot(session: session)
+    }
+
+    func setState(scope: String, key: String, valueJSON: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.setState(session: session, scope: scope, key: key, valueJSON: valueJSON)
+    }
+
+    func getState(scope: String, key: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.getState(session: session, scope: scope, key: key)
+    }
+
+    func deleteState(scope: String, key: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.deleteState(session: session, scope: scope, key: key)
     }
 
     func exportTrace(format: String) -> String {
