@@ -26,6 +26,7 @@ public:
     void setContextCallback(LuminaAgentContextCallback callback, void *context);
     void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
+    void setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context);
     void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
     void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
     void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);
@@ -33,6 +34,8 @@ public:
     void setRollbackCallback(LuminaAgentRollbackCallback callback, void *context);
     void setEventCallback(LuminaAgentEventCallback callback, void *context);
     void setHookCallback(LuminaAgentHookCallback callback, void *context);
+    std::string registerHookRoute(const char *routeJson);
+    void clearHookRoutes();
 
     // Runs a single isolated task from request JSON to runtime result.
     std::string run(const char *requestJson);
@@ -42,6 +45,8 @@ public:
 
     // Adds an external observation to a paused session and continues execution.
     std::string resumeSession(RuntimeSession &session, const char *resumeJson);
+    std::string setSessionState(RuntimeSession &session, const char *scope, const char *key, const char *valueJson);
+    std::string deleteSessionState(RuntimeSession &session, const char *scope, const char *key);
 
     // Marks the current runtime execution as cancelled.
     std::string cancel(const char *requestId);

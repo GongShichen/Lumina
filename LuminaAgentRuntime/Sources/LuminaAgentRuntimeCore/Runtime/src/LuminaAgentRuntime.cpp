@@ -22,6 +22,9 @@ struct LuminaAgentRuntimeSessionRef {
         : session(config) {
         session.setRequestJson(requestJson == nullptr ? "{}" : LuminaAgent::trim(requestJson));
     }
+
+    explicit LuminaAgentRuntimeSessionRef(LuminaAgent::RuntimeSessionConfig config)
+        : session(config) {}
 };
 
 extern "C" LuminaAgentRuntimeRef *LuminaAgentRuntimeCreate(const char *configuration_json) {
@@ -99,6 +102,16 @@ extern "C" void LuminaAgentRuntimeSetConfirmationCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetGuardrailCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentGuardrailCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setGuardrailCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetAuditCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentAuditCallback callback,
@@ -169,6 +182,19 @@ extern "C" void LuminaAgentRuntimeSetHookCallback(
     }
 }
 
+extern "C" char *LuminaAgentRuntimeRegisterHookRoute(LuminaAgentRuntimeRef *runtime, const char *route_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.registerHookRoute(route_json));
+}
+
+extern "C" void LuminaAgentRuntimeClearHookRoutes(LuminaAgentRuntimeRef *runtime) {
+    if (runtime != nullptr) {
+        runtime->runtime.clearHookRoutes();
+    }
+}
+
 extern "C" char *LuminaAgentRuntimeRun(LuminaAgentRuntimeRef *runtime, const char *request_json) {
     if (runtime == nullptr) {
         return LuminaAgent::failureResponse("missing runtime.");
@@ -224,6 +250,75 @@ extern "C" char *LuminaAgentRuntimeSnapshotSession(LuminaAgentRuntimeSessionRef 
         return LuminaAgent::failureResponse("missing session.");
     }
     return LuminaAgent::copyCString(session->session.snapshotJson());
+}
+
+extern "C" char *LuminaAgentRuntimeExportSessionCheckpoint(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.checkpointJson());
+}
+
+extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromCheckpoint(
+    LuminaAgentRuntimeRef *runtime,
+    const char *checkpoint_json
+) {
+    if (runtime == nullptr || checkpoint_json == nullptr) {
+        return nullptr;
+    }
+    auto *sessionRef = new LuminaAgentRuntimeSessionRef(runtime->runtime.sessionConfig());
+    std::string error;
+    if (!sessionRef->session.restoreFromCheckpointJson(LuminaAgent::trim(checkpoint_json), error)) {
+        delete sessionRef;
+        return nullptr;
+    }
+    return sessionRef;
+}
+
+extern "C" char *LuminaAgentRuntimeSessionSetState(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key,
+    const char *value_json
+) {
+    if (runtime == nullptr || session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime or session.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.setSessionState(session->session, scope, key, value_json));
+}
+
+extern "C" char *LuminaAgentRuntimeSessionGetState(
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key
+) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.getStateJson(
+        scope == nullptr ? "" : std::string(scope),
+        key == nullptr ? "" : std::string(key)
+    ));
+}
+
+extern "C" char *LuminaAgentRuntimeSessionDeleteState(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key
+) {
+    if (runtime == nullptr || session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime or session.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.deleteSessionState(session->session, scope, key));
+}
+
+extern "C" char *LuminaAgentRuntimeSessionStateSnapshot(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.stateSnapshotJson());
 }
 
 extern "C" void LuminaAgentRuntimeDestroySession(LuminaAgentRuntimeSessionRef *session) {

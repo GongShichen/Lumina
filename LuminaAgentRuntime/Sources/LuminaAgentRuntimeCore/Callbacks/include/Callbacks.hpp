@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <string>
 
 #include "LuminaAgentRuntime.h"
@@ -18,6 +19,20 @@ struct StreamingModelResult {
     long long chunkCount = 0;
 };
 
+struct RuntimeHookRoute {
+    std::string id;
+    std::vector<std::string> events;
+    std::vector<std::string> toolNamePatterns;
+    std::vector<std::string> sensitivities;
+    std::vector<std::string> sideEffects;
+};
+
+struct RuntimeGuardrailDecision {
+    std::string decision = "allow";
+    std::string message;
+    std::string payloadJson;
+};
+
 class RuntimeCallbacks {
 public:
     // Store caller-provided callbacks. Context ownership remains with the caller.
@@ -27,6 +42,7 @@ public:
     void setContext(LuminaAgentContextCallback callback, void *context);
     void setPermission(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmation(LuminaAgentConfirmationCallback callback, void *context);
+    void setGuardrail(LuminaAgentGuardrailCallback callback, void *context);
     void setAudit(LuminaAgentAuditCallback callback, void *context);
     void setTrace(LuminaAgentTraceCallback callback, void *context);
     void setMetrics(LuminaAgentMetricsCallback callback, void *context);
@@ -42,6 +58,7 @@ public:
     bool hasContext() const;
     bool hasPermission() const;
     bool hasConfirmation() const;
+    bool hasGuardrail() const;
     bool hasHook() const;
     bool hasTrace() const;
     bool hasMetrics() const;
@@ -57,7 +74,11 @@ public:
     std::string loadContext(const std::string &contextRequest) const;
     std::string decidePermission(const std::string &permissionRequest) const;
     std::string confirm(const std::string &confirmationRequest) const;
+    RuntimeGuardrailDecision evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const;
     std::string dispatchHook(const std::string &hookEvent) const;
+    std::vector<std::string> matchingHookRouteIds(const std::string &lifecycle, const std::string &payloadJson) const;
+    std::string registerHookRoute(const std::string &routeJson);
+    void clearHookRoutes();
 
     // Emit normalized runtime telemetry to caller-selected callbacks.
     void emitEvent(const std::string &type, const std::string &payload = "{}") const;
@@ -73,6 +94,7 @@ private:
     CallbackSlot context_;
     CallbackSlot permission_;
     CallbackSlot confirmation_;
+    CallbackSlot guardrail_;
     CallbackSlot audit_;
     CallbackSlot trace_;
     CallbackSlot metrics_;
@@ -80,6 +102,7 @@ private:
     CallbackSlot rollback_;
     CallbackSlot event_;
     CallbackSlot hook_;
+    std::vector<RuntimeHookRoute> hookRoutes_;
 };
 
 } // namespace LuminaAgent

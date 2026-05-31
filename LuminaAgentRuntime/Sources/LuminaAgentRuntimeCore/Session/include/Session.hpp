@@ -36,6 +36,8 @@ public:
 
     // Returns a compact JSON snapshot suitable for public C ABI responses.
     std::string snapshotJson() const;
+    std::string checkpointJson() const;
+    bool restoreFromCheckpointJson(const std::string &checkpointJson, std::string &error);
     std::string canContinueJson() const;
     std::string statusJson() const;
 
@@ -54,6 +56,7 @@ public:
 
     // Records a Markdown result and marks the session as complete.
     std::string recordResult(const std::string &markdown);
+    void rewriteResult(const std::string &markdown);
 
     // Produces a final result if the model did not explicitly produce one.
     std::string finishIfNeeded();
@@ -75,6 +78,12 @@ public:
     // Tracks the latest observation so the next ReAct turn can focus on it.
     void setLastObservationJson(const std::string &observationJson);
     const std::string &lastObservationJson() const;
+
+    // Runtime-managed scoped state. Persistence is caller-owned through checkpoints.
+    std::string setStateJson(const std::string &scope, const std::string &key, const std::string &valueJson);
+    std::string getStateJson(const std::string &scope, const std::string &key) const;
+    std::string deleteStateJson(const std::string &scope, const std::string &key);
+    std::string stateSnapshotJson(const std::string &scope = "") const;
 
     // Pauses/resumes a session for external user input, confirmation, or context.
     void pause(const std::string &kind, const std::string &payloadJson);
@@ -146,6 +155,7 @@ private:
     int consecutiveReplayObservationCount_ = 0;
     std::vector<std::string> observations_;
     std::map<std::string, ToolCallLedgerEntry> toolCallLedger_;
+    std::map<std::string, std::map<std::string, std::string>> state_;
     TraceRecorder trace_;
 };
 

@@ -100,6 +100,19 @@ typedef char *(*LuminaAgentPermissionCallback)(const char *permission_request_js
 typedef char *(*LuminaAgentConfirmationCallback)(const char *confirmation_request_json, void *user_context);
 
 /**
+ * Callback used by runtime-owned guardrail checkpoints.
+ *
+ * The input is a UTF-8 JSON object with `stage` and `payload`. Supported stages
+ * are `request`, `tool_input`, `tool_output`, and `result`. Return
+ * `{"decision":"allow"}`, `{"decision":"reject","message":"..."}`,
+ * `{"decision":"rewrite","payload":{...}}`, or
+ * `{"decision":"tripwire_failure","message":"..."}`. The core runtime owns
+ * when the decision is applied; language bindings should only translate their
+ * native guardrail interfaces into this callback.
+ */
+typedef char *(*LuminaAgentGuardrailCallback)(const char *guardrail_request_json, void *user_context);
+
+/**
  * Callback used by the runtime to write audit records.
  *
  * The input is a UTF-8 JSON object describing lifecycle events, tool calls,
@@ -270,6 +283,15 @@ void LuminaAgentRuntimeSetConfirmationCallback(
 );
 
 /**
+ * Installs the optional guardrail callback used at core runtime checkpoints.
+ */
+void LuminaAgentRuntimeSetGuardrailCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentGuardrailCallback callback,
+    void *user_context
+);
+
+/**
  * Installs the audit callback used to record runtime lifecycle and tool events.
  *
  * Audit is synchronous from the runtime's perspective, so callback
@@ -347,6 +369,22 @@ void LuminaAgentRuntimeSetHookCallback(
 );
 
 /**
+ * Registers a core hook route.
+ *
+ * `route_json` is a JSON object with an `id` and optional matcher fields:
+ * `events`, `tool_name_patterns`, `sensitivities`, and `side_effects`.
+ * Matching happens in the core runtime before the hook callback is invoked; the
+ * callback receives `route_id` when a route matched.
+ */
+char *LuminaAgentRuntimeRegisterHookRoute(LuminaAgentRuntimeRef *runtime, const char *route_json);
+
+/**
+ * Clears all hook routes. With no routes installed, the hook callback is called
+ * once for each lifecycle event for backward compatibility.
+ */
+void LuminaAgentRuntimeClearHookRoutes(LuminaAgentRuntimeRef *runtime);
+
+/**
  * Runs one complete task session.
  *
  * `request_json` is a UTF-8 JSON object supplied by the caller. Each call
@@ -403,6 +441,45 @@ char *LuminaAgentRuntimeCancelSession(
  * Returns the current explicit session snapshot.
  */
 char *LuminaAgentRuntimeSnapshotSession(LuminaAgentRuntimeSessionRef *session);
+
+/**
+ * Exports a complete core checkpoint JSON for caller-owned persistence.
+ */
+char *LuminaAgentRuntimeExportSessionCheckpoint(LuminaAgentRuntimeSessionRef *session);
+
+/**
+ * Creates a session from a previously exported core checkpoint JSON.
+ */
+LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromCheckpoint(
+    LuminaAgentRuntimeRef *runtime,
+    const char *checkpoint_json
+);
+
+/**
+ * Sets, gets, deletes, or snapshots runtime-managed scoped state on a session.
+ *
+ * Supported scopes are `temp`, `session`, `user`, and `app`. Values are raw JSON
+ * fragments owned by the caller and copied by the runtime.
+ */
+char *LuminaAgentRuntimeSessionSetState(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key,
+    const char *value_json
+);
+char *LuminaAgentRuntimeSessionGetState(
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key
+);
+char *LuminaAgentRuntimeSessionDeleteState(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *scope,
+    const char *key
+);
+char *LuminaAgentRuntimeSessionStateSnapshot(LuminaAgentRuntimeSessionRef *session);
 
 /**
  * Destroys an explicit session created by `LuminaAgentRuntimeCreateSession`.

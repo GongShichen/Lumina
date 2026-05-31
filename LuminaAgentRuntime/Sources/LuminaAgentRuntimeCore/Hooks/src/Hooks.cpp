@@ -1,5 +1,7 @@
 #include "Hooks.hpp"
 
+#include <vector>
+
 #include "Json.hpp"
 
 namespace LuminaAgent {
@@ -7,9 +9,48 @@ namespace LuminaAgent {
 HookDispatcher::HookDispatcher(const RuntimeCallbacks &callbacks)
     : callbacks_(callbacks) {}
 
+static void appendDirectiveObjects(std::vector<std::string> &directives, const std::string &directiveJson) {
+    const std::string text = trim(directiveJson);
+    if (text.empty() || text == "{}" || text == "null") {
+        return;
+    }
+    std::map<std::string, JsonField> fields;
+    if (parseFieldsOrEmpty(text, fields)) {
+        const std::string nested = rawField(fields, "directives", "");
+        if (!nested.empty()) {
+            const std::vector<std::string> items = extractObjectArrayItems(nested);
+            directives.insert(directives.end(), items.begin(), items.end());
+            return;
+        }
+    }
+    directives.push_back(text);
+}
+
 std::string HookDispatcher::dispatch(const std::string &lifecycle, const std::string &payload) const {
     if (!callbacks_.hasHook()) {
         return "";
+    }
+    const std::vector<std::string> routeIds = callbacks_.matchingHookRouteIds(lifecycle, payload);
+    if (!routeIds.empty()) {
+        std::vector<std::string> directives;
+        for (const std::string &routeId : routeIds) {
+            const std::string event = "{\"route_id\":" + jsonString(routeId) +
+                ",\"lifecycle\":" + jsonString(lifecycle) +
+                ",\"payload\":" + payload + "}";
+            appendDirectiveObjects(directives, callbacks_.dispatchHook(event));
+        }
+        if (directives.empty()) {
+            return "{}";
+        }
+        std::string output = "{\"directives\":[";
+        for (size_t index = 0; index < directives.size(); index++) {
+            if (index > 0) {
+                output += ",";
+            }
+            output += directives[index];
+        }
+        output += "]}";
+        return output;
     }
     const std::string event = "{\"lifecycle\":" + jsonString(lifecycle) + ",\"payload\":" + payload + "}";
     return callbacks_.dispatchHook(event);
@@ -60,6 +101,11 @@ static void mergeDirective(RuntimeHookDirectives &target, const std::string &jso
         if (target.reason.empty()) {
             target.reason = stringField(fields, "reason", "hook requires confirmation");
         }
+        return;
+    }
+    if (type == "append_context") {
+        target.hasAppendContext = true;
+        target.appendedContextJson = rawField(fields, "context", rawField(fields, "payload", "{}"));
     }
 }
 

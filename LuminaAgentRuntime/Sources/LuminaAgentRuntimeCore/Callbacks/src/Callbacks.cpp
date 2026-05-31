@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <sstream>
+#include <set>
 
 #include "Json.hpp"
 
@@ -35,6 +36,10 @@ void RuntimeCallbacks::setPermission(LuminaAgentPermissionCallback callback, voi
 
 void RuntimeCallbacks::setConfirmation(LuminaAgentConfirmationCallback callback, void *context) {
     confirmation_ = {reinterpret_cast<void *>(callback), context};
+}
+
+void RuntimeCallbacks::setGuardrail(LuminaAgentGuardrailCallback callback, void *context) {
+    guardrail_ = {reinterpret_cast<void *>(callback), context};
 }
 
 void RuntimeCallbacks::setAudit(LuminaAgentAuditCallback callback, void *context) {
@@ -71,6 +76,7 @@ bool RuntimeCallbacks::hasTool() const { return tool_.function != nullptr; }
 bool RuntimeCallbacks::hasContext() const { return context_.function != nullptr; }
 bool RuntimeCallbacks::hasPermission() const { return permission_.function != nullptr; }
 bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function != nullptr; }
+bool RuntimeCallbacks::hasGuardrail() const { return guardrail_.function != nullptr; }
 bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
 bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
 bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
@@ -166,9 +172,192 @@ std::string RuntimeCallbacks::confirm(const std::string &confirmationRequest) co
     return callback == nullptr ? "" : consumeCString(callback(confirmationRequest.c_str(), confirmation_.context));
 }
 
+static RuntimeGuardrailDecision parseGuardrailDecision(const std::string &decisionJson) {
+    RuntimeGuardrailDecision decision;
+    const std::string text = trim(decisionJson);
+    if (text.empty() || text == "{}" || text == "null") {
+        return decision;
+    }
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(text, fields)) {
+        decision.decision = "reject";
+        decision.message = "guardrail returned invalid JSON";
+        return decision;
+    }
+    decision.decision = lowercased(stringField(fields, "decision", stringField(fields, "type", "allow")));
+    if (decision.decision == "allowed") {
+        decision.decision = "allow";
+    } else if (decision.decision == "denied") {
+        decision.decision = "reject";
+    } else if (decision.decision == "tripwire" || decision.decision == "fail") {
+        decision.decision = "tripwire_failure";
+    }
+    decision.message = stringField(fields, "message", stringField(fields, "reason"));
+    decision.payloadJson = rawField(fields, "payload", rawField(fields, "value", ""));
+    return decision;
+}
+
+RuntimeGuardrailDecision RuntimeCallbacks::evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const {
+    auto callback = reinterpret_cast<LuminaAgentGuardrailCallback>(guardrail_.function);
+    if (callback == nullptr) {
+        return RuntimeGuardrailDecision{};
+    }
+    const std::string request = "{\"stage\":" + jsonString(stage) +
+        ",\"payload\":" + (trim(payloadJson).empty() ? "{}" : payloadJson) + "}";
+    return parseGuardrailDecision(consumeCString(callback(request.c_str(), guardrail_.context)));
+}
+
 std::string RuntimeCallbacks::dispatchHook(const std::string &hookEvent) const {
     auto callback = reinterpret_cast<LuminaAgentHookCallback>(hook_.function);
     return callback == nullptr ? "" : consumeCString(callback(hookEvent.c_str(), hook_.context));
+}
+
+static std::vector<std::string> stringArrayField(const std::map<std::string, JsonField> &fields, const std::string &key) {
+    const std::string raw = rawField(fields, key, "");
+    std::vector<std::string> values;
+    if (raw.empty()) {
+        return values;
+    }
+    size_t index = 0;
+    while (index < raw.size()) {
+        while (index < raw.size() && raw[index] != '"') {
+            index++;
+        }
+        if (index >= raw.size()) {
+            break;
+        }
+        index++;
+        std::string value;
+        bool escaped = false;
+        while (index < raw.size()) {
+            const char c = raw[index++];
+            if (escaped) {
+                switch (c) {
+                case '"':
+                case '\\':
+                case '/':
+                    value += c;
+                    break;
+                case 'n': value += '\n'; break;
+                case 'r': value += '\r'; break;
+                case 't': value += '\t'; break;
+                default: value += c; break;
+                }
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                values.push_back(value);
+                break;
+            } else {
+                value += c;
+            }
+        }
+    }
+    return values;
+}
+
+static bool containsValue(const std::vector<std::string> &values, const std::string &candidate) {
+    if (values.empty()) {
+        return true;
+    }
+    const std::string normalized = lowercased(candidate);
+    for (const std::string &value : values) {
+        if (lowercased(value) == normalized) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool patternMatches(const std::string &pattern, const std::string &value) {
+    if (pattern == "*") {
+        return true;
+    }
+    if (!pattern.empty() && pattern.back() == '*') {
+        return value.rfind(pattern.substr(0, pattern.size() - 1), 0) == 0;
+    }
+    return pattern == value;
+}
+
+static bool matchesAnyPattern(const std::vector<std::string> &patterns, const std::string &value) {
+    if (patterns.empty()) {
+        return true;
+    }
+    for (const std::string &pattern : patterns) {
+        if (patternMatches(pattern, value)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::string nestedStringField(const std::map<std::string, JsonField> &fields, const std::string &objectKey, const std::string &nestedKey) {
+    std::map<std::string, JsonField> nestedFields;
+    if (!parseFieldsOrEmpty(rawField(fields, objectKey, ""), nestedFields)) {
+        return "";
+    }
+    return stringField(nestedFields, nestedKey, stringField(nestedFields, nestedKey == "tool_name" ? "toolName" : nestedKey));
+}
+
+std::vector<std::string> RuntimeCallbacks::matchingHookRouteIds(const std::string &lifecycle, const std::string &payloadJson) const {
+    std::vector<std::string> matched;
+    if (hookRoutes_.empty()) {
+        return matched;
+    }
+    std::map<std::string, JsonField> fields;
+    parseFieldsOrEmpty(payloadJson.empty() ? "{}" : payloadJson, fields);
+    const std::string toolName = stringField(fields, "tool_name",
+        stringField(fields, "toolName", nestedStringField(fields, "call", "tool_name")));
+    const std::string sensitivity = stringField(fields, "sensitivity",
+        nestedStringField(fields, "call", "sensitivity"));
+    const std::string sideEffect = stringField(fields, "side_effect",
+        stringField(fields, "sideEffect", nestedStringField(fields, "call", "side_effect")));
+
+    for (const RuntimeHookRoute &route : hookRoutes_) {
+        if (!containsValue(route.events, lifecycle)) {
+            continue;
+        }
+        if (!route.toolNamePatterns.empty() && !matchesAnyPattern(route.toolNamePatterns, toolName)) {
+            continue;
+        }
+        if (!route.sensitivities.empty() && !containsValue(route.sensitivities, sensitivity)) {
+            continue;
+        }
+        if (!route.sideEffects.empty() && !containsValue(route.sideEffects, sideEffect)) {
+            continue;
+        }
+        matched.push_back(route.id);
+    }
+    return matched;
+}
+
+std::string RuntimeCallbacks::registerHookRoute(const std::string &routeJson) {
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(routeJson, fields)) {
+        return "{\"ok\":false,\"error\":\"hook route must be a JSON object\"}";
+    }
+    RuntimeHookRoute route;
+    route.id = stringField(fields, "id", stringField(fields, "route_id"));
+    if (route.id.empty()) {
+        route.id = "route-" + std::to_string(hookRoutes_.size() + 1);
+    }
+    route.events = stringArrayField(fields, "events");
+    route.toolNamePatterns = stringArrayField(fields, "tool_name_patterns");
+    if (route.toolNamePatterns.empty()) {
+        route.toolNamePatterns = stringArrayField(fields, "toolNamePatterns");
+    }
+    route.sensitivities = stringArrayField(fields, "sensitivities");
+    route.sideEffects = stringArrayField(fields, "side_effects");
+    if (route.sideEffects.empty()) {
+        route.sideEffects = stringArrayField(fields, "sideEffects");
+    }
+    hookRoutes_.push_back(route);
+    return "{\"ok\":true,\"route_id\":" + jsonString(route.id) + "}";
+}
+
+void RuntimeCallbacks::clearHookRoutes() {
+    hookRoutes_.clear();
 }
 
 void RuntimeCallbacks::emitEvent(const std::string &type, const std::string &payload) const {

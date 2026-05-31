@@ -23,7 +23,12 @@ static std::string excerpt(const std::string &text, size_t limit) {
     return text.substr(0, limit) + "...";
 }
 
-static bool applyHookDirective(RuntimeSession &session, const std::string &directiveJson) {
+static bool applyHookDirective(
+    RuntimeSession &session,
+    const std::string &directiveJson,
+    std::string *contextJson = nullptr,
+    const std::string &requestJson = "{}"
+) {
     const RuntimeHookDirectives directives = parseRuntimeHookDirectives(directiveJson);
     if (directives.hasFail) {
         session.failWithResult(
@@ -39,7 +44,56 @@ static bool applyHookDirective(RuntimeSession &session, const std::string &direc
         );
         return true;
     }
+    if (directives.hasAppendContext && contextJson != nullptr) {
+        const std::string appended = directives.appendedContextJson.empty() ? "{}" : directives.appendedContextJson;
+        *contextJson = ContextManager(session).mergeContextJson(
+            contextJson->empty() ? "null" : *contextJson,
+            appended
+        );
+        session.setContextJson(*contextJson);
+        session.appendTrace(
+            "hook_context_appended",
+            "{\"request\":" + (trim(requestJson).empty() ? "{}" : requestJson) +
+                ",\"context\":" + appended + "}"
+        );
+    }
     return false;
+}
+
+static bool applyTerminalGuardrailDecision(
+    RuntimeSession &session,
+    RuntimeCallbacks &callbacks,
+    const std::string &stage,
+    const RuntimeGuardrailDecision &decision
+) {
+    if (decision.decision != "reject" && decision.decision != "tripwire_failure") {
+        return false;
+    }
+    const bool tripwire = decision.decision == "tripwire_failure";
+    const std::string message = decision.message.empty()
+        ? (tripwire ? "guardrail tripwire failure" : "guardrail rejected payload")
+        : decision.message;
+    session.failWithResult(
+        tripwire ? "guardrail-tripwire" : "guardrail-rejected",
+        std::string(tripwire ? "### 已终止\n\n" : "### 已拒绝\n\n") + message
+    );
+    callbacks.emitEvent(
+        tripwire ? "guardrail_tripwire" : "guardrail_rejected",
+        "{\"stage\":" + jsonString(stage) + ",\"message\":" + jsonString(message) + "}"
+    );
+    callbacks.audit(
+        tripwire ? "guardrail_tripwire" : "guardrail_rejected",
+        "{\"stage\":" + jsonString(stage) + ",\"message\":" + jsonString(message) + "}"
+    );
+    return true;
+}
+
+static std::string rewrittenResultMarkdown(const std::string &payloadJson) {
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(payloadJson, fields)) {
+        return "";
+    }
+    return stringField(fields, "resultMarkdown", stringField(fields, "content"));
 }
 
 Runtime::Runtime(const char *configurationJson) {
@@ -125,6 +179,10 @@ void Runtime::setConfirmationCallback(LuminaAgentConfirmationCallback callback, 
     callbacks_.setConfirmation(callback, context);
 }
 
+void Runtime::setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context) {
+    callbacks_.setGuardrail(callback, context);
+}
+
 void Runtime::setAuditCallback(LuminaAgentAuditCallback callback, void *context) {
     callbacks_.setAudit(callback, context);
 }
@@ -153,6 +211,14 @@ void Runtime::setHookCallback(LuminaAgentHookCallback callback, void *context) {
     callbacks_.setHook(callback, context);
 }
 
+std::string Runtime::registerHookRoute(const char *routeJson) {
+    return callbacks_.registerHookRoute(routeJson == nullptr ? "{}" : std::string(routeJson));
+}
+
+void Runtime::clearHookRoutes() {
+    callbacks_.clearHookRoutes();
+}
+
 std::string Runtime::run(const char *requestJson) {
     if (!sessionConfig_.isConfigured) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
@@ -175,7 +241,15 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     cancelled_ = false;
     RuntimeEventQueue events(callbacks_, session.sessionId(), session.runId());
     ExecutionContext execution(session, sessionConfig_, tools_, callbacks_, events);
-    const std::string request = session.requestJson().empty() ? trim(requestJson) : session.requestJson();
+    std::string request = session.requestJson().empty() ? trim(requestJson) : session.requestJson();
+    const RuntimeGuardrailDecision requestGuardrail = callbacks_.evaluateGuardrail("request", request.empty() ? "{}" : request);
+    if (requestGuardrail.decision == "rewrite" && !requestGuardrail.payloadJson.empty()) {
+        request = requestGuardrail.payloadJson;
+        events.emitEvent("guardrail_rewritten", "{\"stage\":\"request\"}");
+    } else if (applyTerminalGuardrailDecision(session, callbacks_, "request", requestGuardrail)) {
+        return session.finishIfNeeded();
+    }
+    session.setRequestJson(request);
     execution.setRequestJson(request);
     callbacks_.span("start", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     events.emitEvent("run_started", request.empty() ? "{}" : request);
@@ -194,7 +268,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         contextJson = ContextManager(session).compactIfNeeded(request, contextJson, session.stepsSummaryJson(), session.lastObservationJson());
         execution.setContextJson(contextJson);
         events.emitEvent("context_loaded", contextJson);
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_loaded", contextJson))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_loaded", contextJson), &contextJson, request)) {
             return session.finishIfNeeded();
         }
     }
@@ -216,14 +290,14 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 ",\"last_observation_excerpt\":" + jsonString(excerpt(lastObservation, 1200)) +
                 ",\"input_excerpt\":" + jsonString(excerpt(plannerInput, 2400)) + "}"
         );
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("planner_input_ready", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("planner_input_ready", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"), &contextJson, request)) {
             break;
         }
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_model", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_model", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"), &contextJson, request)) {
             break;
         }
         const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
             break;
         }
         if (trim(stepJson).empty()) {
@@ -234,7 +308,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
 
         std::string error;
         callbacks_.span("start", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"iteration\":" + std::to_string(session.stepCount()) + "}");
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_normalization", "{\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_normalization", "{\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
             break;
         }
         if (!validateReActStepObject(stepJson, true, error)) {
@@ -248,7 +322,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             break;
         }
         callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"succeeded\"}");
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_normalization", stepJson))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_normalization", stepJson), &contextJson, request)) {
             break;
         }
 
@@ -256,7 +330,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         parseFieldsOrEmpty(stepJson, fields);
         const std::string type = reactStepType(fields);
         events.emitEvent("step_produced", stepJson);
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("step_produced", stepJson))) {
+        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("step_produced", stepJson), &contextJson, request)) {
             break;
         }
         const std::string recordJson = session.recordStep(stepJson);
@@ -274,7 +348,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                     contextJson = contextManager.compactIfNeeded(request, contextManager.mergeContextJson(contextJson, additionalContext), session.stepsSummaryJson(), lastObservation);
                     execution.setContextJson(contextJson);
                     events.emitControl("context_updated", contextJson);
-                    if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_updated", contextJson))) {
+                    if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_updated", contextJson), &contextJson, request)) {
                         break;
                     }
                 }
@@ -350,7 +424,18 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         return snapshot;
     }
 
-    const std::string finished = Responder().finalize(session);
+    std::string finished = Responder().finalize(session);
+    const RuntimeGuardrailDecision resultGuardrail = callbacks_.evaluateGuardrail("result", finished);
+    if (resultGuardrail.decision == "rewrite" && !resultGuardrail.payloadJson.empty()) {
+        const std::string markdown = rewrittenResultMarkdown(resultGuardrail.payloadJson);
+        if (!markdown.empty()) {
+            session.rewriteResult(markdown);
+            finished = Responder().finalize(session);
+            events.emitEvent("guardrail_rewritten", "{\"stage\":\"result\"}");
+        }
+    } else if (applyTerminalGuardrailDecision(session, callbacks_, "result", resultGuardrail)) {
+        finished = Responder().finalize(session);
+    }
     events.emitEvent(
         "run_termination",
         "{\"status\":" + jsonString(runStatusName(session.status())) +
@@ -373,6 +458,27 @@ std::string Runtime::resumeSession(RuntimeSession &session, const char *resumeJs
     }
     session.resumeWithObservation(trim(resumeJson).empty() ? "{\"status\":\"cancelled\",\"content\":\"resume payload was empty\"}" : trim(resumeJson));
     return runSession(session, session.requestJson().c_str(), true);
+}
+
+std::string Runtime::setSessionState(RuntimeSession &session, const char *scope, const char *key, const char *valueJson) {
+    const std::string result = session.setStateJson(
+        scope == nullptr ? "" : std::string(scope),
+        key == nullptr ? "" : std::string(key),
+        valueJson == nullptr ? "null" : std::string(valueJson)
+    );
+    callbacks_.emitEvent("state_mutated", result);
+    callbacks_.trace("state_mutated", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"mutation\":" + result + "}");
+    return result;
+}
+
+std::string Runtime::deleteSessionState(RuntimeSession &session, const char *scope, const char *key) {
+    const std::string result = session.deleteStateJson(
+        scope == nullptr ? "" : std::string(scope),
+        key == nullptr ? "" : std::string(key)
+    );
+    callbacks_.emitEvent("state_mutated", result);
+    callbacks_.trace("state_mutated", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"mutation\":" + result + "}");
+    return result;
 }
 
 std::string Runtime::cancel(const char *requestId) {

@@ -12,10 +12,12 @@ struct RuntimeHookDirectives {
     bool hasRejectToolCall = false;
     bool hasRewriteToolCall = false;
     bool requiresConfirmation = false;
+    bool hasAppendContext = false;
     std::string reason;
     std::string markdown;
     std::string pauseKind;
     std::string pausePayloadJson;
+    std::string appendedContextJson;
     std::string rewrittenToolName;
     std::string rewrittenParametersJson;
 };

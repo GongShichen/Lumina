@@ -78,6 +78,133 @@ std::string RuntimeSession::snapshotJson() const {
     return output.str();
 }
 
+static std::string ledgerJson(const std::map<std::string, ToolCallLedgerEntry> &ledger) {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const auto &entry : ledger) {
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << "{"
+               << "\"call_id\":" << jsonString(entry.second.callId) << ","
+               << "\"tool_name\":" << jsonString(entry.second.toolName) << ","
+               << "\"dedup_key\":" << jsonString(entry.second.dedupKey) << ","
+               << "\"canonical_parameters\":" << jsonString(entry.second.canonicalParameters) << ","
+               << "\"status\":" << jsonString(entry.second.status) << ","
+               << "\"summary\":" << jsonString(entry.second.summary) << ","
+               << "\"raw_result\":" << (trim(entry.second.rawResultJson).empty() ? "null" : entry.second.rawResultJson) << ","
+               << "\"timestamp\":" << jsonString(entry.second.timestamp) << ","
+               << "\"replayable\":" << jsonBool(entry.second.replayable)
+               << "}";
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string RuntimeSession::checkpointJson() const {
+    std::ostringstream output;
+    output << "{"
+           << "\"contract\":\"runtime_checkpoint\","
+           << "\"session_id\":" << jsonString(sessionId_) << ","
+           << "\"run_id\":" << jsonString(runId_) << ","
+           << "\"status\":" << jsonString(runStatusName(status())) << ","
+           << "\"request\":" << (trim(requestJson_).empty() ? "{}" : requestJson_) << ","
+           << "\"context\":" << (trim(contextJson_).empty() ? "null" : contextJson_) << ","
+           << "\"step_index\":" << stepCount_ << ","
+           << "\"stepCount\":" << stepCount_ << ","
+           << "\"actionCount\":" << actionCount_ << ","
+           << "\"reasoningCount\":" << reasoningCount_ << ","
+           << "\"observationCount\":" << observationCount_ << ","
+           << "\"pending\":" << pendingJson() << ","
+           << "\"budget\":{"
+                << "\"maximumReActIterations\":" << config_.maximumReActIterations << ","
+                << "\"maximumToolCalls\":" << config_.maximumToolCalls << ","
+                << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
+                << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate()
+           << "},"
+           << "\"last_observation\":" << (trim(lastObservationJson_).empty() ? "null" : lastObservationJson_) << ","
+           << "\"runtime_state\":" << stateSnapshotJson() << ","
+           << "\"tool_replay_ledger\":" << ledgerJson(toolCallLedger_) << ","
+           << "\"trace_summary\":" << trace_.summaryJson(12) << ","
+           << "\"trace\":" << trace_.json() << ","
+           << "\"terminationReason\":" << jsonString(terminationReason_) << ","
+           << "\"resultMarkdown\":" << jsonString(resultMarkdown_) << ","
+           << "\"paused\":" << jsonBool(paused_) << ","
+           << "\"hasResult\":" << jsonBool(hasResult_)
+           << "}";
+    return output.str();
+}
+
+static bool restoreStateObject(
+    const std::string &stateJson,
+    std::map<std::string, std::map<std::string, std::string>> &state
+) {
+    std::map<std::string, JsonField> scopes;
+    if (!parseFieldsOrEmpty(stateJson, scopes)) {
+        return false;
+    }
+    state.clear();
+    for (const std::string &scope : {"temp", "session", "user", "app"}) {
+        std::map<std::string, JsonField> values;
+        if (!parseFieldsOrEmpty(rawField(scopes, scope, "{}"), values)) {
+            continue;
+        }
+        for (const auto &entry : values) {
+            state[scope][entry.first] = trim(entry.second.raw.empty() ? "null" : entry.second.raw);
+        }
+    }
+    return true;
+}
+
+bool RuntimeSession::restoreFromCheckpointJson(const std::string &checkpointJson, std::string &error) {
+    std::map<std::string, JsonField> fields;
+    if (!parseTopLevelObject(checkpointJson, fields, error)) {
+        return false;
+    }
+    sessionId_ = stringField(fields, "session_id", sessionId_);
+    runId_ = stringField(fields, "run_id", runId_);
+    stepCount_ = intField(fields, "stepCount", intField(fields, "step_index", stepCount_));
+    actionCount_ = intField(fields, "actionCount", actionCount_);
+    reasoningCount_ = intField(fields, "reasoningCount", reasoningCount_);
+    observationCount_ = intField(fields, "observationCount", observationCount_);
+    requestJson_ = rawField(fields, "request", requestJson_.empty() ? "{}" : requestJson_);
+    contextJson_ = rawField(fields, "context", contextJson_);
+    lastObservationJson_ = rawField(fields, "last_observation", lastObservationJson_);
+    terminationReason_ = stringField(fields, "terminationReason", terminationReason_);
+    resultMarkdown_ = stringField(fields, "resultMarkdown", resultMarkdown_);
+    hasResult_ = boolField(fields, "hasResult", !resultMarkdown_.empty());
+    paused_ = boolField(fields, "paused", false);
+    if (paused_) {
+        std::map<std::string, JsonField> pendingFields;
+        parseFieldsOrEmpty(rawField(fields, "pending", "{}"), pendingFields);
+        pendingKind_ = stringField(pendingFields, "kind", pendingKind_);
+        pendingPayloadJson_ = rawField(pendingFields, "payload", pendingPayloadJson_.empty() ? "{}" : pendingPayloadJson_);
+    }
+    restoreStateObject(rawField(fields, "runtime_state", "{}"), state_);
+    for (const std::string &item : extractObjectArrayItems(rawField(fields, "tool_replay_ledger", "[]"))) {
+        std::map<std::string, JsonField> itemFields;
+        if (!parseFieldsOrEmpty(item, itemFields)) {
+            continue;
+        }
+        ToolCallLedgerEntry entry;
+        entry.callId = stringField(itemFields, "call_id");
+        entry.toolName = stringField(itemFields, "tool_name");
+        entry.dedupKey = stringField(itemFields, "dedup_key");
+        entry.canonicalParameters = stringField(itemFields, "canonical_parameters");
+        entry.status = stringField(itemFields, "status");
+        entry.summary = stringField(itemFields, "summary");
+        entry.rawResultJson = rawField(itemFields, "raw_result", "{}");
+        entry.timestamp = stringField(itemFields, "timestamp");
+        entry.replayable = boolField(itemFields, "replayable", false);
+        if (!entry.dedupKey.empty()) {
+            toolCallLedger_[entry.dedupKey] = entry;
+        }
+    }
+    appendTrace("checkpoint_restored", "{\"session_id\":" + jsonString(sessionId_) + ",\"run_id\":" + jsonString(runId_) + "}");
+    return true;
+}
+
 std::string RuntimeSession::canContinueJson() const {
     std::ostringstream output;
     output << "{\"ok\":true,"
@@ -209,6 +336,13 @@ std::string RuntimeSession::recordResult(const std::string &markdown) {
     return snapshotJson();
 }
 
+void RuntimeSession::rewriteResult(const std::string &markdown) {
+    hasResult_ = true;
+    terminationReason_ = "result";
+    resultMarkdown_ = markdown;
+    appendTrace("result_rewritten", "{\"markdown\":" + jsonString(markdown) + "}");
+}
+
 std::string RuntimeSession::finishIfNeeded() {
     if (!hasResult_) {
         if (terminationReason_.empty()) {
@@ -262,6 +396,92 @@ void RuntimeSession::setLastObservationJson(const std::string &observationJson) 
 
 const std::string &RuntimeSession::lastObservationJson() const {
     return lastObservationJson_;
+}
+
+static bool isAllowedStateScope(const std::string &scope) {
+    return scope == "temp" || scope == "session" || scope == "user" || scope == "app";
+}
+
+static std::string normalizedStateValue(const std::string &valueJson) {
+    const std::string value = trim(valueJson);
+    return value.empty() ? "null" : value;
+}
+
+std::string RuntimeSession::setStateJson(const std::string &scope, const std::string &key, const std::string &valueJson) {
+    if (!isAllowedStateScope(scope)) {
+        return "{\"ok\":false,\"error\":\"invalid state scope\"}";
+    }
+    if (trim(key).empty()) {
+        return "{\"ok\":false,\"error\":\"state key is required\"}";
+    }
+    state_[scope][key] = normalizedStateValue(valueJson);
+    appendTrace(
+        "state_mutated",
+        "{\"operation\":\"set\",\"scope\":" + jsonString(scope) +
+            ",\"key\":" + jsonString(key) +
+            ",\"value\":" + state_[scope][key] + "}"
+    );
+    return "{\"ok\":true,\"scope\":" + jsonString(scope) + ",\"key\":" + jsonString(key) + ",\"value\":" + state_[scope][key] + "}";
+}
+
+std::string RuntimeSession::getStateJson(const std::string &scope, const std::string &key) const {
+    auto scopeIt = state_.find(scope);
+    if (!isAllowedStateScope(scope) || scopeIt == state_.end()) {
+        return "{\"ok\":false,\"error\":\"state value not found\"}";
+    }
+    auto valueIt = scopeIt->second.find(key);
+    if (valueIt == scopeIt->second.end()) {
+        return "{\"ok\":false,\"error\":\"state value not found\"}";
+    }
+    return "{\"ok\":true,\"scope\":" + jsonString(scope) + ",\"key\":" + jsonString(key) + ",\"value\":" + valueIt->second + "}";
+}
+
+std::string RuntimeSession::deleteStateJson(const std::string &scope, const std::string &key) {
+    if (!isAllowedStateScope(scope)) {
+        return "{\"ok\":false,\"error\":\"invalid state scope\"}";
+    }
+    auto scopeIt = state_.find(scope);
+    if (scopeIt != state_.end()) {
+        scopeIt->second.erase(key);
+    }
+    appendTrace(
+        "state_mutated",
+        "{\"operation\":\"delete\",\"scope\":" + jsonString(scope) +
+            ",\"key\":" + jsonString(key) + "}"
+    );
+    return "{\"ok\":true,\"scope\":" + jsonString(scope) + ",\"key\":" + jsonString(key) + "}";
+}
+
+std::string RuntimeSession::stateSnapshotJson(const std::string &scope) const {
+    auto writeScope = [&](std::ostringstream &output, const std::string &name) {
+        output << jsonString(name) << ":{";
+        auto scopeIt = state_.find(name);
+        size_t index = 0;
+        if (scopeIt != state_.end()) {
+            for (const auto &entry : scopeIt->second) {
+                if (index++ > 0) {
+                    output << ",";
+                }
+                output << jsonString(entry.first) << ":" << normalizedStateValue(entry.second);
+            }
+        }
+        output << "}";
+    };
+    std::ostringstream output;
+    output << "{";
+    if (!scope.empty() && isAllowedStateScope(scope)) {
+        writeScope(output, scope);
+    } else {
+        size_t index = 0;
+        for (const std::string &name : {"temp", "session", "user", "app"}) {
+            if (index++ > 0) {
+                output << ",";
+            }
+            writeScope(output, name);
+        }
+    }
+    output << "}";
+    return output.str();
 }
 
 void RuntimeSession::pause(const std::string &kind, const std::string &payloadJson) {

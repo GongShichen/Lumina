@@ -63,6 +63,36 @@ static std::string makeDedupKey(
     return toolName + "\n" + canonicalParameters;
 }
 
+static bool terminalGuardrailToolDecision(
+    RuntimeSession &session,
+    const RuntimeCallbacks &callbacks,
+    const std::string &toolName,
+    const RuntimeGuardrailDecision &decision,
+    std::string &result
+) {
+    if (decision.decision == "tripwire_failure") {
+        const std::string message = decision.message.empty() ? "tool guardrail tripwire failure" : decision.message;
+        session.failWithResult("guardrail-tripwire", "### 已终止\n\n" + message);
+        callbacks.emitEvent("guardrail_tripwire", "{\"stage\":\"tool\",\"tool_name\":" + jsonString(toolName) + ",\"message\":" + jsonString(message) + "}");
+        result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(message) + "}";
+        return true;
+    }
+    if (decision.decision == "reject") {
+        const std::string message = decision.message.empty() ? "tool guardrail rejected payload" : decision.message;
+        callbacks.emitEvent("guardrail_rejected", "{\"stage\":\"tool\",\"tool_name\":" + jsonString(toolName) + ",\"message\":" + jsonString(message) + "}");
+        result = "{\"status\":\"denied\",\"content\":\"\",\"errorMessage\":" + jsonString(message) + "}";
+        return true;
+    }
+    return false;
+}
+
+static std::string guardrailRewritePayload(const RuntimeGuardrailDecision &decision) {
+    if (decision.decision != "rewrite" || decision.payloadJson.empty()) {
+        return "";
+    }
+    return decision.payloadJson;
+}
+
 ToolExecutor::ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks)
     : tools_(tools), callbacks_(callbacks) {}
 
@@ -75,6 +105,46 @@ std::string ToolExecutor::runToolCall(
     std::string activeToolName = toolName;
     std::string activeParameters = parameters.empty() ? "{}" : parameters;
     bool confirmationRequired = requiresConfirmation;
+    const std::string callId = session.nextToolCallId();
+
+    const std::string guardrailPayload = "{\"tool_name\":" + jsonString(activeToolName) +
+        ",\"call_id\":" + jsonString(callId) +
+        ",\"parameters\":" + activeParameters +
+        ",\"requires_confirmation\":" + jsonBool(confirmationRequired) +
+        ",\"side_effect\":" + jsonString(tools_.sideEffect(activeToolName)) +
+        ",\"sensitivity\":" + jsonString(tools_.sensitivity(activeToolName)) +
+        ",\"destructive\":" + jsonBool(tools_.isDestructive(activeToolName)) + "}";
+    const RuntimeGuardrailDecision toolInputGuardrail = callbacks_.evaluateGuardrail("tool_input", guardrailPayload);
+    std::string guardrailResult;
+    if (terminalGuardrailToolDecision(session, callbacks_, activeToolName, toolInputGuardrail, guardrailResult)) {
+        if (toolInputGuardrail.decision == "reject") {
+            const std::string observation = session.recordObservation(
+                activeToolName,
+                "denied",
+                "",
+                toolInputGuardrail.message.empty() ? "tool guardrail rejected payload" : toolInputGuardrail.message,
+                false,
+                false
+            );
+            callbacks_.emitEvent("observation_created", observation);
+        }
+        return guardrailResult;
+    }
+    const std::string rewrittenToolInput = guardrailRewritePayload(toolInputGuardrail);
+    if (!rewrittenToolInput.empty()) {
+        std::map<std::string, JsonField> rewrittenFields;
+        std::string rewrittenObject = rewrittenToolInput;
+        std::map<std::string, JsonField> envelopeFields;
+        if (parseFieldsOrEmpty(rewrittenToolInput, envelopeFields) && rawField(envelopeFields, "call", "").size() > 0) {
+            rewrittenObject = rawField(envelopeFields, "call", "{}");
+        }
+        if (parseFieldsOrEmpty(rewrittenObject, rewrittenFields)) {
+            activeToolName = stringField(rewrittenFields, "tool_name", stringField(rewrittenFields, "toolName", activeToolName));
+            activeParameters = rawField(rewrittenFields, "parameters", rawField(rewrittenFields, "arguments", activeParameters.empty() ? "{}" : activeParameters));
+            confirmationRequired = confirmationRequired || boolField(rewrittenFields, "requires_confirmation", boolField(rewrittenFields, "requiresConfirmation", false));
+            callbacks_.emitEvent("guardrail_rewritten", "{\"stage\":\"tool_input\",\"tool_name\":" + jsonString(activeToolName) + "}");
+        }
+    }
 
     if (!tools_.contains(activeToolName)) {
         const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool is not registered\"}";
@@ -83,7 +153,6 @@ std::string ToolExecutor::runToolCall(
         return result;
     }
 
-    const std::string callId = session.nextToolCallId();
     std::string canonicalParameters = canonicalizeJsonObject(activeParameters);
     std::string idempotencyPolicy = tools_.idempotencyPolicy(activeToolName);
     std::string dedupKey = makeDedupKey(activeToolName, canonicalParameters, idempotencyPolicy, activeParameters);
@@ -296,6 +365,29 @@ std::string ToolExecutor::runToolCall(
         result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
         resultFields.clear();
         parsed = parseFieldsOrEmpty(result, resultFields);
+    }
+    const RuntimeGuardrailDecision toolOutputGuardrail = callbacks_.evaluateGuardrail(
+        "tool_output",
+        "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}"
+    );
+    std::string outputGuardrailResult;
+    if (terminalGuardrailToolDecision(session, callbacks_, activeToolName, toolOutputGuardrail, outputGuardrailResult)) {
+        result = outputGuardrailResult;
+        resultFields.clear();
+        parsed = parseFieldsOrEmpty(result, resultFields);
+    } else {
+        const std::string rewrittenToolOutput = guardrailRewritePayload(toolOutputGuardrail);
+        if (!rewrittenToolOutput.empty()) {
+            std::map<std::string, JsonField> rewriteFields;
+            if (parseFieldsOrEmpty(rewrittenToolOutput, rewriteFields)) {
+                result = rawField(rewriteFields, "result", rewrittenToolOutput);
+            } else {
+                result = rewrittenToolOutput;
+            }
+            resultFields.clear();
+            parsed = parseFieldsOrEmpty(result, resultFields);
+            callbacks_.emitEvent("guardrail_rewritten", "{\"stage\":\"tool_output\",\"tool_name\":" + jsonString(activeToolName) + "}");
+        }
     }
     callbacks_.audit("tool_did_execute", "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}");
     HookDispatcher(callbacks_).dispatch("tool_did_execute", "{\"call\":" + redactedCallJson + ",\"result\":" + result + "}");
