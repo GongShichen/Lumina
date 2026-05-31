@@ -1,6 +1,8 @@
 #include "Session.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <map>
 #include <sstream>
 
@@ -10,11 +12,28 @@
 
 namespace LuminaAgent {
 
+static std::string makeSessionIdentifier(const std::string &prefix) {
+    static std::atomic<unsigned long long> counter{0};
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+    return prefix + "-" + std::to_string(millis) + "-" + std::to_string(counter.fetch_add(1) + 1);
+}
+
 RuntimeSession::RuntimeSession(RuntimeSessionConfig config)
-    : config_(config) {}
+    : config_(config),
+      sessionId_(makeSessionIdentifier("session")),
+      runId_(makeSessionIdentifier("run")) {}
+
+const std::string &RuntimeSession::sessionId() const {
+    return sessionId_;
+}
+
+const std::string &RuntimeSession::runId() const {
+    return runId_;
+}
 
 bool RuntimeSession::canContinue() const {
-    return !paused_ && !hasFinal_ && terminationReason_.empty() && stepCount_ < config_.maximumReActIterations;
+    return !paused_ && !hasResult_ && terminationReason_.empty() && stepCount_ < config_.maximumReActIterations;
 }
 
 RunStatus RuntimeSession::status() const {
@@ -28,7 +47,7 @@ RunStatus RuntimeSession::status() const {
         terminationReason_ == "invalid-model-output") {
         return RunStatus::failed;
     }
-    if (!hasFinal_ && terminationReason_.empty()) {
+    if (!hasResult_ && terminationReason_.empty()) {
         return RunStatus::running;
     }
     if (hasFailedTool_) {
@@ -41,6 +60,8 @@ std::string RuntimeSession::snapshotJson() const {
     std::ostringstream output;
     output << "{"
            << "\"ok\":true,"
+           << "\"session_id\":" << jsonString(sessionId_) << ","
+           << "\"run_id\":" << jsonString(runId_) << ","
            << "\"status\":" << jsonString(runStatusName(status())) << ","
            << "\"canContinue\":" << jsonBool(canContinue()) << ","
            << "\"paused\":" << jsonBool(paused_) << ","
@@ -52,7 +73,7 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
            << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate() << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
-           << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
+           << "\"resultMarkdown\":" << jsonString(resultMarkdown_)
            << "}";
     return output.str();
 }
@@ -73,7 +94,7 @@ std::string RuntimeSession::statusJson() const {
 }
 
 std::string RuntimeSession::recordStep(const std::string &stepJson) {
-    if (hasFinal_ || !terminationReason_.empty()) {
+    if (hasResult_ || !terminationReason_.empty()) {
         return "{\"ok\":false,\"error\":\"runtime session has already terminated.\"}";
     }
     if (stepCount_ >= config_.maximumReActIterations) {
@@ -107,15 +128,15 @@ std::string RuntimeSession::recordStep(const std::string &stepJson) {
             return "{\"ok\":false,\"error\":\"maximum tool call budget reached.\"}";
         }
         actionCount_ += 1;
-    } else if (type == "final_answer") {
-        hasFinal_ = true;
-        terminationReason_ = "final";
-        finalMarkdown_ = fields["content"].stringValue;
+    } else if (type == "result") {
+        hasResult_ = true;
+        terminationReason_ = "result";
+        resultMarkdown_ = fields["content"].stringValue;
     } else if (type == "cannot_complete") {
         hasFailedTool_ = true;
-        hasFinal_ = true;
+        hasResult_ = true;
         terminationReason_ = "cannot-complete";
-        finalMarkdown_ = "### 无法完成\n\n" + fields["reason"].stringValue;
+        resultMarkdown_ = "### 无法完成\n\n" + fields["reason"].stringValue;
     }
     appendTrace("step_recorded", stepJson);
 
@@ -126,7 +147,7 @@ std::string RuntimeSession::recordStep(const std::string &stepJson) {
            << "\"actionCount\":" << actionCount_ << ","
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
            << "\"consecutiveReasoningCount\":" << consecutiveReasoningCount_ << ","
-           << "\"finalMarkdown\":" << jsonString(finalMarkdown_) << ","
+           << "\"resultMarkdown\":" << jsonString(resultMarkdown_) << ","
            << "\"terminationReason\":" << jsonString(terminationReason_)
            << "}";
     return output.str();
@@ -162,9 +183,9 @@ std::string RuntimeSession::recordObservation(
     observations_.push_back(summary);
     appendTrace("observation_created", "{\"toolName\":" + jsonString(toolName) + ",\"status\":" + jsonString(resultStatus) + ",\"summary\":" + jsonString(summary) + "}");
     if (config_.stopOnToolFailure && resultStatus != "succeeded") {
-        hasFinal_ = true;
+        hasResult_ = true;
         terminationReason_ = "tool-failure";
-        finalMarkdown_ = "### 执行中止\n\n" + summary;
+        resultMarkdown_ = "### 执行中止\n\n" + summary;
     }
 
     std::ostringstream output;
@@ -174,30 +195,30 @@ std::string RuntimeSession::recordObservation(
            << "\"summary\":" << jsonString(summary) << ","
            << "\"errorMessage\":" << jsonString(errorMessage) << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
-           << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
+           << "\"resultMarkdown\":" << jsonString(resultMarkdown_)
            << "}";
     lastObservationJson_ = output.str();
     return lastObservationJson_;
 }
 
-std::string RuntimeSession::recordFinal(const std::string &markdown) {
-    hasFinal_ = true;
-    terminationReason_ = "final";
-    finalMarkdown_ = markdown;
-    appendTrace("final_recorded", "{\"markdown\":" + jsonString(markdown) + "}");
+std::string RuntimeSession::recordResult(const std::string &markdown) {
+    hasResult_ = true;
+    terminationReason_ = "result";
+    resultMarkdown_ = markdown;
+    appendTrace("result_recorded", "{\"markdown\":" + jsonString(markdown) + "}");
     return snapshotJson();
 }
 
 std::string RuntimeSession::finishIfNeeded() {
-    if (!hasFinal_) {
+    if (!hasResult_) {
         if (terminationReason_.empty()) {
             terminationReason_ = stepCount_ >= config_.maximumReActIterations ? "budget" : "stopped";
         }
-        hasFinal_ = true;
-        if (finalMarkdown_.empty()) {
-            finalMarkdown_ = terminationReason_ == "budget"
+        hasResult_ = true;
+        if (resultMarkdown_.empty()) {
+            resultMarkdown_ = terminationReason_ == "budget"
                 ? "### 已达到执行预算\n\nAgent 已停止继续调用工具。"
-                : "### 执行结束\n\n本次任务没有生成最终回答。";
+                : "### 执行结束\n\n本次任务没有生成result。";
         }
     }
     return snapshotJson();
@@ -281,8 +302,8 @@ int RuntimeSession::maximumCompactFailures() const { return config_.maximumCompa
 int RuntimeSession::maximumObservationCharacters() const { return config_.maximumObservationCharacters; }
 int RuntimeSession::toolResultTokenBudget() const { return config_.toolResultTokenBudget; }
 int RuntimeSession::remainingContextTokensEstimate() const { return std::max(0, config_.contextWindowTokens - contextTokenUsageEstimate_); }
-bool RuntimeSession::hasFinal() const { return hasFinal_; }
-bool RuntimeSession::isTerminated() const { return hasFinal_ || !terminationReason_.empty(); }
+bool RuntimeSession::hasResult() const { return hasResult_; }
+bool RuntimeSession::isTerminated() const { return hasResult_ || !terminationReason_.empty(); }
 int RuntimeSession::consecutiveReasoningCount() const { return consecutiveReasoningCount_; }
 int RuntimeSession::maximumConsecutiveReasoningSteps() const { return config_.maximumConsecutiveReasoningSteps; }
 int RuntimeSession::maximumConsecutiveReplayObservations() const { return config_.maximumConsecutiveReplayObservations; }
@@ -331,7 +352,7 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
 
     const std::string summary =
         "Runtime 已检测到同一个 tool_name + parameters 在本 session 中执行过，因此没有再次执行工具。"
-        "请基于上一轮结果继续；如果任务已经完成，请输出 final_answer；不要再次调用相同参数。"
+        "请基于上一轮结果继续；如果任务已经完成，请输出 result；不要再次调用相同参数。"
         "上一轮状态：" + resultStatus + "。上一轮摘要：" + entry.summary;
     observationCount_ += 1;
     observations_.push_back(summary);
@@ -343,9 +364,9 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
     }
     if (config_.maximumConsecutiveReplayObservations > 0 &&
         consecutiveReplayObservationCount_ >= config_.maximumConsecutiveReplayObservations) {
-        hasFinal_ = true;
+        hasResult_ = true;
         terminationReason_ = "replay-loop";
-        finalMarkdown_ = "### 无法继续执行\n\n模型连续重复同一个 tool call，runtime 已复用上一轮 observation 并停止重复执行。请根据上一轮 observation 选择下一步工具或输出最终回答。";
+        resultMarkdown_ = "### 无法继续执行\n\n模型连续重复同一个 tool call，runtime 已复用上一轮 observation 并停止重复执行。请根据上一轮 observation 选择下一步工具或输出result。";
     }
     appendTrace(
         "observation_created",
@@ -367,7 +388,7 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
            << "\"replay_count\":" << consecutiveReplayObservationCount_ << ","
            << "\"duplicate_of\":" << jsonString(entry.callId) << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
-           << "\"finalMarkdown\":" << jsonString(finalMarkdown_)
+           << "\"resultMarkdown\":" << jsonString(resultMarkdown_)
            << "}";
     lastObservationJson_ = output.str();
     return lastObservationJson_;
@@ -375,16 +396,16 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
 
 void RuntimeSession::cancel() {
     cancelled_ = true;
-    hasFinal_ = true;
+    hasResult_ = true;
     terminationReason_ = "cancelled";
-    finalMarkdown_ = "### 已取消\n\n本次任务已取消。";
+    resultMarkdown_ = "### 已取消\n\n本次任务已取消。";
 }
 
-void RuntimeSession::failWithFinal(const std::string &reason, const std::string &markdown) {
+void RuntimeSession::failWithResult(const std::string &reason, const std::string &markdown) {
     hasFailedTool_ = true;
-    hasFinal_ = true;
+    hasResult_ = true;
     terminationReason_ = reason;
-    finalMarkdown_ = markdown;
+    resultMarkdown_ = markdown;
 }
 
 } // namespace LuminaAgent

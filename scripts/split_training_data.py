@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -15,8 +16,8 @@ MEMORY_TOOLS = {"memory.ingest_text", "memory.recent", "memory.stats", "memory.d
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Split Lumina SFT and DPO datasets into stable train/test files.")
-    parser.add_argument("--sft", type=Path, default=Path("TrainingData/lumina_react_sft_600.jsonl"))
-    parser.add_argument("--dpo", type=Path, default=Path("TrainingData/lumina_react_dpo_1200.jsonl"))
+    parser.add_argument("--sft", type=Path, default=Path("TrainingData/lumina_react_sft_1200.jsonl"))
+    parser.add_argument("--dpo", type=Path, default=Path("TrainingData/lumina_react_dpo_2400.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("TrainingData/splits"))
     parser.add_argument("--test-ratio", type=float, default=0.10)
     parser.add_argument("--seed", type=str, default="20260526")
@@ -34,7 +35,16 @@ def main() -> None:
         "dpo_evaluation": split_records([record for record in dpo_records if is_evaluation_record(record, "dpo")], args.test_ratio, args.seed, "dpo_evaluation", filter_name="evaluation"),
     }
 
-    summary: dict[str, Any] = {"schemaVersion": "lumina-training-splits-v1", "seed": args.seed, "testRatio": args.test_ratio, "splits": {}}
+    summary: dict[str, Any] = {
+        "schemaVersion": "lumina-training-splits-v8",
+        "seed": args.seed,
+        "testRatio": args.test_ratio,
+        "splits": {},
+        "promptShape": "LuminaAppReActPromptBuilder-2026-05-31-xml-tags",
+        "runtimeTraceFormat": "compactTraceContext-v5-runtime-observation-json-with-actions-xml-targets",
+        "assistantEnvelope": "xml_tags",
+        "assistantDialect": "xml_tags",
+    }
     for name, split in split_specs.items():
         train_path = args.output / f"{name}_train.jsonl"
         test_path = args.output / f"{name}_test.jsonl"
@@ -117,6 +127,9 @@ def is_evaluation_record(record: dict[str, Any], kind: str) -> bool:
 
 def chosen_tool_name(record: dict[str, Any]) -> str | None:
     content = assistant_content(record, "dpo" if "chosen" in record else "sft")
+    xml_tool = xml_tool_name(content)
+    if xml_tool is not None:
+        return xml_tool
     try:
         payload = json.loads(content)
     except json.JSONDecodeError:
@@ -128,6 +141,15 @@ def chosen_tool_name(record: dict[str, Any]) -> str | None:
     return None
 
 
+def xml_tool_name(content: str) -> str | None:
+    match = re.search(r'<tool_use\s+[^>]*name="([^"]+)"', content)
+    if match:
+        return match.group(1)
+    if "<ask_user>" in content:
+        return ASK_USER_TOOL
+    return None
+
+
 def assistant_content(record: dict[str, Any], kind: str) -> str:
     if kind == "dpo":
         chosen = record["chosen"]
@@ -135,12 +157,15 @@ def assistant_content(record: dict[str, Any], kind: str) -> str:
             for message in chosen:
                 if message.get("role") != "assistant":
                     continue
+                content = message.get("content", "")
+                if xml_tool_name(content) is not None:
+                    return content
                 try:
-                    payload = json.loads(message.get("content", ""))
+                    payload = json.loads(content)
                 except json.JSONDecodeError:
                     continue
                 if payload.get("type") in {"tool_use", "ask_user", "multi_tool_use"}:
-                    return message.get("content", "")
+                    return content
             for message in reversed(chosen):
                 if message.get("role") == "assistant":
                     return message.get("content", "")

@@ -6,7 +6,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
     public var thought: String?
     public var action: LuminaToolCall?
     public var observation: LuminaReActObservation?
-    public var finalMarkdown: String?
+    public var resultMarkdown: String?
     public var elapsedMilliseconds: Double
 
     public init(
@@ -15,7 +15,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
         thought: String? = nil,
         action: LuminaToolCall? = nil,
         observation: LuminaReActObservation? = nil,
-        finalMarkdown: String? = nil,
+        resultMarkdown: String? = nil,
         elapsedMilliseconds: Double = 0
     ) {
         self.id = id
@@ -23,7 +23,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
         self.thought = thought
         self.action = action
         self.observation = observation
-        self.finalMarkdown = finalMarkdown
+        self.resultMarkdown = resultMarkdown
         self.elapsedMilliseconds = elapsedMilliseconds
     }
 
@@ -39,7 +39,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
         LuminaReActStep(kind: .observation, observation: value, elapsedMilliseconds: elapsedMilliseconds)
     }
 
-    public static func final(_ markdown: String, thought: String? = nil, elapsedMilliseconds: Double = 0) -> LuminaReActStep {
-        LuminaReActStep(kind: .final, thought: thought, finalMarkdown: markdown, elapsedMilliseconds: elapsedMilliseconds)
+    public static func result(_ markdown: String, thought: String? = nil, elapsedMilliseconds: Double = 0) -> LuminaReActStep {
+        LuminaReActStep(kind: .result, thought: thought, resultMarkdown: markdown, elapsedMilliseconds: elapsedMilliseconds)
     }
 }

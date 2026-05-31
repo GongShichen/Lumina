@@ -10,7 +10,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
     public var toolCall: LuminaToolCall?
     public var toolResult: LuminaToolResult?
     public var observation: LuminaReActObservation?
-    public var finalMarkdown: String?
+    public var resultMarkdown: String?
     public var timing: LuminaRuntimeTiming?
     public var errorMessage: String?
 
@@ -24,7 +24,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
         toolCall: LuminaToolCall? = nil,
         toolResult: LuminaToolResult? = nil,
         observation: LuminaReActObservation? = nil,
-        finalMarkdown: String? = nil,
+        resultMarkdown: String? = nil,
         timing: LuminaRuntimeTiming? = nil,
         errorMessage: String? = nil
     ) {
@@ -37,7 +37,7 @@ public struct LuminaAgentRuntimeHookContext: Sendable {
         self.toolCall = toolCall
         self.toolResult = toolResult
         self.observation = observation
-        self.finalMarkdown = finalMarkdown
+        self.resultMarkdown = resultMarkdown
         self.timing = timing
         self.errorMessage = errorMessage
     }

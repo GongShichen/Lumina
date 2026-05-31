@@ -27,6 +27,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let stepGenerationMilliseconds: Double
     let toolMilliseconds: Double
     let modelMetrics: [LuminaModelInferenceMetrics]
+    let runtimeMetrics: LuminaBenchmarkRuntimeMetrics
     let failureSummary: String?
 
     init(
@@ -41,6 +42,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         stepGenerationMilliseconds: Double,
         toolMilliseconds: Double,
         modelMetrics: [LuminaModelInferenceMetrics],
+        runtimeMetrics: LuminaBenchmarkRuntimeMetrics,
         failureSummary: String?
     ) {
         self.id = task.id
@@ -73,6 +75,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.stepGenerationMilliseconds = stepGenerationMilliseconds
         self.toolMilliseconds = toolMilliseconds
         self.modelMetrics = modelMetrics
+        self.runtimeMetrics = runtimeMetrics
         self.failureSummary = failureSummary
     }
 }

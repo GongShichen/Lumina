@@ -27,11 +27,14 @@ public:
     void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
     void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
+    void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
+    void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);
+    void setSpanCallback(LuminaAgentSpanCallback callback, void *context);
     void setRollbackCallback(LuminaAgentRollbackCallback callback, void *context);
     void setEventCallback(LuminaAgentEventCallback callback, void *context);
     void setHookCallback(LuminaAgentHookCallback callback, void *context);
 
-    // Runs a single isolated task from request JSON to final runtime result.
+    // Runs a single isolated task from request JSON to runtime result.
     std::string run(const char *requestJson);
 
     // Advances an explicit session until completion, failure, cancellation, or pause.

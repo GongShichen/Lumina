@@ -33,7 +33,7 @@ final class LuminaModelReadinessStore: ObservableObject, @unchecked Sendable {
     func markModelRun(source: String) {
         snapshot.modelState = .ready
         snapshot.modelSource = source
-        snapshot.modelMessage = "本次由端侧模型生成标准 ReAct action/final。"
+        snapshot.modelMessage = "本次由端侧模型生成标准 ReAct action/result。"
         snapshot.lastRunUsedFallback = false
     }
 

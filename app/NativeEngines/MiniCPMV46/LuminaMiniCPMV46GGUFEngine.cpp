@@ -123,6 +123,13 @@ std::string model_path_for_directory(const char * model_directory) {
     return "";
 }
 
+void llama_log_callback(enum ggml_log_level level, const char * text, void * user_data) {
+    (void) level;
+    (void) user_data;
+    printf("[Lumina][llama.cpp] %s", text);
+    fflush(stdout);
+}
+
 bool ensure_model_loaded(const std::string & model_path, std::string & error) {
     if (g_model != nullptr && g_loaded_model_path == model_path) {
         return true;
@@ -133,6 +140,7 @@ bool ensure_model_loaded(const std::string & model_path, std::string & error) {
         g_loaded_model_path.clear();
     }
     if (!g_backend_initialized) {
+        llama_log_set(llama_log_callback, nullptr);
         ggml_backend_load_all();
         llama_backend_init();
         std::atexit(cleanup_backend);
@@ -234,7 +242,7 @@ bool likely_json_started(const std::string & text) {
 bool is_schema_step_generation(const std::string & prompt) {
     return prompt.find("ReAct step schema") != std::string::npos ||
            prompt.find("\"type\":\"tool_use\"") != std::string::npos ||
-           prompt.find("\"type\":\"final_answer\"") != std::string::npos;
+           prompt.find("\"type\":\"result\"") != std::string::npos;
 }
 
 } // namespace
@@ -248,27 +256,34 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     int safety_margin_tokens
 ) {
     (void) safety_margin_tokens;
+    printf("[Lumina][C++] Starting generation request...\n"); fflush(stdout);
     auto start = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock(g_mutex);
 
     const std::string backend = backend_preference == nullptr ? "automatic" : backend_preference;
     const std::string raw_prompt = prompt == nullptr ? "" : prompt;
     const std::string model_path = model_path_for_directory(model_directory);
+    printf("[Lumina][C++] Model path: %s\n", model_path.c_str());
     if (model_path.empty()) {
         return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V model.gguf was not found.", false));
     }
 
     std::string error;
     if (!ensure_model_loaded(model_path, error)) {
+        printf("[Lumina][C++] Model load FAILED: %s\n", error.c_str());
         return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
     }
+    printf("[Lumina][C++] Model loaded successfully.\n"); fflush(stdout);
 
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     const std::string prompt_text = chat_wrapped_prompt(raw_prompt);
+    printf("[Lumina][C++] Tokenizing prompt (length: %zu)...\n", prompt_text.size());
     std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, error);
     if (prompt_tokens.empty()) {
+        printf("[Lumina][C++] Tokenization FAILED.\n");
         return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
     }
+    printf("[Lumina][C++] Tokens count: %zu\n", prompt_tokens.size());
 
     const bool schema_step = is_schema_step_generation(raw_prompt);
     const int requested_max_output_tokens = max_output_tokens;
@@ -315,21 +330,26 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
 
     llama_context * ctx = llama_init_from_model(g_model, ctx_params);
     if (ctx == nullptr) {
+        printf("[Lumina][C++] Failed to create llama context.\n");
         return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context.", schema_step));
     }
+    printf("[Lumina][C++] Llama context created with n_ctx: %u\n", ctx_params.n_ctx);
 
     llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
     sampler_params.no_perf = false;
     llama_sampler * sampler = llama_sampler_chain_init(sampler_params);
     llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
+    printf("[Lumina][C++] Decoding prompt batch (size: %zu)...\n", prompt_tokens.size()); fflush(stdout);
     llama_batch batch = llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
     int32_t decode_result = llama_decode(ctx, batch);
     if (decode_result != 0) {
+        printf("[Lumina][C++] Prompt decode FAILED with code: %d\n", decode_result);
         llama_sampler_free(sampler);
         llama_free(ctx);
         return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V prompt decode failed with code " + std::to_string(decode_result) + ".", schema_step));
     }
+    printf("[Lumina][C++] Prompt decoded. Starting generation loop...\n");
 
     std::string output;
     int output_tokens = 0;

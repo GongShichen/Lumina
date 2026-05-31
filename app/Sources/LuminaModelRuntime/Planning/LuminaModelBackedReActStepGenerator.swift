@@ -28,20 +28,22 @@ public struct LuminaModelBackedReActStepGenerator: LuminaReActStepGenerator {
 
     public func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         try Task.checkCancellation()
+        print("[Lumina][StepGenerator] nextStep started, iteration: \(context.iteration)")
         let prompt = try await promptBuilder(context)
-        Self.debugLog("Prompt characters: \(prompt.count), tools: \(context.availableTools.map(\.name).sorted().joined(separator: ", "))")
+        print("[Lumina][StepGenerator] Prompt built, length: \(prompt.count)")
         let input = LuminaStructuredStepGenerationInput(
             prompt: prompt,
             content: context.request.content,
             availableTools: context.availableTools,
             maxOutputTokensHint: Self.outputBudgetHint(for: context, repairAttempt: nil)
         )
+        print("[Lumina][StepGenerator] Calling model.generateJSON...")
         let json = try await generateJSON(input: input, context: context)
-        Self.debugLog("Model JSON: \(json.prefix(1_200))")
+        print("[Lumina][StepGenerator] model.generateJSON returned, length: \(json.count)")
         do {
             return try LuminaReActStepParser.parse(json: json, availableTools: context.availableTools)
         } catch {
-            Self.debugLog("Parser failed: \(error.localizedDescription)")
+            print("[Lumina][StepGenerator] Parser failed: \(error.localizedDescription), triggering repair...")
             return try await repairAndParse(invalidJSON: json, parserError: error, originalInput: input, context: context)
         }
     }

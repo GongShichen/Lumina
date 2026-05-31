@@ -13,5 +13,5 @@ enum LuminaTab {
 }
 
 enum LuminaFeatureFlags {
-    static let showTrustTab = false
+    static let showTrustTab = true
 }

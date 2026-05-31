@@ -109,6 +109,32 @@ typedef char *(*LuminaAgentConfirmationCallback)(const char *confirmation_reques
 typedef void (*LuminaAgentAuditCallback)(const char *audit_record_json, void *user_context);
 
 /**
+ * Callback used by external trace collectors.
+ *
+ * Trace records are optional and emitted only when this sink is installed.
+ * Payloads are intended for replay/debug harnesses and are not persisted by the
+ * core runtime.
+ */
+typedef void (*LuminaAgentTraceCallback)(const char *trace_record_json, void *user_context);
+
+/**
+ * Callback used by external metrics collectors.
+ *
+ * Metric samples are optional atomic observations such as model latency, tool
+ * latency, retry counts, or parser latency. The runtime does not aggregate or
+ * persist metrics when no sink is installed.
+ */
+typedef void (*LuminaAgentMetricsCallback)(const char *metric_json, void *user_context);
+
+/**
+ * Callback used by external span/tracing integrations.
+ *
+ * Span records are optional start/end markers suitable for caller-owned
+ * OpenTelemetry or custom tracing bridges.
+ */
+typedef void (*LuminaAgentSpanCallback)(const char *span_json, void *user_context);
+
+/**
  * Callback used by the runtime to request best-effort rollback.
  *
  * The input is a UTF-8 JSON object containing rollback metadata emitted by a
@@ -121,7 +147,7 @@ typedef char *(*LuminaAgentRollbackCallback)(const char *rollback_request_json, 
  * Callback used by the runtime to stream execution events.
  *
  * The input is a UTF-8 JSON event object. Events include run start/end, context
- * loaded, model generation, tool execution, observation, final answer, failure,
+ * loaded, model generation, tool execution, observation, result, failure,
  * and cancellation. The runtime does not retain the pointer after the callback
  * returns.
  */
@@ -256,6 +282,33 @@ void LuminaAgentRuntimeSetAuditCallback(
 );
 
 /**
+ * Installs the optional trace sink.
+ */
+void LuminaAgentRuntimeSetTraceCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentTraceCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional metrics sink.
+ */
+void LuminaAgentRuntimeSetMetricsCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentMetricsCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional span sink.
+ */
+void LuminaAgentRuntimeSetSpanCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentSpanCallback callback,
+    void *user_context
+);
+
+/**
  * Installs the rollback callback used after failed side-effect tool execution.
  *
  * The runtime passes generic rollback JSON. The caller decides whether rollback
@@ -283,7 +336,7 @@ void LuminaAgentRuntimeSetEventCallback(
  * Installs the generic lifecycle hook callback.
  *
  * Hooks observe runtime lifecycle points such as run start, context loaded,
- * planner input ready, step produced, tool execution, observation, final,
+ * planner input ready, step produced, tool execution, observation, result,
  * cancellation, and error. The runtime stores the callback without taking
  * ownership of `user_context`.
  */
@@ -319,7 +372,7 @@ LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSession(
  * Runs or continues an explicit session until it finishes, fails, or pauses.
  *
  * The returned heap-allocated JSON contains the session status, pending state
- * when paused, and current final Markdown when available.
+ * when paused, and current result Markdown when available.
  */
 char *LuminaAgentRuntimeRunSession(
     LuminaAgentRuntimeRef *runtime,
@@ -345,6 +398,11 @@ char *LuminaAgentRuntimeCancelSession(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentRuntimeSessionRef *session
 );
+
+/**
+ * Returns the current explicit session snapshot.
+ */
+char *LuminaAgentRuntimeSnapshotSession(LuminaAgentRuntimeSessionRef *session);
 
 /**
  * Destroys an explicit session created by `LuminaAgentRuntimeCreateSession`.
@@ -385,6 +443,15 @@ char *LuminaReActValidateStepJSON(const char *json);
  * `LuminaAgentRuntimeReleaseString`.
  */
 char *LuminaReActExtractFirstStandardObject(const char *text);
+
+/**
+ * Normalizes model output from a supported dialect into the canonical runtime
+ * ReAct step contract.
+ *
+ * Supported dialects include `canonical_json` and `xml_tags`. Provider-native
+ * or custom adapters should normalize before calling the runtime.
+ */
+char *LuminaReActNormalizeStepText(const char *text, const char *dialect);
 
 /**
  * Exports the trace for an explicit task session.

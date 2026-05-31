@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 
 #include "Json.hpp"
 
@@ -35,6 +36,18 @@ void RuntimeCallbacks::setAudit(LuminaAgentAuditCallback callback, void *context
     audit_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setTrace(LuminaAgentTraceCallback callback, void *context) {
+    trace_ = {reinterpret_cast<void *>(callback), context};
+}
+
+void RuntimeCallbacks::setMetrics(LuminaAgentMetricsCallback callback, void *context) {
+    metrics_ = {reinterpret_cast<void *>(callback), context};
+}
+
+void RuntimeCallbacks::setSpan(LuminaAgentSpanCallback callback, void *context) {
+    span_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setRollback(LuminaAgentRollbackCallback callback, void *context) {
     rollback_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -54,6 +67,9 @@ bool RuntimeCallbacks::hasContext() const { return context_.function != nullptr;
 bool RuntimeCallbacks::hasPermission() const { return permission_.function != nullptr; }
 bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function != nullptr; }
 bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
+bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
+bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
+bool RuntimeCallbacks::hasSpan() const { return span_.function != nullptr; }
 
 std::string RuntimeCallbacks::callModel(const std::string &plannerInput) const {
     auto callback = reinterpret_cast<LuminaAgentModelCallback>(model_.function);
@@ -166,6 +182,40 @@ void RuntimeCallbacks::audit(const std::string &type, const std::string &payload
     }
     const std::string record = "{\"type\":" + jsonString(type) + ",\"payload\":" + payload + "}";
     callback(record.c_str(), audit_.context);
+}
+
+void RuntimeCallbacks::trace(const std::string &type, const std::string &payload) const {
+    auto callback = reinterpret_cast<LuminaAgentTraceCallback>(trace_.function);
+    if (callback == nullptr) {
+        return;
+    }
+    const std::string record = "{\"type\":" + jsonString(type) + ",\"payload\":" + payload + "}";
+    callback(record.c_str(), trace_.context);
+}
+
+void RuntimeCallbacks::metric(const std::string &name, double value, const std::string &payload) const {
+    auto callback = reinterpret_cast<LuminaAgentMetricsCallback>(metrics_.function);
+    if (callback == nullptr) {
+        return;
+    }
+    std::ostringstream output;
+    output << "{\"name\":" << jsonString(name)
+           << ",\"value\":" << value
+           << ",\"payload\":" << (trim(payload).empty() ? "{}" : payload)
+           << "}";
+    const std::string record = output.str();
+    callback(record.c_str(), metrics_.context);
+}
+
+void RuntimeCallbacks::span(const std::string &phase, const std::string &name, const std::string &payload) const {
+    auto callback = reinterpret_cast<LuminaAgentSpanCallback>(span_.function);
+    if (callback == nullptr) {
+        return;
+    }
+    const std::string record = "{\"phase\":" + jsonString(phase) +
+        ",\"name\":" + jsonString(name) +
+        ",\"payload\":" + (trim(payload).empty() ? "{}" : payload) + "}";
+    callback(record.c_str(), span_.context);
 }
 
 } // namespace LuminaAgent

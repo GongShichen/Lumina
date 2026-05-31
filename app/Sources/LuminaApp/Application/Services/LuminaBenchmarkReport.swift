@@ -26,6 +26,20 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let modelTokensPerSecondP95: Double?
     let modelPromptTokensP95: Double?
     let modelOutputTokensP95: Double?
+    let runtimeContractFailureCount: Int
+    let runtimeContractFailureRate: Double
+    let normalizationFailureCount: Int
+    let schemaValidationFailureCount: Int
+    let modelOwnedObservationRejectCount: Int
+    let unknownToolRejectCount: Int
+    let retryCount: Int
+    let fallbackCount: Int
+    let remoteModelInvocationCount: Int
+    let localModelInvocationCount: Int
+    let runtimeObservationCount: Int
+    let resultGeneratedCount: Int
+    let hookEventCount: Int
+    let toolFailureCount: Int
     let memoryAccessDisabled: Bool
     let results: [LuminaBenchmarkTaskResult]
     let jsonReportURL: URL?
@@ -39,6 +53,9 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let exact = ratio(results.filter(\.exactMatch).count, completed)
         let modelMetrics = results.flatMap(\.modelMetrics)
         let ttft = modelMetrics.compactMap(\.timeToFirstTokenMilliseconds)
+        let runtimeMetrics = results.reduce(into: LuminaBenchmarkRuntimeMetrics()) { partial, result in
+            partial.merge(result.runtimeMetrics)
+        }
 
         var truePositive = 0
         var falsePositive = 0
@@ -79,6 +96,20 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             modelTokensPerSecondP95: optionalPercentile(modelMetrics.map(\.tokensPerSecond), percentile: 0.95),
             modelPromptTokensP95: optionalPercentile(modelMetrics.map { Double($0.promptTokens) }, percentile: 0.95),
             modelOutputTokensP95: optionalPercentile(modelMetrics.map { Double($0.outputTokens) }, percentile: 0.95),
+            runtimeContractFailureCount: runtimeMetrics.contractFailureCount,
+            runtimeContractFailureRate: ratio(runtimeMetrics.contractFailureCount, max(1, completed)),
+            normalizationFailureCount: runtimeMetrics.normalizationFailureCount,
+            schemaValidationFailureCount: runtimeMetrics.schemaValidationFailureCount,
+            modelOwnedObservationRejectCount: runtimeMetrics.modelOwnedObservationRejectCount,
+            unknownToolRejectCount: runtimeMetrics.unknownToolRejectCount,
+            retryCount: runtimeMetrics.retryCount,
+            fallbackCount: runtimeMetrics.fallbackCount,
+            remoteModelInvocationCount: runtimeMetrics.remoteModelInvocationCount,
+            localModelInvocationCount: runtimeMetrics.localModelInvocationCount,
+            runtimeObservationCount: runtimeMetrics.observationCount,
+            resultGeneratedCount: runtimeMetrics.resultGeneratedCount,
+            hookEventCount: runtimeMetrics.hookEventCount,
+            toolFailureCount: runtimeMetrics.toolFailureCount,
             memoryAccessDisabled: true,
             results: results,
             jsonReportURL: jsonReportURL,

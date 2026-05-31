@@ -30,11 +30,11 @@ public enum LuminaReActStepParser {
                     requiresConfirmation: (dto.requiresConfirmation ?? false) || schema.sideEffect != .readOnly
                 )
             )
-        case "final_answer":
+        case "result":
             guard let content = dto.content else {
-                throw LuminaReActParserError.invalidSchema("final_answer steps require a content string.")
+                throw LuminaReActParserError.invalidSchema("result steps require a content string.")
             }
-            return .final(content, thought: thought)
+            return .result(content, thought: thought)
         case "ask_user":
             guard schemasByName["ask_user"] != nil else {
                 throw LuminaReActParserError.invalidAction
@@ -52,7 +52,7 @@ public enum LuminaReActStepParser {
         case "cannot_complete":
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let reason = object?["reason"] as? String ?? "无法完成。"
-            return .final("### 无法完成\n\n\(reason)", thought: thought)
+            return .result("### 无法完成\n\n\(reason)", thought: thought)
         default:
             throw LuminaReActParserError.invalidStepType(stepType)
         }
@@ -71,9 +71,10 @@ public enum LuminaReActStepParser {
             "schema_version", "step_id", "type", "thought", "requires_followup",
             "confidence", "needs_more_context", "tool_name", "parameters",
             "expected_observation", "requires_confirmation", "tool_calls",
+            "query", "category", "max_results", "include_schemas",
             "questions", "reason", "sensitivity", "timeout_seconds",
             "allow_custom_answer", "content", "citations", "completed",
-            "recoverable_actions"
+            "structured_content", "artifacts", "recoverable_actions"
         ])
         let unknownTopLevelKeys = topLevelKeys.subtracting(allowedTopLevelKeys)
         guard unknownTopLevelKeys.isEmpty else {
@@ -95,9 +96,9 @@ public enum LuminaReActStepParser {
             if let value = object["requires_confirmation"], !(value is Bool) {
                 throw LuminaReActParserError.invalidSchema("requires_confirmation must be a boolean when present.")
             }
-        case "final_answer":
+        case "result":
             guard object["content"] is String else {
-                throw LuminaReActParserError.invalidSchema("final_answer requires a string content field.")
+                throw LuminaReActParserError.invalidSchema("result requires a string content field.")
             }
         case "ask_user":
             guard object["questions"] is [Any] else {

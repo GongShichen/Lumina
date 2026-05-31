@@ -1,13 +1,16 @@
 #include "RuntimeEventQueue.hpp"
 
 #include <sstream>
+#include <utility>
 
 #include "Json.hpp"
 
 namespace LuminaAgent {
 
-RuntimeEventQueue::RuntimeEventQueue(const RuntimeCallbacks &callbacks)
-    : callbacks_(callbacks) {}
+RuntimeEventQueue::RuntimeEventQueue(const RuntimeCallbacks &callbacks, std::string sessionId, std::string runId)
+    : callbacks_(callbacks),
+      sessionId_(std::move(sessionId)),
+      runId_(std::move(runId)) {}
 
 void RuntimeEventQueue::emitEvent(const std::string &type, const std::string &payloadJson) {
     emit("event", type, payloadJson);
@@ -39,12 +42,18 @@ void RuntimeEventQueue::emit(const std::string &channel, const std::string &type
     const std::string payload = trim(payloadJson).empty() ? "{}" : payloadJson;
     const std::string event = "{"
         "\"sequence\":" + std::to_string(sequence_) + ","
+        "\"session_id\":" + jsonString(sessionId_) + ","
+        "\"run_id\":" + jsonString(runId_) + ","
         "\"channel\":" + jsonString(channel) + ","
         "\"type\":" + jsonString(type) + ","
         "\"payload\":" + payload +
         "}";
     events_.push_back(event);
-    callbacks_.emitEvent(type, "{\"sequence\":" + std::to_string(sequence_) + ",\"channel\":" + jsonString(channel) + ",\"payload\":" + payload + "}");
+    callbacks_.emitEvent(type, "{\"sequence\":" + std::to_string(sequence_) +
+        ",\"session_id\":" + jsonString(sessionId_) +
+        ",\"run_id\":" + jsonString(runId_) +
+        ",\"channel\":" + jsonString(channel) +
+        ",\"payload\":" + payload + "}");
 }
 
 } // namespace LuminaAgent

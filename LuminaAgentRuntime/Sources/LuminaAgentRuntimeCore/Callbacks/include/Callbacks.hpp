@@ -28,6 +28,9 @@ public:
     void setPermission(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmation(LuminaAgentConfirmationCallback callback, void *context);
     void setAudit(LuminaAgentAuditCallback callback, void *context);
+    void setTrace(LuminaAgentTraceCallback callback, void *context);
+    void setMetrics(LuminaAgentMetricsCallback callback, void *context);
+    void setSpan(LuminaAgentSpanCallback callback, void *context);
     void setRollback(LuminaAgentRollbackCallback callback, void *context);
     void setEvent(LuminaAgentEventCallback callback, void *context);
     void setHook(LuminaAgentHookCallback callback, void *context);
@@ -40,6 +43,9 @@ public:
     bool hasPermission() const;
     bool hasConfirmation() const;
     bool hasHook() const;
+    bool hasTrace() const;
+    bool hasMetrics() const;
+    bool hasSpan() const;
 
     // Invoke model callbacks and return runtime-owned std::string values.
     std::string callModel(const std::string &plannerInput) const;
@@ -53,9 +59,12 @@ public:
     std::string confirm(const std::string &confirmationRequest) const;
     std::string dispatchHook(const std::string &hookEvent) const;
 
-    // Emit normalized runtime telemetry to event/audit callbacks.
+    // Emit normalized runtime telemetry to caller-selected callbacks.
     void emitEvent(const std::string &type, const std::string &payload = "{}") const;
     void audit(const std::string &type, const std::string &payload = "{}") const;
+    void trace(const std::string &type, const std::string &payload = "{}") const;
+    void metric(const std::string &name, double value, const std::string &payload = "{}") const;
+    void span(const std::string &phase, const std::string &name, const std::string &payload = "{}") const;
 
 private:
     CallbackSlot model_;
@@ -65,6 +74,9 @@ private:
     CallbackSlot permission_;
     CallbackSlot confirmation_;
     CallbackSlot audit_;
+    CallbackSlot trace_;
+    CallbackSlot metrics_;
+    CallbackSlot span_;
     CallbackSlot rollback_;
     CallbackSlot event_;
     CallbackSlot hook_;

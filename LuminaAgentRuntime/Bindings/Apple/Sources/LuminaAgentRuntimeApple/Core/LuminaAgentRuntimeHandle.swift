@@ -31,6 +31,9 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetPermissionCallback(handle, luminaAgentSwiftAdapterPermissionCallback, context)
         LuminaAgentRuntimeSetConfirmationCallback(handle, luminaAgentSwiftAdapterConfirmationCallback, context)
         LuminaAgentRuntimeSetAuditCallback(handle, luminaAgentSwiftAdapterAuditCallback, context)
+        LuminaAgentRuntimeSetTraceCallback(handle, luminaAgentSwiftAdapterTraceCallback, context)
+        LuminaAgentRuntimeSetMetricsCallback(handle, luminaAgentSwiftAdapterMetricsCallback, context)
+        LuminaAgentRuntimeSetSpanCallback(handle, luminaAgentSwiftAdapterSpanCallback, context)
         LuminaAgentRuntimeSetRollbackCallback(handle, luminaAgentSwiftAdapterRollbackCallback, context)
         LuminaAgentRuntimeSetEventCallback(handle, luminaAgentSwiftAdapterEventCallback, context)
         LuminaAgentRuntimeSetHookCallback(handle, luminaAgentSwiftAdapterHookCallback, context)
@@ -47,7 +50,7 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
 
     func run(requestJSON: String) -> String {
         guard let handle = currentHandle() else {
-            return "{\"ok\":false,\"status\":\"failed\",\"finalMarkdown\":\"### Runtime unavailable\"}"
+            return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
         }
         return requestJSON.withCString { requestPointer in
             consumeRuntimeString(LuminaAgentRuntimeRun(handle, requestPointer))

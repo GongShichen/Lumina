@@ -8,7 +8,7 @@ public enum LuminaAgentRuntimeHookEvent: String, Codable, Hashable, Sendable {
     case toolWillExecute
     case toolDidExecute
     case observationCreated
-    case finalGenerated
+    case resultGenerated
     case runEnded
     case cancelled
     case failed

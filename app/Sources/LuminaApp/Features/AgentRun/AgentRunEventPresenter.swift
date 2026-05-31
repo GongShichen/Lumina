@@ -30,7 +30,7 @@ enum AgentRunEventPresenter {
             return AgentRunTimelineItem(title: "ReAct 动作：\(call.toolName)", detail: nil, systemImage: "arrowshape.turn.up.right", status: .active)
         case let .observationCreated(observation):
             return AgentRunTimelineItem(title: "观察结果：\(observation.toolName)", detail: observation.summary, systemImage: "eye", status: status(for: observation.status))
-        case .finalGenerated:
+        case .resultGenerated:
             return nil
         case let .hookAnnotated(key, value):
             return AgentRunTimelineItem(

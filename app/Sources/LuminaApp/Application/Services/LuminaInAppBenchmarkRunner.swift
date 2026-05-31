@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaModelRuntime
 import Contacts
 import CoreLocation
 @preconcurrency import EventKit
@@ -46,6 +47,7 @@ final class LuminaInAppBenchmarkRunner {
             services.beginSession()
             let metricsMark = services.modelMetrics.mark()
             let (result, observedTimings) = await runSingleTask(task, completed: results.count, total: tasks.count, traceLogger: traceLogger, progress: progress)
+            let modelMetrics = services.modelMetrics.metrics(after: metricsMark)
             let toolAttempts = result.toolResults.map(\.toolName)
             let toolReplays = result.toolResults.filter { $0.output["replayed"]?.boolValue == true }.map(\.toolName)
             let actualTools = result.toolResults.filter { $0.output["replayed"]?.boolValue != true }.map(\.toolName)
@@ -72,7 +74,8 @@ final class LuminaInAppBenchmarkRunner {
                 observedTimings: observedTimings,
                 stepGenerationMilliseconds: result.timing.stepGenerationMilliseconds,
                 toolMilliseconds: result.timing.toolExecutionMilliseconds,
-                modelMetrics: services.modelMetrics.metrics(after: metricsMark),
+                modelMetrics: modelMetrics,
+                runtimeMetrics: runtimeMetrics(observedTimings: observedTimings, modelMetrics: modelMetrics),
                 failureSummary: failure
             )
             results.append(taskResult)
@@ -91,8 +94,16 @@ final class LuminaInAppBenchmarkRunner {
                 "activeMs": String(format: "%.1f", observedTimings.activeRuntimeMilliseconds),
                 "modelMs": String(format: "%.1f", result.timing.stepGenerationMilliseconds),
                 "toolMs": String(format: "%.1f", result.timing.toolExecutionMilliseconds),
-                "final": result.plan.summary.truncated(to: 4_000),
-                "toolResultCount": "\(result.toolResults.count)"
+                "result": result.plan.summary.truncated(to: 4_000),
+                "toolResultCount": "\(result.toolResults.count)",
+                "normalizationFailures": "\(taskResult.runtimeMetrics.normalizationFailureCount)",
+                "schemaValidationFailures": "\(taskResult.runtimeMetrics.schemaValidationFailureCount)",
+                "modelOwnedObservationRejects": "\(taskResult.runtimeMetrics.modelOwnedObservationRejectCount)",
+                "unknownToolRejects": "\(taskResult.runtimeMetrics.unknownToolRejectCount)",
+                "retries": "\(taskResult.runtimeMetrics.retryCount)",
+                "fallbacks": "\(taskResult.runtimeMetrics.fallbackCount)",
+                "remoteModelCalls": "\(taskResult.runtimeMetrics.remoteModelInvocationCount)",
+                "localModelCalls": "\(taskResult.runtimeMetrics.localModelInvocationCount)"
             ])
             progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: actualTools.last ?? task.expectedTools.last))
         }
@@ -107,6 +118,19 @@ final class LuminaInAppBenchmarkRunner {
         return report
     }
 
+    private func runtimeMetrics(
+        observedTimings: LuminaObservedRunTimings,
+        modelMetrics: [LuminaModelInferenceMetrics]
+    ) -> LuminaBenchmarkRuntimeMetrics {
+        var metrics = observedTimings.runtimeMetrics
+        metrics.remoteModelInvocationCount = modelMetrics.filter { $0.computeUnits.localizedCaseInsensitiveContains("remote") }.count
+        metrics.localModelInvocationCount = modelMetrics.count - metrics.remoteModelInvocationCount
+        if services.modelReadiness.snapshot.lastRunUsedFallback {
+            metrics.fallbackCount = max(metrics.fallbackCount, 1)
+        }
+        return metrics
+    }
+
     private func runSingleTask(
         _ task: LuminaBenchmarkTask,
         completed: Int,
@@ -114,7 +138,7 @@ final class LuminaInAppBenchmarkRunner {
         traceLogger: LuminaBenchmarkTraceLogger,
         progress: @escaping ProgressHandler
     ) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
-        var finalResult: LuminaAgentRunResult?
+        var runResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
         var latestPromptTokens: Int?
         var latestSampledTokens = 0
@@ -181,11 +205,11 @@ final class LuminaInAppBenchmarkRunner {
                 ))
             }
             if case let .finished(result) = event {
-                finalResult = result
+                runResult = result
             }
         }
-        if let finalResult {
-            return (finalResult, observer.finish(result: finalResult))
+        if let runResult {
+            return (runResult, observer.finish(result: runResult))
         }
         let cancelled = LuminaAgentRunResult(
             requestID: UUID(),
@@ -228,9 +252,9 @@ final class LuminaInAppBenchmarkRunner {
             fields["duplicateOf"] = observation.duplicateOf ?? ""
             fields["summary"] = observation.summary.truncated(to: 2_000)
             await traceLogger.record("observation_created", fields: fields)
-        case let .finalGenerated(markdown):
+        case let .resultGenerated(markdown):
             fields["markdown"] = markdown.truncated(to: 4_000)
-            await traceLogger.record("final_generated", fields: fields)
+            await traceLogger.record("result_generated", fields: fields)
         case let .finished(result):
             fields["status"] = result.status.rawValue
             fields["summary"] = result.plan.summary.truncated(to: 4_000)
@@ -286,7 +310,8 @@ final class LuminaInAppBenchmarkRunner {
     private func markdown(_ report: LuminaBenchmarkReport) -> String {
         let rows = report.results.prefix(200).map { result in
             let semantic = result.semanticPassed ? "pass" : result.semanticFailures.joined(separator: "; ").truncated(to: 120)
-            return "| \(result.taskID) | \(result.status) | \(result.semanticPassed ? "yes" : "no") | \(semantic) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(Int(result.systemPermissionWaitMilliseconds))ms | \(result.toolAttemptCount) | \(result.toolExecutionCount) | \(result.toolReplayCount) | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
+            let contract = result.runtimeMetrics.contractFailureCount == 0 ? "pass" : "\(result.runtimeMetrics.contractFailureCount)"
+            return "| \(result.taskID) | \(result.status) | \(result.semanticPassed ? "yes" : "no") | \(semantic) | \(contract) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(Int(result.systemPermissionWaitMilliseconds))ms | \(result.toolAttemptCount) | \(result.toolExecutionCount) | \(result.toolReplayCount) | \(result.actualTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
         }.joined(separator: "\n")
         return """
         # Lumina In-App Benchmark Report
@@ -311,16 +336,27 @@ final class LuminaInAppBenchmarkRunner {
         - Memory access disabled: \(report.memoryAccessDisabled)
         - Tool attempts / executions / replays: \(report.results.reduce(0) { $0 + $1.toolAttemptCount }) / \(report.results.reduce(0) { $0 + $1.toolExecutionCount }) / \(report.results.reduce(0) { $0 + $1.toolReplayCount })
 
+        ## Runtime Contract & Observability
+        - Contract failure count/rate: \(report.runtimeContractFailureCount) / \(format(report.runtimeContractFailureRate))
+        - Normalization failures: \(report.normalizationFailureCount)
+        - Schema validation failures: \(report.schemaValidationFailureCount)
+        - Model-owned observation rejects: \(report.modelOwnedObservationRejectCount)
+        - Unknown tool rejects: \(report.unknownToolRejectCount)
+        - Retry / fallback count: \(report.retryCount) / \(report.fallbackCount)
+        - Runtime observations / results / hook events: \(report.runtimeObservationCount) / \(report.resultGeneratedCount) / \(report.hookEventCount)
+        - Tool failures: \(report.toolFailureCount)
+
         ## Model Inference
         - Model invocations: \(report.modelInvocationCount)
+        - Local / remote invocations: \(report.localModelInvocationCount) / \(report.remoteModelInvocationCount)
         - TTFT p50/p95: \(optionalMilliseconds(report.modelTTFTP50Milliseconds)) / \(optionalMilliseconds(report.modelTTFTP95Milliseconds))
         - Decode tokens/s p50/p95: \(optionalNumber(report.modelTokensPerSecondP50)) / \(optionalNumber(report.modelTokensPerSecondP95))
         - Prompt tokens p95: \(optionalNumber(report.modelPromptTokensP95))
         - Output tokens p95: \(optionalNumber(report.modelOutputTokensP95))
 
         ## Tasks
-        | Task | Status | Semantic | Semantic detail | Tool F1 | Active latency | Wall clock | Permission wait | Attempts | Executions | Replays | Executed tools | Model calls |
-        | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+        | Task | Status | Semantic | Semantic detail | Contract | Tool F1 | Active latency | Wall clock | Permission wait | Attempts | Executions | Replays | Executed tools | Model calls |
+        | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
         \(rows)
         """
     }

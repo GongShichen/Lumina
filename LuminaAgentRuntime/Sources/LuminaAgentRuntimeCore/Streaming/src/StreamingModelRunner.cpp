@@ -21,6 +21,7 @@ static std::string excerpt(const std::string &text, size_t limit) {
 std::string StreamingModelRunner::generate(const std::string &plannerInput) const {
     const auto started = std::chrono::steady_clock::now();
     callbacks_.emitEvent("model_generation_started", "{\"input_characters\":" + std::to_string(plannerInput.size()) + "}");
+    callbacks_.span("start", "model_generation", "{\"input_characters\":" + std::to_string(plannerInput.size()) + "}");
     StreamingModelResult result = callbacks_.callStreamingModelWithMetrics(plannerInput);
     const auto finished = std::chrono::steady_clock::now();
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(finished - started).count();
@@ -41,6 +42,17 @@ std::string StreamingModelRunner::generate(const std::string &plannerInput) cons
             ",\"output_characters\":" + std::to_string(modelText.size()) +
             ",\"output_excerpt\":" + jsonString(excerpt(modelText, 1200)) + "}"
     );
+    callbacks_.metric("model_generation_ms", static_cast<double>(elapsedMs), "{\"input_characters\":" + std::to_string(plannerInput.size()) + ",\"output_characters\":" + std::to_string(modelText.size()) + "}");
+    callbacks_.metric("model_ttft_ms", static_cast<double>(result.timeToFirstTokenMilliseconds), "{\"chunk_count\":" + std::to_string(result.chunkCount) + "}");
+    callbacks_.metric("model_tokens_per_second", tokensPerSecond, "{\"output_token_count\":" + std::to_string(result.outputTokenCount) + "}");
+    callbacks_.trace(
+        "model_generation_validated",
+        "{\"wall_time_ms\":" + std::to_string(elapsedMs) +
+            ",\"ttft_ms\":" + std::to_string(result.timeToFirstTokenMilliseconds) +
+            ",\"raw_output_excerpt\":" + jsonString(excerpt(result.text, 1600)) +
+            ",\"normalized_excerpt\":" + jsonString(excerpt(modelText, 1200)) + "}"
+    );
+    callbacks_.span("end", "model_generation", "{\"wall_time_ms\":" + std::to_string(elapsedMs) + ",\"output_characters\":" + std::to_string(modelText.size()) + "}");
     return modelText;
 }
 

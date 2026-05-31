@@ -27,6 +27,10 @@ public:
     // Creates a per-task state container. Sessions are intentionally not shared across tasks.
     explicit RuntimeSession(RuntimeSessionConfig config);
 
+    // Stable correlation identifiers included in observable payloads.
+    const std::string &sessionId() const;
+    const std::string &runId() const;
+
     // Returns true while iteration, tool, pause, and final-state budgets allow more work.
     bool canContinue() const;
 
@@ -48,8 +52,8 @@ public:
         bool confirmed
     );
 
-    // Records a Markdown final answer and marks the session as complete.
-    std::string recordFinal(const std::string &markdown);
+    // Records a Markdown result and marks the session as complete.
+    std::string recordResult(const std::string &markdown);
 
     // Produces a final result if the model did not explicitly produce one.
     std::string finishIfNeeded();
@@ -92,7 +96,7 @@ public:
     int maximumObservationCharacters() const;
     int toolResultTokenBudget() const;
     int remainingContextTokensEstimate() const;
-    bool hasFinal() const;
+    bool hasResult() const;
     bool isTerminated() const;
     int consecutiveReasoningCount() const;
     int maximumConsecutiveReasoningSteps() const;
@@ -110,10 +114,12 @@ public:
 
     // Terminal state helpers for cancellation and unrecoverable failures.
     void cancel();
-    void failWithFinal(const std::string &reason, const std::string &markdown);
+    void failWithResult(const std::string &reason, const std::string &markdown);
 
 private:
     RuntimeSessionConfig config_;
+    std::string sessionId_;
+    std::string runId_;
     int stepCount_ = 0;
     int actionCount_ = 0;
     int reasoningCount_ = 0;
@@ -122,7 +128,7 @@ private:
     int toolCallSequence_ = 0;
     int contextTokenUsageEstimate_ = 0;
     int compactFailureCount_ = 0;
-    bool hasFinal_ = false;
+    bool hasResult_ = false;
     bool cancelled_ = false;
     bool hasSucceededTool_ = false;
     bool hasFailedTool_ = false;
@@ -134,7 +140,7 @@ private:
     std::string pendingKind_;
     std::string pendingPayloadJson_;
     std::string terminationReason_;
-    std::string finalMarkdown_;
+    std::string resultMarkdown_;
     std::string lastReplayDedupKey_;
     int consecutiveReplayObservationCount_ = 0;
     std::vector<std::string> observations_;

@@ -9,7 +9,7 @@ namespace LuminaAgent {
 
 class RuntimeEventQueue {
 public:
-    explicit RuntimeEventQueue(const RuntimeCallbacks &callbacks);
+    RuntimeEventQueue(const RuntimeCallbacks &callbacks, std::string sessionId = "", std::string runId = "");
 
     void emitEvent(const std::string &type, const std::string &payloadJson = "{}");
     void emitControl(const std::string &type, const std::string &payloadJson = "{}");
@@ -18,6 +18,8 @@ public:
 
 private:
     const RuntimeCallbacks &callbacks_;
+    std::string sessionId_;
+    std::string runId_;
     long long sequence_ = 0;
     std::vector<std::string> events_;
 

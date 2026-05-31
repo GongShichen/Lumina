@@ -52,7 +52,10 @@ struct AgentHomeView: View {
             .tabItem { Label("Memory", systemImage: "brain.head.profile") }
 
             NavigationStack {
-                LuminaSettingsScreen(settings: services.remoteInferenceSettings)
+                LuminaSettingsScreen(
+                    settings: services.remoteInferenceSettings,
+                    localModelSelection: services.localModelSelection
+                )
             }
             .tag(LuminaTab.settings)
             .tabItem { Label("Settings", systemImage: "gearshape.fill") }
@@ -124,6 +127,7 @@ struct AgentHomeView: View {
 
 private struct LuminaSettingsScreen: View {
     @ObservedObject var settings: LuminaRemoteInferenceSettingsStore
+    @ObservedObject var localModelSelection: LuminaLocalModelSelectionStore
     @State private var baseURL = ""
     @State private var model = ""
     @State private var apiKey = ""
@@ -137,6 +141,7 @@ private struct LuminaSettingsScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header
+                    localModelPanel
                     remotePanel
                 }
                 .padding(.horizontal, 18)
@@ -177,6 +182,26 @@ private struct LuminaSettingsScreen: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    private var localModelPanel: some View {
+        LuminaPanel(padding: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                LuminaSectionHeader(title: "Local Model", subtitle: "原始权重会保留；切换后下一次端侧推理生效。")
+                Picker("本地模型", selection: Binding(
+                    get: { localModelSelection.selection },
+                    set: { localModelSelection.select($0) }
+                )) {
+                    ForEach(LuminaLocalModelSelection.allCases) { selection in
+                        Text(selection.shortLabel).tag(selection)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("当前：\(localModelSelection.selection.displayName)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

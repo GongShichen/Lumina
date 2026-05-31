@@ -11,6 +11,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     let confirmationCoordinator: any LuminaConfirmationCoordinator
     let auditLogger: any LuminaAuditLogger
     let hooks: [any LuminaAgentRuntimeHook]
+    let observabilitySinks: LuminaRuntimeObservabilitySinks
     var currentEventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     var currentRequest: LuminaAgentRequest?
     var trace = LuminaReActTrace()
@@ -31,7 +32,8 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         permissionGate: any LuminaPermissionGate,
         confirmationCoordinator: any LuminaConfirmationCoordinator,
         auditLogger: any LuminaAuditLogger,
-        hooks: [any LuminaAgentRuntimeHook]
+        hooks: [any LuminaAgentRuntimeHook],
+        observabilitySinks: LuminaRuntimeObservabilitySinks
     ) {
         self.tools = tools
         self.toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.schema.name, $0) })
@@ -43,6 +45,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         self.confirmationCoordinator = confirmationCoordinator
         self.auditLogger = auditLogger
         self.hooks = hooks
+        self.observabilitySinks = observabilitySinks
     }
 
     func requestCancellation() {
@@ -67,7 +70,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         let object = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any]
         let statusText = object?["status"] as? String
         let status = LuminaAgentRunStatus(rawValue: statusText ?? "") ?? ((object?["ok"] as? Bool) == false ? .failed : .succeeded)
-        let finalMarkdown = (object?["finalMarkdown"] as? String) ?? trace.steps.last?.finalMarkdown ?? "### 执行结束"
+        let resultMarkdown = (object?["resultMarkdown"] as? String) ?? trace.steps.last?.resultMarkdown ?? "### 执行结束"
         var finalTrace = trace
         if finalTrace.terminationReason == nil,
            let terminationReason = object?["terminationReason"] as? String,
@@ -81,7 +84,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         )
         return LuminaAgentRunResult(
             requestID: request.id,
-            plan: LuminaAgentPlan(summary: finalMarkdown, toolCalls: trace.steps.compactMap(\.action)),
+            plan: LuminaAgentPlan(summary: resultMarkdown, toolCalls: trace.steps.compactMap(\.action)),
             toolResults: toolResults,
             status: status,
             timing: timing,

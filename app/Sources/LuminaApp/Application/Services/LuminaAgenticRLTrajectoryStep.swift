@@ -31,8 +31,8 @@ struct LuminaAgenticRLTrajectoryStep: Codable, Hashable {
                 observationStatus: step.observation?.status.rawValue,
                 elapsedMilliseconds: step.elapsedMilliseconds
             )
-        case .final:
-            return LuminaAgenticRLTrajectoryStep(type: "final", content: step.finalMarkdown, toolName: nil, parameters: nil, observationStatus: nil, elapsedMilliseconds: step.elapsedMilliseconds)
+        case .result:
+            return LuminaAgenticRLTrajectoryStep(type: "result", content: step.resultMarkdown, toolName: nil, parameters: nil, observationStatus: nil, elapsedMilliseconds: step.elapsedMilliseconds)
         }
     }
 }

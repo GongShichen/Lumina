@@ -396,7 +396,7 @@ final class AgentHomeViewModel: ObservableObject {
         switch event {
         case let .toolFinished(result):
             resultContent.append(contentsOf: result.content)
-        case let .finalGenerated(markdown):
+        case let .resultGenerated(markdown):
             resultText = markdown
         case let .finished(result):
             runSummary = LuminaAgentRunSummary(result: result)
@@ -542,7 +542,7 @@ final class AgentHomeViewModel: ObservableObject {
             }
         case let .observationCreated(observation):
             snapshot = runningSnapshot(title: "读取执行结果", detail: observation.summary, toolName: observation.toolName, progress: baseProgress)
-        case .finalGenerated:
+        case .resultGenerated:
             snapshot = runningSnapshot(title: "正在整理回复", detail: "生成可读 Markdown 结果", progress: 0.94)
         case let .hookAnnotated(key, _):
             snapshot = runningSnapshot(title: "运行标注", detail: key, progress: baseProgress)

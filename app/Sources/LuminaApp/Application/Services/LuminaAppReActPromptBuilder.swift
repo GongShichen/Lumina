@@ -19,16 +19,16 @@ struct LuminaAppReActPromptBuilder: Sendable {
         let hasRuntimeObservation = context.trace.steps.contains { $0.kind == .observation }
         let modalities = context.request.content.modalities.map(\.rawValue).sorted().joined(separator: ", ")
         let contract = isEvaluation
-            ? #"Output exactly one valid Lumina ReAct JSON object and nothing else. No <think>, prose, XML, markdown, labels, or tool_call blocks. For tool calls use this full shape: {"schema_version":"1.0","step_id":"s1","type":"tool_use","thought":"...","tool_name":"exact.name","parameters":{},"requires_confirmation":false}. For answers use: {"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"...","content":"markdown","completed":true}. For blockers use: {"schema_version":"1.0","step_id":"s-blocked","type":"cannot_complete","thought":"...","reason":"..."}. Before any runtime result, if a tool can progress the task, call the tool; do not final_answer. After a successful runtime result, either call the next different needed tool or finish with final_answer. If a runtime result says replayed=true or already executed, do not repeat that tool; finish or choose a different required tool."#
+            ? #"Output exactly one valid Lumina XML ReAct step and nothing else. No <think>, prose, markdown, fences, JSON ReAct object, labels, or tool_call blocks. For tools use: <thought>why</thought><tool_use name="exact.name" requires_confirmation="false">{}</tool_use>. For answers use: <thought>done</thought><result>markdown answer</result>. For blockers use: <thought>blocked</thought><cannot_complete>reason</cannot_complete>. For ask_user use: <thought>need info</thought><ask_user>{"reason":"...","questions":[],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}</ask_user>. Before any runtime result, if a tool can progress the task, call the tool; do not output result. After a successful runtime result, either call the next different needed tool or finish with result. If a runtime result says replayed=true or already executed, do not repeat that tool; finish or choose a different required tool."#
             : LuminaReActSchema.compactPromptContract
         let examples = (hasRuntimeObservation && !isEvaluation) ? "" : "\(formatExamples(for: profile, tools: context.availableTools, isEvaluation: isEvaluation))\n"
         let profileText = profileInstructions(for: profile, metadata: context.request.metadata, isEvaluation: isEvaluation)
         let nextStepDirective = nextStepDirective(for: context, isEvaluation: isEvaluation)
         let rulesText = isEvaluation
-            ? "Use tools to progress. If focused schemas contain a relevant tool, call it. Do not claim success before a real runtime Observation. For create/new tasks, create after any needed device.current_time. For update/delete/complete/open tasks that identify an item by title or name, first call the matching search/list tool with a query keyword to get the required id, then call the mutation tool with that id. Never call a tool with empty parameters when its schema has required parameters or when the user gave a specific query keyword."
-            : "Rules: finish tasks end-to-end; if a tool can make progress output the standard tool_use object; if ask_user is available and required info is missing, use ask_user; if ask_user is unavailable, explain the missing info in final_answer; never claim success before runtime observation; after a useful observation either call the next needed tool or output final_answer; never output observation yourself; final_answer uses content."
+            ? "Use tools to progress. If focused schemas contain a relevant tool, call it with the XML tool_use tag. Do not claim success before a real runtime Observation. For create/new tasks, create after any needed device.current_time. For update/delete/complete/open tasks that identify an item by title or name, first call the matching search/list tool with a query keyword to get the required id, then call the mutation tool with that id. Never call a tool with empty parameters when its schema has required parameters or when the user gave a specific query keyword."
+            : "Rules: finish tasks end-to-end; if a tool can make progress output the XML tool_use tag; if ask_user is available and required info is missing, use ask_user XML; if ask_user is unavailable, explain the missing info in result; never claim success before runtime observation; after a useful observation either call the next needed tool or output result; never output observation yourself; result content is inside <result>."
         let openAIWarning = isEvaluation
-            ? "\nDo not copy tool schemas into parameters or final_answer. Do not output XML, markdown fences, Python dicts, OpenAI tool_call, args, arguments, input keys, or <think> text. The first byte of the response must be `{` and the last byte must be `}`."
+            ? "\nDo not copy tool schemas into parameters or result. Do not output JSON ReAct objects, markdown fences, Python dicts, OpenAI tool_call, args, arguments, input keys, or <think> text. The first bytes must be `<thought>`."
             : "\nDo not output OpenAI-style tool calls. Do not output {\"type\":\"tool_call\"}. Do not output function/args/arguments/input keys."
         return """
         \(contract)
@@ -73,7 +73,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
         if lastObservation.replayed {
             return """
             The latest runtime result is a replay, so the identical tool_name + parameters has already been executed in this session.
-            Do not call that identical tool again. Output final_answer if that result completes the user goal; otherwise call a different needed tool with valid parameters.
+            Do not call that identical tool again. Output result if that result completes the user goal; otherwise call a different needed tool with valid parameters.
             \(recentIDHint)
             """
         }
@@ -81,7 +81,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
         case .succeeded:
             if isReadOnlyAnswerGoal(goal) {
                 return """
-                The latest runtime result is the answer data for this read-only user goal. Do not call another tool. Output final_answer in concise Markdown using only this runtime result.
+                The latest runtime result is the answer data for this read-only user goal. Do not call another tool. Output result in concise Markdown using only this runtime result.
                 \(recentIDHint)
                 """
             }
@@ -100,7 +100,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
                 }
             }
             return """
-            Use the latest real runtime result now. If it satisfies the goal, output final_answer. If the task needs another operation, call the next different tool with required parameters.
+            Use the latest real runtime result now. If it satisfies the goal, output a result object. If the task needs another operation, call the next different tool with required parameters.
             \(recentIDHint)
             """
         case .failed, .denied, .cancelled:
@@ -118,7 +118,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
                 """
             }
             return """
-            The latest runtime result did not complete the task. Output cannot_complete/final_answer with the recoverable reason, or call a different valid tool if one can recover.
+            The latest runtime result did not complete the task. Output cannot_complete or result with the recoverable reason, or call a different valid tool if one can recover.
             \(recentIDHint)
             """
         }
@@ -160,7 +160,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
             - Save durable memory only via memory.ingest_text when the user asks or a stable reusable fact/preference appears; do not save transient state.
             """
             let askUserPolicy = askUserDisabled(in: metadata) ? """
-            - ask_user disabled for this evaluation run; do not ask follow-up questions. If information is missing, use conservative defaults or final_answer with the missing fields.
+            - ask_user disabled for this evaluation run; do not ask follow-up questions. If information is missing, use conservative defaults or a result object with the missing fields.
             """ : """
             - ask_user may be used when required details are missing and no safe default exists.
             """
@@ -188,20 +188,20 @@ struct LuminaAppReActPromptBuilder: Sendable {
             examples.append("""
             Example no observation:
             User: 现在几点？
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-time","type":"tool_use","thought":"Need current device time.","tool_name":"device.current_time","parameters":{},"requires_confirmation":false}
-            Invalid: {"type":"final_answer","content":"device.current_time|r|l|{}"}
+            Valid output exactly: <thought>Need current device time.</thought><tool_use name="device.current_time" requires_confirmation="false">{}</tool_use>
+            Invalid: {"type":"result","content":"device.current_time|r|l|{}"}
             Example after observation:
             Runtime observation JSON: {"toolName":"device.current_time","status":"succeeded","replayed":false,"summary":"已读取本机时间：2026-05-25 21:51:48 Asia/Shanghai"}
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Time was observed.","content":"现在是 2026-05-25 21:51:48，时区 Asia/Shanghai。","completed":true}
+            Valid output exactly: <thought>Time was observed.</thought><result>现在是 2026-05-25 21:51:48，时区 Asia/Shanghai。</result>
             """)
         }
         if isEvaluation, names.contains("device.current_time"), names.contains("reminder.create") {
             examples.append("""
             Example relative-time write:
             User: 明天早上 8 点提醒我带伞
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-time","type":"tool_use","thought":"Tomorrow is relative; get current time first.","tool_name":"device.current_time","parameters":{},"requires_confirmation":false}
+            Valid output exactly: <thought>Tomorrow is relative; get current time first.</thought><tool_use name="device.current_time" requires_confirmation="false">{}</tool_use>
             After time observation:
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-create-reminder","type":"tool_use","thought":"Create the reminder using an ISO due date from observed time.","tool_name":"reminder.create","parameters":{"title":"带伞","dueDateISO":"2026-05-29T08:00:00+08:00"},"requires_confirmation":true}
+            Valid output exactly: <thought>Create the reminder using an ISO due date from observed time.</thought><tool_use name="reminder.create" requires_confirmation="true">{"title":"带伞","dueDateISO":"2026-05-29T08:00:00+08:00"}</tool_use>
             Invalid for create: {"type":"tool_use","tool_name":"reminder.search","parameters":{"query":"带伞"}}
             """)
         }
@@ -209,9 +209,9 @@ struct LuminaAppReActPromptBuilder: Sendable {
             examples.append("""
             Example calendar create:
             User: 明天上午 7 点创建日程 LuminaTest 去上厕所
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-time","type":"tool_use","thought":"Tomorrow is relative; get current time first.","tool_name":"device.current_time","parameters":{},"requires_confirmation":false}
+            Valid output exactly: <thought>Tomorrow is relative; get current time first.</thought><tool_use name="device.current_time" requires_confirmation="false">{}</tool_use>
             After time runtime result:
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-create-calendar","type":"tool_use","thought":"Create a calendar event, not a reminder, because the user said 日程.","tool_name":"calendar.create","parameters":{"title":"LuminaTest 去上厕所","startDateISO":"2026-05-29T07:00:00+08:00","endDateISO":"2026-05-29T07:30:00+08:00"},"requires_confirmation":true}
+            Valid output exactly: <thought>Create a calendar event, not a reminder, because the user said 日程.</thought><tool_use name="calendar.create" requires_confirmation="true">{"title":"LuminaTest 去上厕所","startDateISO":"2026-05-29T07:00:00+08:00","endDateISO":"2026-05-29T07:30:00+08:00"}</tool_use>
             Invalid for 日程: {"type":"tool_use","tool_name":"reminder.create","parameters":{"title":"LuminaTest 去上厕所"}}
             """)
         }
@@ -219,9 +219,9 @@ struct LuminaAppReActPromptBuilder: Sendable {
             examples.append("""
             Example calendar update:
             User: 把 LuminaTest 明天 7 点的日程改成 7 点半
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-search-calendar","type":"tool_use","thought":"Need the existing calendar event id before updating.","tool_name":"calendar.search","parameters":{"query":"LuminaTest"},"requires_confirmation":false}
+            Valid output exactly: <thought>Need the existing calendar event id before updating.</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"LuminaTest"}</tool_use>
             After search runtime result with id:
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-update-calendar","type":"tool_use","thought":"Update the found calendar event by id.","tool_name":"calendar.update","parameters":{"id":"ID_FROM_RUNTIME_RESULT","startDateISO":"2026-05-29T07:30:00+08:00"},"requires_confirmation":true}
+            Valid output exactly: <thought>Update the found calendar event by id.</thought><tool_use name="calendar.update" requires_confirmation="true">{"id":"ID_FROM_RUNTIME_RESULT","startDateISO":"2026-05-29T07:30:00+08:00"}</tool_use>
             Invalid for 日程: {"type":"tool_use","tool_name":"reminder.search","parameters":{"query":"LuminaTest"}}
             """)
         }
@@ -229,25 +229,25 @@ struct LuminaAppReActPromptBuilder: Sendable {
             examples.append("""
             Example calendar delete:
             User: 删除 LuminaTest 日程
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-search-calendar","type":"tool_use","thought":"Need the calendar event id before deleting.","tool_name":"calendar.search","parameters":{"query":"LuminaTest"},"requires_confirmation":false}
+            Valid output exactly: <thought>Need the calendar event id before deleting.</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"LuminaTest"}</tool_use>
             After search runtime result with id:
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-delete-calendar","type":"tool_use","thought":"Delete the found calendar event by id.","tool_name":"calendar.delete","parameters":{"id":"ID_FROM_RUNTIME_RESULT"},"requires_confirmation":true}
+            Valid output exactly: <thought>Delete the found calendar event by id.</thought><tool_use name="calendar.delete" requires_confirmation="true">{"id":"ID_FROM_RUNTIME_RESULT"}</tool_use>
             """)
         }
         if isEvaluation, names.contains("reminder.search"), names.contains("reminder.update") {
             examples.append("""
             Example update existing item:
             User: 把带伞提醒改到明早 8 点半
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-search-reminder","type":"tool_use","thought":"Need the existing reminder id before updating.","tool_name":"reminder.search","parameters":{"query":"带伞"},"requires_confirmation":false}
+            Valid output exactly: <thought>Need the existing reminder id before updating.</thought><tool_use name="reminder.search" requires_confirmation="false">{"query":"带伞"}</tool_use>
             After search observation with id:
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-update-reminder","type":"tool_use","thought":"Update the found reminder by id.","tool_name":"reminder.update","parameters":{"id":"ID_FROM_OBSERVATION","dueDateISO":"2026-05-29T08:30:00+08:00"},"requires_confirmation":true}
+            Valid output exactly: <thought>Update the found reminder by id.</thought><tool_use name="reminder.update" requires_confirmation="true">{"id":"ID_FROM_OBSERVATION","dueDateISO":"2026-05-29T08:30:00+08:00"}</tool_use>
             """)
         }
         if !isEvaluation, profile == .taskExecution, names.contains("ask_user") {
             examples.append("""
             Example missing required info:
             User: 帮我安排一下
-            Valid output exactly: {"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need user preference before continuing.","reason":"缺少安排偏好","questions":[{"id":"preference","question":"你想优先安排哪类事情？","options":[{"label":"工作","description":"优先整理工作任务"},{"label":"生活","description":"优先整理生活事项"}]}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}
+            Valid output exactly: <thought>Need user preference before continuing.</thought><ask_user>{"reason":"缺少安排偏好","questions":[{"id":"preference","question":"你想优先安排哪类事情？","options":[{"label":"工作","description":"优先整理工作任务"},{"label":"生活","description":"优先整理生活事项"}]}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}</ask_user>
             """)
         }
         guard !examples.isEmpty else { return "Examples: none" }
@@ -291,7 +291,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
                 "sensitivity": schema.sensitivity.rawValue,
                 "requires_confirmation": schema.sideEffect != .readOnly,
                 "required_parameters": required,
-                "call_template": callTemplate(for: schema),
+                "xml_tool_use_template": xmlCallTemplate(for: schema),
                 "parameters": schema.parameters.map { parameter in
                     [
                         "name": parameter.name,
@@ -322,6 +322,22 @@ struct LuminaAppReActPromptBuilder: Sendable {
             }),
             "requires_confirmation": schema.sideEffect != .readOnly
         ]
+    }
+
+    private func xmlCallTemplate(for schema: LuminaToolSchema) -> String {
+        let parameters = Dictionary(uniqueKeysWithValues: schema.parameters.map { parameter in
+            (parameter.name, placeholder(for: parameter))
+        })
+        let parameterJSON: String
+        if JSONSerialization.isValidJSONObject(parameters),
+           let data = try? JSONSerialization.data(withJSONObject: parameters, options: [.sortedKeys]),
+           let json = String(data: data, encoding: .utf8) {
+            parameterJSON = json
+        } else {
+            parameterJSON = "{}"
+        }
+        let confirmation = schema.sideEffect == .readOnly ? "false" : "true"
+        return #"<thought>why this tool is needed</thought><tool_use name="\#(schema.name)" requires_confirmation="\#(confirmation)">\#(parameterJSON)</tool_use>"#
     }
 
     private func placeholder(for parameter: LuminaToolParameterSchema) -> Any {
@@ -518,9 +534,9 @@ struct LuminaAppReActPromptBuilder: Sendable {
                     return "Runtime observation summary: \(observation.summary.truncated(to: 240))"
                 }
                 return "Runtime observation JSON: \(json)"
-            case .final:
-                guard let final = step.finalMarkdown else { return nil }
-                return "Final(model): \(final.truncated(to: 180))"
+            case .result:
+                guard let final = step.resultMarkdown else { return nil }
+                return "Result(model): \(final.truncated(to: 180))"
             }
         }
         let text = lines.joined(separator: "\n")

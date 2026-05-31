@@ -88,7 +88,7 @@ struct AgentRunTimelineView: View {
         if title.localizedCaseInsensitiveContains("observation") || title.contains("Observation") {
             return "Reading local context"
         }
-        if title.localizedCaseInsensitiveContains("final") || title.contains("完成") {
+        if title.localizedCaseInsensitiveContains("result") || title.contains("完成") {
             return "Done"
         }
         return title

@@ -9,6 +9,8 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private let lock = NSLock()
     private var plannerInputs: [String] = []
     private var events: [String] = []
+    private var traces: [String] = []
+    private var metrics: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
 
@@ -16,6 +18,8 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.lock()
         plannerInputs = []
         events = []
+        traces = []
+        metrics = []
         toolCallCount = 0
         modelCallCount = 0
         lock.unlock()
@@ -33,6 +37,18 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendTrace(_ value: String) {
+        lock.lock()
+        traces.append(value)
+        lock.unlock()
+    }
+
+    func appendMetric(_ value: String) {
+        lock.lock()
+        metrics.append(value)
+        lock.unlock()
+    }
+
     func incrementToolCallCount() {
         lock.lock()
         toolCallCount += 1
@@ -47,10 +63,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, toolCallCount, modelCallCount)
     }
 }
 
@@ -58,11 +74,23 @@ private func luminaRuntimeCString(_ value: String) -> UnsafeMutablePointer<CChar
     strdup(value)
 }
 
+private let luminaTraceCallback: LuminaAgentTraceCallback = { record, _ in
+    if let record {
+        LuminaRuntimeCaptureStore.shared.appendTrace(String(cString: record))
+    }
+}
+
+private let luminaMetricsCallback: LuminaAgentMetricsCallback = { metric, _ in
+    if let metric {
+        LuminaRuntimeCaptureStore.shared.appendMetric(String(cString: metric))
+    }
+}
+
 private let luminaFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
     if let plannerInput {
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
-    return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"final_answer\",\"thought\":\"done\",\"content\":\"## 完成\\n\\n已处理。\",\"completed\":true,\"requires_followup\":false}")
+    return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"done\",\"content\":\"## 完成\\n\\n已处理。\",\"completed\":true,\"requires_followup\":false}")
 }
 
 private let luminaAskUserModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -80,7 +108,7 @@ private let luminaAskThenFinalModelCallback: LuminaAgentModelCallback = { planne
     if call == 1 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"User answered.","content":"## 已继续\n\n收到你的回答，继续完成。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"User answered.","content":"## 已继续\n\n收到你的回答，继续完成。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaNeedsContextThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -91,7 +119,7 @@ private let luminaNeedsContextThenFinalModelCallback: LuminaAgentModelCallback =
     if call == 1 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-context","type":"reasoning","thought":"Need deeper context.","needs_more_context":true,"confidence":0.7,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -102,7 +130,7 @@ private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback 
     if call == 1 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Need focused calendar schema.","query":"calendar","category":"pim","max_results":2,"include_schemas":true,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -113,7 +141,7 @@ private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelC
     if call <= 2 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-open","type":"tool_use","thought":"Open the external surface once.","tool_name":"external.open","parameters":{"target":"compose","payload":"Hello"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -127,7 +155,7 @@ private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCal
     if call == 2 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-b","type":"tool_use","thought":"Lookup B.","tool_name":"data.lookup","parameters":{"query":"B"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDifferentIdempotencyKeysThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -141,7 +169,7 @@ private let luminaDifferentIdempotencyKeysThenFinalModelCallback: LuminaAgentMod
     if call == 2 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-two","type":"tool_use","thought":"Create second instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"two"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaAlwaysExecuteThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -152,7 +180,7 @@ private let luminaAlwaysExecuteThenFinalModelCallback: LuminaAgentModelCallback 
     if call <= 2 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-status","type":"tool_use","thought":"Read fresh status.","tool_name":"status.read","parameters":{"scope":"live"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -166,7 +194,7 @@ private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCal
     if call == 2 {
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-second","type":"tool_use","thought":"Call duplicate with reordered parameters.","tool_name":"canonical.action","parameters":{"a":"1","b":"2"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"final_answer","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
@@ -181,9 +209,9 @@ private let luminaStreamingModelCallback: LuminaAgentStreamingModelCallback = { 
     if let plannerInput {
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
-    _ = emit?(#"{"delta":"{\"type\":\"final_answer\"","tokenCount":3}"#, emitContext)
+    _ = emit?(#"{"delta":"{\"type\":\"result\"","tokenCount":3}"#, emitContext)
     _ = emit?(#"{"delta":",\"content\":\"done\"}","tokenCount":2}"#, emitContext)
-    return luminaRuntimeCString(#"model said: {"schema_version":"1.0","step_id":"s-stream","type":"final_answer","thought":"done","content":"done","completed":true,"requires_followup":false}"#)
+    return luminaRuntimeCString(#"model said: {"schema_version":"1.0","step_id":"s-stream","type":"result","thought":"done","content":"done","completed":true,"requires_followup":false}"#)
 }
 
 private let luminaEventCallback: LuminaAgentEventCallback = { event, _ in
@@ -211,6 +239,91 @@ final class LuminaRuntimeKernelTests: XCTestCase {
     override func setUp() {
         super.setUp()
         LuminaRuntimeCaptureStore.shared.reset()
+    }
+
+    func testCanonicalContractRejectsLegacyFinalAnswerType() {
+        let legacy = #"{"type":"final_answer","content":"done"}"#
+        let result = legacy.withCString { LuminaReActValidateStepJSON($0) }
+        defer { LuminaAgentRuntimeReleaseString(result) }
+        let text = result.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(text.contains(#""ok":false"#))
+        XCTAssertTrue(text.contains("unknown ReAct step type"))
+    }
+
+    func testXMLTagDialectNormalizesToCanonicalResultAndToolUse() {
+        let resultOutput = "<thought>done</thought><result>完成</result>"
+        let normalizedResult = resultOutput.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedResult) }
+        let resultText = normalizedResult.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(resultText.contains(#""ok":true"#))
+        XCTAssertTrue(resultText.contains(#"\"type\":\"result\""#))
+
+        let toolOutput = #"<thought>need time</thought><tool_use name="device.current_time">{}</tool_use>"#
+        let normalizedTool = toolOutput.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
+        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(toolText.contains(#""ok":true"#))
+        XCTAssertTrue(toolText.contains(#"\"type\":\"tool_use\""#))
+        XCTAssertTrue(toolText.contains(#"\"tool_name\":\"device.current_time\""#))
+
+        let sideEffectToolOutput = #"<thought>create it</thought><tool_use name="calendar.create" requires_confirmation="true">{"title":"Demo","startDateISO":"2026-05-31T12:00:00+08:00"}</tool_use>"#
+        let normalizedSideEffectTool = sideEffectToolOutput.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedSideEffectTool) }
+        let sideEffectToolText = normalizedSideEffectTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(sideEffectToolText.contains(#""ok":true"#))
+        XCTAssertTrue(sideEffectToolText.contains(#"\"requires_confirmation\":true"#))
+
+        let askUserOutput = #"<thought>need preference</thought><ask_user>{"reason":"缺少偏好","questions":[{"id":"p","question":"选哪个？"}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}</ask_user>"#
+        let normalizedAskUser = askUserOutput.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedAskUser) }
+        let askUserText = normalizedAskUser.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(askUserText.contains(#""ok":true"#))
+        XCTAssertTrue(askUserText.contains(#"\"type\":\"ask_user\""#))
+    }
+
+    func testObservabilitySinksAreOptionalAndIndependentlyRegistered() throws {
+        guard let silentRuntime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(silentRuntime) }
+        LuminaAgentRuntimeSetModelCallback(silentRuntime, luminaFinalModelCallback, nil)
+        var result = "{}".withCString { LuminaAgentRuntimeRun(silentRuntime, $0) }
+        if let result { LuminaAgentRuntimeReleaseString(result) }
+        XCTAssertTrue(LuminaRuntimeCaptureStore.shared.snapshot().traces.isEmpty)
+        XCTAssertTrue(LuminaRuntimeCaptureStore.shared.snapshot().metrics.isEmpty)
+
+        LuminaRuntimeCaptureStore.shared.reset()
+        guard let observableRuntime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(observableRuntime) }
+        LuminaAgentRuntimeSetModelCallback(observableRuntime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetTraceCallback(observableRuntime, luminaTraceCallback, nil)
+        LuminaAgentRuntimeSetMetricsCallback(observableRuntime, luminaMetricsCallback, nil)
+        result = "{}".withCString { LuminaAgentRuntimeRun(observableRuntime, $0) }
+        if let result { LuminaAgentRuntimeReleaseString(result) }
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertFalse(snapshot.traces.isEmpty)
+        XCTAssertFalse(snapshot.metrics.isEmpty)
+        XCTAssertTrue(snapshot.traces.contains { $0.contains("run_finished") })
     }
 
     func testTaskEnvelopeIsSemanticAndMultimodalWithoutRawRequest() throws {
@@ -554,7 +667,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
             tools: [tool],
             stepGenerator: ScriptedLuminaReActModel(steps: [
                 .action(thought: "search", call: LuminaToolCall(toolName: "local.search", arguments: [:])),
-                .final("done")
+                .result("done")
             ]),
             configuration: luminaTestRuntimeConfiguration
         )
@@ -599,7 +712,7 @@ private actor ScriptedLuminaReActModel: LuminaReActStepGenerator {
     }
 
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
-        guard !steps.isEmpty else { return .final("done") }
+        guard !steps.isEmpty else { return .result("done") }
         return steps.removeFirst()
     }
 }

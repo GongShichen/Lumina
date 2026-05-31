@@ -1,4 +1,4 @@
 {
-  "type": "final_answer",
+  "type": "result",
   "content": "### Cross-platform conformance\n\nRuntime callback path is alive."
 }

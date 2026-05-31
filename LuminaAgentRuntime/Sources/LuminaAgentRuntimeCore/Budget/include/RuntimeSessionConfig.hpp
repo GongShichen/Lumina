@@ -24,7 +24,7 @@ struct RuntimeSessionConfig {
     // Maximum model output tokens allowed by the caller/model adapter.
     int maxOutputTokens = 0;
 
-    // Tokens reserved for protocol overhead and final answer headroom.
+    // Tokens reserved for protocol overhead and result headroom.
     int reservedOutputTokens = 0;
 
     // Maximum characters retained from each runtime-owned observation summary.

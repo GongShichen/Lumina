@@ -13,8 +13,8 @@ extension LuminaReActStep {
             return #"{"type":"tool_use","thought":"\#(LuminaAgentRuntimeAdapterBox.escape(thought ?? ""))","tool_name":"\#(LuminaAgentRuntimeAdapterBox.escape(action.toolName))","parameters":\#(parameters),"requires_confirmation":\#(action.requiresConfirmation)}"#
         case .observation:
             return #"{"type":"reasoning","thought":"observation received","requires_followup":true}"#
-        case .final:
-            return #"{"type":"final_answer","thought":"\#(LuminaAgentRuntimeAdapterBox.escape(thought ?? "done"))","content":"\#(LuminaAgentRuntimeAdapterBox.escape(finalMarkdown ?? ""))","completed":true}"#
+        case .result:
+            return #"{"type":"result","thought":"\#(LuminaAgentRuntimeAdapterBox.escape(thought ?? "done"))","content":"\#(LuminaAgentRuntimeAdapterBox.escape(resultMarkdown ?? ""))","completed":true}"#
         }
     }
 }

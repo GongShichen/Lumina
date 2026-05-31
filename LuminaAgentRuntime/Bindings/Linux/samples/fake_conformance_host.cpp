@@ -17,7 +17,7 @@ char *copyCString(const std::string &value) {
 }
 
 char *fakeModelCallback(const char *, void *) {
-    return copyCString(R"({"type":"final_answer","content":"### Linux conformance\n\nRuntime callback path is alive."})");
+    return copyCString(R"({"type":"result","content":"### Linux conformance\n\nRuntime callback path is alive."})");
 }
 
 char *fakeToolCallback(const char *, void *) {

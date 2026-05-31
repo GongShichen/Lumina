@@ -11,6 +11,7 @@ struct AppEnvironment {
     var askUser: AskUserCoordinator
     var modelReadiness: LuminaModelReadinessStore
     var modelMetrics: LuminaModelInferenceMetricsStore
+    var localModelSelection: LuminaLocalModelSelectionStore
     var remoteInferenceSettings: LuminaRemoteInferenceSettingsStore
     var auditLogger: any LuminaAuditLogger
     var auditLogReader: (any LuminaAuditLogReader)?
@@ -27,6 +28,7 @@ struct AppEnvironment {
 
         let modelReadiness = LuminaModelReadinessStore()
         let modelMetrics = LuminaModelInferenceMetricsStore()
+        let localModelSelection = LuminaLocalModelSelectionStore()
         let remoteInferenceSettings = LuminaRemoteInferenceSettingsStore()
         let memoryRepository = LuminaJSONMemoryRepository(url: appSupport.appendingPathComponent("memory-index.json"))
         let memoryStore = LuminaMemoryStore(
@@ -52,6 +54,7 @@ struct AppEnvironment {
             askUser: AskUserCoordinator(),
             modelReadiness: modelReadiness,
             modelMetrics: modelMetrics,
+            localModelSelection: localModelSelection,
             remoteInferenceSettings: remoteInferenceSettings,
             auditLogger: auditLogger,
             auditLogReader: auditLogger,
@@ -59,6 +62,7 @@ struct AppEnvironment {
                 readinessStore: modelReadiness,
                 metricsStore: modelMetrics,
                 memoryStore: memoryStore,
+                localModelSelection: localModelSelection,
                 remoteSettings: remoteInferenceSettings
             ),
             contextProvider: LuminaEmptyRuntimeContextProvider(),

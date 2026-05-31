@@ -58,6 +58,7 @@ static std::string makeDedupKey(
         if (!callerKey.empty()) {
             return toolName + "\ncaller_key:" + callerKey;
         }
+        return toolName + "\ncaller_key:implicit";
     }
     return toolName + "\n" + canonicalParameters;
 }
@@ -206,7 +207,12 @@ std::string ToolExecutor::runToolCall(
     }
     callbacks_.emitEvent("tool_will_execute", redactedCallJson);
     HookDispatcher(callbacks_).dispatch("tool_will_execute", redactedCallJson);
+    callbacks_.span("start", "tool_execution", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + "}");
+    const auto toolStartedAt = std::chrono::steady_clock::now();
     std::string result = callbacks_.callTool(callJson);
+    const auto toolElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - toolStartedAt
+    ).count();
     if (trim(result).empty()) {
         result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool returned an empty result\"}";
     }
@@ -227,8 +233,12 @@ std::string ToolExecutor::runToolCall(
         "tool_callback_returned",
         "{\"tool_name\":" + jsonString(toolName) +
             ",\"call_id\":" + jsonString(callId) +
+            ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) +
             ",\"raw_result_excerpt\":" + jsonString(excerpt(result, 1200)) + "}"
     );
+    callbacks_.metric("tool_latency_ms", static_cast<double>(toolElapsedMs), "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + "}");
+    callbacks_.trace("tool_result", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + ",\"result_excerpt\":" + jsonString(excerpt(result, 1200)) + "}");
+    callbacks_.span("end", "tool_execution", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + "}");
 
     const std::string status = parsed ? stringField(resultFields, "status", "succeeded") : "succeeded";
     const std::string content = tools_.truncateResultContent(toolName, parsed ? stringField(resultFields, "content", result) : result);
@@ -257,6 +267,7 @@ std::string ToolExecutor::runToolCall(
         session.recordToolCallLedgerEntry(entry);
     }
     callbacks_.emitEvent("observation_created", observation);
+    callbacks_.trace("observation_created", "{\"tool_name\":" + jsonString(toolName) + ",\"call_id\":" + jsonString(callId) + ",\"observation\":" + observation + "}");
     HookDispatcher(callbacks_).dispatch("observation_created", observation);
     return result;
 }
@@ -294,7 +305,7 @@ std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::s
             observations << ",";
         }
         observations << runToolCall(session, toolName, parameters, false);
-        if (session.hasFinal()) {
+        if (session.hasResult()) {
             break;
         }
     }

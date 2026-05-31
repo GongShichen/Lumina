@@ -2,10 +2,10 @@ import XCTest
 @testable import LuminaAgentRuntimeApple
 
 final class ReActRuntimeTests: XCTestCase {
-    func testRuntimeExecutesReActActionObservationFinal() async {
+    func testRuntimeExecutesReActActionObservationResult() async {
         let model = ScriptedReActModel(steps: [
             .action(thought: "Need local context.", call: LuminaToolCall(toolName: "local.search", arguments: ["query": .string("coffee")])),
-            .final("### Done\n\nFound context.")
+            .result("### Done\n\nFound context.")
         ])
         let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
             LuminaToolResult(callID: UUID(), toolName: "local.search", status: .succeeded, content: [.markdown("### Result\n\n- coffee")])
@@ -41,7 +41,7 @@ final class ReActRuntimeTests: XCTestCase {
         let hook = RecordingRuntimeHook()
         let runtime = LuminaAgentRuntime(
             tools: [],
-            stepGenerator: ScriptedReActModel(steps: [.final("done")]),
+            stepGenerator: ScriptedReActModel(steps: [.result("done")]),
             configuration: luminaTestRuntimeConfiguration,
             hooks: [hook]
         )
@@ -50,7 +50,7 @@ final class ReActRuntimeTests: XCTestCase {
         let events = await hook.events
 
         XCTAssertEqual(result.status, .succeeded)
-        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .stepContextReady, .stepProduced, .finalGenerated]))
+        XCTAssertTrue(events.starts(with: [.runStarted, .contextLoaded, .stepContextReady, .stepProduced, .resultGenerated]))
         XCTAssertEqual(events.last, .runEnded)
     }
 
@@ -70,7 +70,7 @@ final class ReActRuntimeTests: XCTestCase {
     func testRuntimeHookFailureFailsRun() async {
         let runtime = LuminaAgentRuntime(
             tools: [],
-            stepGenerator: ScriptedReActModel(steps: [.final("done")]),
+            stepGenerator: ScriptedReActModel(steps: [.result("done")]),
             configuration: luminaTestRuntimeConfiguration,
             hooks: [FailingRuntimeHook()]
         )
@@ -146,7 +146,7 @@ final class ReActRuntimeTests: XCTestCase {
         let model = ScriptedReActModel(steps: [
             .action(thought: "Try delete.", call: LuminaToolCall(toolName: "calendar.delete", arguments: [:])),
             .action(thought: "Repeat delete.", call: LuminaToolCall(toolName: "calendar.delete", arguments: [:])),
-            .final("done")
+            .result("done")
         ])
         let runtime = LuminaAgentRuntime(
             tools: [tool],
@@ -181,7 +181,7 @@ final class ReActRuntimeTests: XCTestCase {
         let model = ScriptedReActModel(steps: [
             .action(thought: "Create.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "dueDateISO": .string("2026-06-15T08:00:00Z")])),
             .action(thought: "Try again with drifted date.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "dueDateISO": .string("2026-06-16T08:00:00Z")])),
-            .final("done")
+            .result("done")
         ])
         let runtime = LuminaAgentRuntime(
             tools: [tool],
@@ -217,7 +217,7 @@ final class ReActRuntimeTests: XCTestCase {
         let model = ScriptedReActModel(steps: [
             .action(thought: "Create first.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "instance_id": .string("one")])),
             .action(thought: "Create second.", call: LuminaToolCall(toolName: "reminder.create", arguments: ["title": .string("LuminaTest"), "instance_id": .string("two")])),
-            .final("done")
+            .result("done")
         ])
         let runtime = LuminaAgentRuntime(
             tools: [tool],
@@ -244,13 +244,13 @@ final class ReActRuntimeTests: XCTestCase {
     func testReActParserParsesStandardFinalAnswerShape() throws {
         let step = try LuminaReActStepParser.parse(
             json: """
-            {"type":"final_answer","content":"## 完成\\n\\n已处理。"}
+            {"type":"result","content":"## 完成\\n\\n已处理。"}
             """,
             availableTools: []
         )
 
-        XCTAssertEqual(step.kind, .final)
-        XCTAssertEqual(step.finalMarkdown, "## 完成\n\n已处理。")
+        XCTAssertEqual(step.kind, .result)
+        XCTAssertEqual(step.resultMarkdown, "## 完成\n\n已处理。")
     }
 
     func testReActParserAcceptsCompleteStructuredTransportSteps() throws {
@@ -277,8 +277,8 @@ final class ReActRuntimeTests: XCTestCase {
             """,
             availableTools: []
         )
-        XCTAssertEqual(cannotComplete.kind, .final)
-        XCTAssertTrue(cannotComplete.finalMarkdown?.contains("缺少权限") == true)
+        XCTAssertEqual(cannotComplete.kind, .result)
+        XCTAssertTrue(cannotComplete.resultMarkdown?.contains("缺少权限") == true)
     }
 
     func testReActParserRejectsLegacyActionShape() throws {
@@ -338,7 +338,7 @@ final class ReActRuntimeTests: XCTestCase {
         ))
     }
 
-    func testIterationLimitReturnsMarkdownFinal() async {
+    func testIterationLimitReturnsMarkdownResult() async {
         let model = ScriptedReActModel(steps: [.thought("still thinking"), .thought("again")])
         let runtime = LuminaAgentRuntime(
             tools: [],
@@ -432,7 +432,7 @@ final class AgentRuntimePerformanceTests: XCTestCase {
         for _ in 0..<20 {
             let model = ScriptedReActModel(steps: [
                 .action(thought: "search", call: LuminaToolCall(toolName: "local.search", arguments: [:])),
-                .final("done")
+                .result("done")
             ])
             let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model, configuration: luminaTestRuntimeConfiguration)
             let start = ContinuousClock.now
@@ -466,7 +466,7 @@ private actor ScriptedReActModel: LuminaReActStepGenerator {
     }
 
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
-        guard !steps.isEmpty else { return .final("done") }
+        guard !steps.isEmpty else { return .result("done") }
         return steps.removeFirst()
     }
 }
@@ -476,7 +476,7 @@ private struct SlowReActModel: LuminaReActStepGenerator {
 
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         try await Task.sleep(nanoseconds: delayNanoseconds)
-        return .final("done")
+        return .result("done")
     }
 }
 
@@ -494,7 +494,7 @@ private struct StaticReActModel: LuminaReActStepGenerator {
                 let summary = observation.summary.trimmingCharacters(in: .whitespacesAndNewlines)
                 return summary.hasPrefix("#") ? summary : "### \(observation.toolName)\n\n\(summary)"
             }.joined(separator: "\n\n")
-            return .final("## 执行结果\n\n\(markdown)")
+            return .result("## 执行结果\n\n\(markdown)")
         }
         return .action(thought: "static", call: LuminaToolCall(toolName: toolName, arguments: [:]))
     }
@@ -521,7 +521,7 @@ private actor CountingContextProvider: LuminaRuntimeContextProvider {
 
 private struct ContextAwareReActModel: LuminaReActStepGenerator {
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
-        LuminaReActStep(kind: .final, finalMarkdown: context.loadedContext.sections.first?.summary ?? "missing context")
+        LuminaReActStep(kind: .result, resultMarkdown: context.loadedContext.sections.first?.summary ?? "missing context")
     }
 }
 
@@ -570,7 +570,7 @@ private struct FailingRuntimeHook: LuminaAgentRuntimeHook {
 private struct BudgetAwareReActModel: LuminaReActStepGenerator {
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         guard context.trace.actionCount < 2 else {
-            return .final("done compactions=\(context.trace.compactionCount)")
+            return .result("done compactions=\(context.trace.compactionCount)")
         }
         return .action(
             thought: "search",

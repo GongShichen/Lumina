@@ -83,6 +83,13 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
            let standard = LuminaReActTransport.extractFirstStandardJSONObject(from: fenced) {
             return standard
         }
+        if let fenced = extractFencedJSON(from: trimmed),
+           let normalized = LuminaReActTransport.normalizeXMLTags(from: fenced) {
+            return normalized
+        }
+        if let normalized = LuminaReActTransport.normalizeXMLTags(from: trimmed) {
+            return normalized
+        }
         throw LuminaMiniCPMV46ReActModelError.missingJSONObject(generated)
     }
 
@@ -139,6 +146,11 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
                 maxOutputTokens: maxNewTokens,
                 safetyMarginTokens: configuration.outputSafetyMarginTokens
             )
+
+            print("[Lumina][NativeEngine] Response ok: \(response.ok), output length: \(response.output?.count ?? 0), error: \(response.error ?? "none")")
+            if let output = response.output {
+                print("[Lumina][NativeEngine] Raw output: \(output)")
+            }
 
             configuration.metricsRecorder?(LuminaModelInferenceMetrics(
                 modelName: "MiniCPM-V 4.6",

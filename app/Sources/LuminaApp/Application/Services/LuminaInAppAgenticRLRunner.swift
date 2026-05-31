@@ -46,7 +46,7 @@ final class LuminaInAppAgenticRLRunner {
         total: Int,
         progress: @escaping ProgressHandler
     ) async -> (LuminaAgentRunResult, LuminaObservedRunTimings) {
-        var finalResult: LuminaAgentRunResult?
+        var runResult: LuminaAgentRunResult?
         var observer = LuminaRunStreamObserver()
         var latestPromptTokens: Int?
         var latestSampledTokens = 0
@@ -112,11 +112,11 @@ final class LuminaInAppAgenticRLRunner {
                 ))
             }
             if case let .finished(result) = event {
-                finalResult = result
+                runResult = result
             }
         }
-        if let finalResult {
-            return (finalResult, observer.finish(result: finalResult))
+        if let runResult {
+            return (runResult, observer.finish(result: runResult))
         }
         let cancelled = LuminaAgentRunResult(
             requestID: UUID(),
@@ -149,7 +149,7 @@ final class LuminaInAppAgenticRLRunner {
         let recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         let f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
         let reward = result.status == .succeeded ? min(1, 0.35 + 0.65 * f1) : 0
-        let final = result.reactTrace?.steps.last(where: { $0.kind == .final })?.finalMarkdown ?? result.plan.summary
+        let final = result.reactTrace?.steps.last(where: { $0.kind == .result })?.resultMarkdown ?? result.plan.summary
         return LuminaAgenticRLTrajectoryRecord(
             id: "\(task.id)-\(result.requestID.uuidString)",
             schemaVersion: "lumina.agentic_rl.v1",
@@ -162,7 +162,7 @@ final class LuminaInAppAgenticRLRunner {
                 difficulty: task.difficulty,
                 cleanupPrefixes: task.cleanupPrefixes
             ),
-            environment: .init(app: "Lumina", runtime: "ReAct", schemaVersion: "standard_tool_use_final_answer", localOnly: true),
+            environment: .init(app: "Lumina", runtime: "ReAct", schemaVersion: "standard_tool_use_result", localOnly: true),
             messages: [
                 .init(role: "user", content: task.instruction),
                 .init(role: "assistant", content: final)

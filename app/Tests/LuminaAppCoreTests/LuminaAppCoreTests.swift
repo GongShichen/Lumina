@@ -714,7 +714,7 @@ private func collectReActCalls(
             guard let call = step.action else { return calls }
             calls.append(call)
             trace.steps.append(step)
-        case .final:
+        case .result:
             return calls
         case .thought, .observation:
             trace.steps.append(step)
@@ -730,7 +730,7 @@ private struct LuminaFixedReActModel: LuminaReActStepGenerator {
         try Task.checkCancellation()
         let index = context.trace.actionCount
         guard index < calls.count else {
-            return .final("## 完成\n\n测试 model 已完成指定工具调用。")
+            return .result("## 完成\n\n测试 model 已完成指定工具调用。")
         }
         return .action(thought: "Test model selected \(calls[index].toolName).", call: calls[index])
     }

@@ -3,17 +3,17 @@ import Foundation
 public enum LuminaReActSchema {
     public static let thoughtExample = #"{"type":"thought","thought":"brief status"}"#
     public static let toolUseExample = #"{"type":"tool_use","thought":"why this tool","tool_name":"exact tool name","parameters":{},"requires_confirmation":false}"#
-    public static let finalAnswerExample = #"{"type":"final_answer","thought":"done","content":"concise markdown answer"}"#
+    public static let resultExample = #"{"type":"result","thought":"done","content":"concise markdown answer"}"#
 
     public static let promptContract = """
     Output exactly one JSON object and no prose outside JSON.
     ReAct step schema:
     Thought: \(thoughtExample)
     Tool use: \(toolUseExample)
-    Final: \(finalAnswerExample)
+    Result: \(resultExample)
 
     Schema rules:
-    - type must be one of thought, tool_use, final_answer.
+    - type must be one of thought, tool_use, result.
     - For tools, type must be the literal string "tool_use"; never put a tool name in type.
     - tool_use uses top-level tool_name and parameters.
     - tool_name contains the exact tool name. parameters contains the JSON object passed to the tool.
@@ -27,15 +27,14 @@ public enum LuminaReActSchema {
     """
 
     public static let compactPromptContract = """
-    CRITICAL OUTPUT CONTRACT: Return one JSON object only. No prose.
-    The only valid ReAct JSON shapes are:
-    {"type":"tool_use","thought":"...","tool_name":"tool.name","parameters":{},"requires_confirmation":false}
-    {"type":"final_answer","thought":"...","content":"markdown"}
-    type is only "tool_use" or "final_answer".
-    For tools, use exactly these top-level keys: type, thought, tool_name, parameters, requires_confirmation.
-    Forbidden keys/values: tool_call, function, args, arguments, input, targetReference, action, toolUse, name.
-    If you want a tool, type must be "tool_use"; the exact tool goes in tool_name; inputs go in parameters.
-    Use only tool_name from Tools(all). Never output observation; observations are runtime-only. No markdown fences.
+    CRITICAL OUTPUT CONTRACT: Return one XML-tag ReAct step only. No prose.
+    The only valid ReAct XML shapes are:
+    <thought>why</thought><tool_use name="tool.name" requires_confirmation="false">{}</tool_use>
+    <thought>done</thought><result>markdown</result>
+    <thought>blocked</thought><cannot_complete>reason</cannot_complete>
+    For tools, put the exact tool name in the name attribute and put only the JSON parameters object inside the tag.
+    Forbidden keys/values: tool_call, function, args, arguments, input, targetReference, action, toolUse.
+    Use only tool names from Tools(all). Never output observation; observations are runtime-only. No markdown fences.
     """
 
     public static func repairPrompt(
@@ -65,12 +64,12 @@ public enum LuminaReActSchema {
 
         Valid output shapes:
         {"type":"tool_use","thought":"short reason","tool_name":"EXACT_TOOL_NAME","parameters":{},"requires_confirmation":false}
-        {"type":"final_answer","thought":"done","content":"concise markdown answer"}
+        {"type":"result","thought":"done","content":"concise markdown answer"}
         {"type":"cannot_complete","thought":"blocked","reason":"short recoverable reason"}
 
         Repair rules:
         - If a tool is still needed, use type="tool_use"; put the exact tool name in tool_name; put only tool parameters in parameters.
-        - If the latest runtime observation already satisfies the user task, use final_answer.content as user-facing Markdown.
+        - If the latest runtime observation already satisfies the user task, use result.content as user-facing Markdown.
         - Never output observation; observations are runtime-owned.
         - Never repeat an identical tool call that the latest observation says already succeeded or was replayed.
         - Never output keys named tool_call, tool_use, function, args, arguments, input, targetReference, action, name, duration, or command.

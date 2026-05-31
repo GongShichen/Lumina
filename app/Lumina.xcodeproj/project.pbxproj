@@ -206,6 +206,9 @@
 		B2FCAC92D8192168AC48D555 /* MarkdownListItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B6B7C55DB8525108F4271F8 /* MarkdownListItem.swift */; };
 		B39B9EEC8D3621878D8E1D1C /* MultimodalAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = B504BF03D63B18510A5DF41C /* MultimodalAttachment.swift */; };
 		B3F46F4A5D377F3F4171C0FF /* LocalModelBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C96BA688258C57F97EA33D8 /* LocalModelBootstrap.swift */; };
+		FD309D548BB9A08824B12F21 /* LuminaSelectableLocalReActStepGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 074A77685A4CC7B9D948615F /* LuminaSelectableLocalReActStepGenerator.swift */; };
+		E42C6CB137E4C036E59E5EA1 /* LuminaLocalModelSelectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A84D1BC98F10AB29605256DB /* LuminaLocalModelSelectionStore.swift */; };
+		733FB61F7EAC86C63FE09586 /* LuminaLocalModelSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98B613E4774459D396FCE539 /* LuminaLocalModelSelection.swift */; };
 		B4F5074591006923D5EB617E /* LuminaAppPromptProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29AC69FF6A6A3611DD031297 /* LuminaAppPromptProfile.swift */; };
 		B562C7E62BB1098DC0688BF1 /* LuminaModelBackedReActStepGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CCDF7B568E73C6D9CDE431E /* LuminaModelBackedReActStepGenerator.swift */; };
 		B8B8B21B59EAD737E66B3B13 /* LuminaAgenticRLSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A51E3F4DFAEAD69BE37682C /* LuminaAgenticRLSnapshot.swift */; };
@@ -553,6 +556,9 @@
 		99AED9772CA9ED077D3F3456 /* LuminaAgentActivityCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaAgentActivityCenter.swift; sourceTree = "<group>"; };
 		9AF238BCA06580E084B4E0FC /* LuminaLedgerRecordTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaLedgerRecordTool.swift; sourceTree = "<group>"; };
 		9C96BA688258C57F97EA33D8 /* LocalModelBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelBootstrap.swift; sourceTree = "<group>"; };
+		074A77685A4CC7B9D948615F /* LuminaSelectableLocalReActStepGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaSelectableLocalReActStepGenerator.swift; sourceTree = "<group>"; };
+		A84D1BC98F10AB29605256DB /* LuminaLocalModelSelectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaLocalModelSelectionStore.swift; sourceTree = "<group>"; };
+		98B613E4774459D396FCE539 /* LuminaLocalModelSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaLocalModelSelection.swift; sourceTree = "<group>"; };
 		9CBD3F917EE967C1F229FEC2 /* LuminaLocalSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaLocalSearchTool.swift; sourceTree = "<group>"; };
 		9D4CB940D23B4A907460C6A0 /* MarkdownDirectiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDirectiveView.swift; sourceTree = "<group>"; };
 		A0B59E7C7260B4A6B52B4A85 /* LuminaVolatileCalendarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaVolatileCalendarStore.swift; sourceTree = "<group>"; };
@@ -1064,6 +1070,9 @@
 				CFEA6F87FFBB0107696F6A6C /* ConfirmationRequest.swift */,
 				7B17A1AD7218D69E36DF7D4F /* HomePersonalizationAgent.swift */,
 				9C96BA688258C57F97EA33D8 /* LocalModelBootstrap.swift */,
+				074A77685A4CC7B9D948615F /* LuminaSelectableLocalReActStepGenerator.swift */,
+				A84D1BC98F10AB29605256DB /* LuminaLocalModelSelectionStore.swift */,
+				98B613E4774459D396FCE539 /* LuminaLocalModelSelection.swift */,
 				99AED9772CA9ED077D3F3456 /* LuminaAgentActivityCenter.swift */,
 				333BC0EDDD2AFCFC61AB96C6 /* LuminaAgentActivitySnapshot.swift */,
 				C1B1A0EE88C648314D44A25D /* LuminaAgentActivityState.swift */,
@@ -1760,6 +1769,9 @@
 				C7B67B6DE57F8785D588FB66 /* HomeSuggestion.swift in Sources */,
 				018ED420F62BF244BF087119 /* LocalImageView.swift in Sources */,
 				B3F46F4A5D377F3F4171C0FF /* LocalModelBootstrap.swift in Sources */,
+				FD309D548BB9A08824B12F21 /* LuminaSelectableLocalReActStepGenerator.swift in Sources */,
+				E42C6CB137E4C036E59E5EA1 /* LuminaLocalModelSelectionStore.swift in Sources */,
+				733FB61F7EAC86C63FE09586 /* LuminaLocalModelSelection.swift in Sources */,
 				345D8D34ABB19B5D02626642 /* LuminaAgentActivityCenter.swift in Sources */,
 				10741061F60C3D3F6724A17F /* LuminaAgentActivitySnapshot.swift in Sources */,
 				F0DE01A76E7F46374092E18B /* LuminaAgentActivityState.swift in Sources */,

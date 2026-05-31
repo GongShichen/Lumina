@@ -3,7 +3,7 @@
 namespace LuminaAgent {
 
 std::string reactStepSchemaJson() {
-    return R"({"schema_version":"1.0","allowed_step_types":["reasoning","tool_discovery","tool_use","multi_tool_use","ask_user","final_answer","cannot_complete"],"rules":["Return exactly one JSON object.","Never emit observations; observations are runtime-owned.","final_answer.content must be Markdown.","tool_use.parameters must be a JSON object.","multi_tool_use may only contain read-only tools.","tool_discovery only returns schema metadata."]})";
+    return R"({"schema_version":"1.0","allowed_step_types":["reasoning","tool_discovery","tool_use","multi_tool_use","ask_user","result","cannot_complete"],"rules":["Return exactly one JSON object.","Never emit observations; observations are runtime-owned.","result.content must be Markdown.","tool_use.parameters must be a JSON object.","multi_tool_use may only contain read-only tools.","tool_discovery only returns schema metadata."]})";
 }
 
 std::string taskEnvelopeSchemaJson() {
@@ -87,7 +87,7 @@ std::string runEventSchemaJson() {
 }
 
 std::string runResultSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","fields":{"ok":"boolean","status":"string","finalMarkdown":"string","terminationReason":"string","trace":"Trace","timing":"object"}})";
+    return R"({"schema_version":"1.0","type":"object","fields":{"ok":"boolean","status":"string","resultMarkdown":"string","terminationReason":"string","trace":"Trace","timing":"object"}})";
 }
 
 std::string auditRecordSchemaJson() {

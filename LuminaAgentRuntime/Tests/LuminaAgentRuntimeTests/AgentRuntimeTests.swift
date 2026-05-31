@@ -272,7 +272,7 @@ private struct FixedReActModel: LuminaReActStepGenerator {
 
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         let index = context.trace.actionCount
-        guard index < calls.count else { return .final("done") }
+        guard index < calls.count else { return .result("done") }
         return .action(thought: "Fixed ReAct test step", call: calls[index])
     }
 }

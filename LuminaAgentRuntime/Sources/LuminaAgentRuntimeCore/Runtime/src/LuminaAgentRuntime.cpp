@@ -109,6 +109,36 @@ extern "C" void LuminaAgentRuntimeSetAuditCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetTraceCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentTraceCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setTraceCallback(callback, user_context);
+    }
+}
+
+extern "C" void LuminaAgentRuntimeSetMetricsCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentMetricsCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setMetricsCallback(callback, user_context);
+    }
+}
+
+extern "C" void LuminaAgentRuntimeSetSpanCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentSpanCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setSpanCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetRollbackCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentRollbackCallback callback,
@@ -189,6 +219,13 @@ extern "C" char *LuminaAgentRuntimeCancelSession(
     return LuminaAgent::copyCString(session->session.snapshotJson());
 }
 
+extern "C" char *LuminaAgentRuntimeSnapshotSession(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.snapshotJson());
+}
+
 extern "C" void LuminaAgentRuntimeDestroySession(LuminaAgentRuntimeSessionRef *session) {
     delete session;
 }
@@ -225,6 +262,22 @@ extern "C" char *LuminaReActExtractFirstStandardObject(const char *text) {
         return LuminaAgent::failureResponse("no standard ReAct JSON object found.");
     }
     return LuminaAgent::successResponse(object);
+}
+
+extern "C" char *LuminaReActNormalizeStepText(const char *text, const char *dialect) {
+    if (text == nullptr) {
+        return LuminaAgent::failureResponse("missing text input.");
+    }
+    std::string error;
+    const std::string normalized = LuminaAgent::normalizeReActStepText(
+        std::string(text),
+        dialect == nullptr ? "canonical_json" : std::string(dialect),
+        error
+    );
+    if (normalized.empty()) {
+        return LuminaAgent::failureResponse(error.empty() ? "could not normalize model output." : error);
+    }
+    return LuminaAgent::successResponse(normalized);
 }
 
 extern "C" void LuminaReActFreeCString(char *value) {

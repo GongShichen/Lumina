@@ -19,7 +19,7 @@ Runtime 将模型输出转换为结构化 ReAct step，校验 step，按工具 s
 
 ## Runtime 架构
 
-Runtime 包含 session loop、planner input builder、ReAct transport、tool registry、tool executor、context/budget manager、trace recorder、audit/event callbacks、contract export，以及 status/cancellation 处理。Core loop 支持 reasoning、tool discovery、tool use、只读 multi-tool use、ask_user、final answer 和 cannot-complete 状态。
+Runtime 包含 session loop、planner input builder、ReAct transport、tool registry、tool executor、context/budget manager、trace recorder、audit/event callbacks、contract export，以及 status/cancellation 处理。Core loop 支持 reasoning、tool discovery、tool use、只读 multi-tool use、ask_user、result 和 cannot-complete 状态。
 
 宿主应用只需要提供模型适配器、工具实现、上下文加载、权限/确认策略和事件消费。Runtime 负责把这些能力组织成一次可控、可审计、可回放的 Agent 执行过程。
 
@@ -30,7 +30,7 @@ Runtime 包含 session loop、planner input builder、ReAct transport、tool reg
 3. Model adapter 返回结构化 ReAct step。
 4. Runtime 校验 step，执行 permission / confirmation 策略，并调度工具调用。
 5. 工具结果被校验、审计脱敏、按策略去重回放，并转换成 observation。
-6. Observation 进入下一轮规划，直到 final answer、failure 或 cancellation。
+6. Observation 进入下一轮规划，直到 result、failure 或 cancellation。
 
 ## 开箱即用
 

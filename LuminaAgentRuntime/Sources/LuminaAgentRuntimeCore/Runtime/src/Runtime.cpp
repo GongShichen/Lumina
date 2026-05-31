@@ -28,7 +28,7 @@ static bool applyHookDirective(RuntimeSession &session, const std::string &direc
     if (!parseFieldsOrEmpty(directiveJson, fields) || !boolField(fields, "terminate", false)) {
         return false;
     }
-    session.failWithFinal(
+    session.failWithResult(
         stringField(fields, "reason", "hook terminated run"),
         stringField(fields, "markdown", "### 已终止\n\nRuntime hook terminated this run.")
     );
@@ -119,6 +119,18 @@ void Runtime::setAuditCallback(LuminaAgentAuditCallback callback, void *context)
     callbacks_.setAudit(callback, context);
 }
 
+void Runtime::setTraceCallback(LuminaAgentTraceCallback callback, void *context) {
+    callbacks_.setTrace(callback, context);
+}
+
+void Runtime::setMetricsCallback(LuminaAgentMetricsCallback callback, void *context) {
+    callbacks_.setMetrics(callback, context);
+}
+
+void Runtime::setSpanCallback(LuminaAgentSpanCallback callback, void *context) {
+    callbacks_.setSpan(callback, context);
+}
+
 void Runtime::setRollbackCallback(LuminaAgentRollbackCallback callback, void *context) {
     callbacks_.setRollback(callback, context);
 }
@@ -133,7 +145,7 @@ void Runtime::setHookCallback(LuminaAgentHookCallback callback, void *context) {
 
 std::string Runtime::run(const char *requestJson) {
     if (!sessionConfig_.isConfigured) {
-        return "{\"ok\":false,\"status\":\"failed\",\"finalMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
     }
     RuntimeSession session(sessionConfig_);
     return runSession(session, requestJson, false);
@@ -141,22 +153,24 @@ std::string Runtime::run(const char *requestJson) {
 
 std::string Runtime::runSession(RuntimeSession &session, const char *requestJson, bool allowPause) {
     if (!sessionConfig_.isConfigured) {
-        return "{\"ok\":false,\"status\":\"failed\",\"finalMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
     }
     if (requestJson == nullptr) {
-        return "{\"ok\":false,\"status\":\"failed\",\"finalMarkdown\":\"### 无法执行\\n\\n缺少请求 JSON。\"}";
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\n缺少请求 JSON。\"}";
     }
     if (!callbacks_.hasModel() && !callbacks_.hasStreamingModel()) {
-        return "{\"ok\":false,\"status\":\"failed\",\"finalMarkdown\":\"### 无法执行\\n\\n没有可用的模型回调。\"}";
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\n没有可用的模型回调。\"}";
     }
 
     cancelled_ = false;
-    RuntimeEventQueue events(callbacks_);
+    RuntimeEventQueue events(callbacks_, session.sessionId(), session.runId());
     ExecutionContext execution(session, sessionConfig_, tools_, callbacks_, events);
     const std::string request = session.requestJson().empty() ? trim(requestJson) : session.requestJson();
     execution.setRequestJson(request);
+    callbacks_.span("start", "run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     events.emitEvent("run_started", request.empty() ? "{}" : request);
     callbacks_.audit("run_started", request.empty() ? "{}" : request);
+    callbacks_.trace("run_started", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"request\":" + (request.empty() ? "{}" : request) + "}");
     if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("run_started", request.empty() ? "{}" : request))) {
         return session.finishIfNeeded();
     }
@@ -180,7 +194,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         const ContextBudgetSnapshot budgetSnapshot = execution.budgetManager().snapshotFor(request, contextJson, session.stepsSummaryJson(), lastObservation);
         session.setContextTokenUsageEstimate(budgetSnapshot.usedTokens);
         if (budgetSnapshot.overWindow && !execution.budgetManager().canAttemptCompact(session.compactFailureCount())) {
-            session.failWithFinal("context-budget", "### 无法继续\n\n上下文超过调用方配置的窗口，且 auto compact 已达到失败上限。");
+            session.failWithResult("context-budget", "### 无法继续\n\n上下文超过调用方配置的窗口，且 auto compact 已达到失败上限。");
             break;
         }
         const std::string plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
@@ -198,7 +212,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         const std::string stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
         if (trim(stepJson).empty()) {
             events.emitEvent("model_generation_failed", "{\"reason\":\"empty-or-invalid-step\"}");
-            session.failWithFinal("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
+            session.failWithResult("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
             break;
         }
 
@@ -209,7 +223,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 "{\"reason\":\"invalid-step\",\"error\":" + jsonString(error) +
                     ",\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"
             );
-            session.failWithFinal("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
+            session.failWithResult("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
             break;
         }
 
@@ -222,8 +236,9 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         }
         const std::string recordJson = session.recordStep(stepJson);
         callbacks_.audit("step_recorded", recordJson);
+        callbacks_.trace("step_recorded", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
 
-        if (type == "final_answer" || type == "cannot_complete") {
+        if (type == "result" || type == "cannot_complete") {
             break;
         }
         if (type == "reasoning") {
@@ -240,7 +255,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 }
             }
             if (session.consecutiveReasoningCount() >= session.maximumConsecutiveReasoningSteps()) {
-                session.failWithFinal("reasoning-budget", "### 无法继续\n\n模型连续输出 reasoning，已达到空转保护上限。");
+                session.failWithResult("reasoning-budget", "### 无法继续\n\n模型连续输出 reasoning，已达到空转保护上限。");
                 break;
             }
             continue;
@@ -316,9 +331,11 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         "{\"status\":" + jsonString(runStatusName(session.status())) +
             ",\"snapshot\":" + session.snapshotJson() + "}"
     );
-    HookDispatcher(callbacks_).dispatch("final_generated", finished);
+    HookDispatcher(callbacks_).dispatch("result_generated", finished);
     events.emitEvent("run_finished", finished);
     callbacks_.audit("run_finished", finished);
+    callbacks_.trace("run_finished", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"result\":" + finished + "}");
+    callbacks_.span("end", "run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
     HookDispatcher(callbacks_).dispatch("run_finished", finished);
     return finished;
 }

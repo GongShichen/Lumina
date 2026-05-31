@@ -1,5 +1,6 @@
 #include "ReAct.hpp"
 
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,7 @@ bool validateReActStepObject(const std::string &json, bool requireKnownType, std
                 "query", "category", "max_results", "include_schemas",
                 "questions", "reason", "sensitivity", "timeout_seconds",
                 "allow_custom_answer", "content", "citations", "completed",
-                "recoverable_actions"
+                "structured_content", "artifacts", "recoverable_actions"
             },
             error
         )) {
@@ -113,13 +114,13 @@ bool validateReActStepObject(const std::string &json, bool requireKnownType, std
         return true;
     }
 
-    if (type == "final_answer") {
-        if (!hasAllowedKeys(fields, {"schema_version", "step_id", "type", "thought", "requires_followup", "content", "citations", "completed"}, error)) {
-            error = "final_answer may only contain schema_version, step_id, type, thought, requires_followup, content, citations, and completed.";
+    if (type == "result") {
+        if (!hasAllowedKeys(fields, {"schema_version", "step_id", "type", "thought", "requires_followup", "content", "structured_content", "artifacts", "citations", "completed"}, error)) {
+            error = "result may only contain schema_version, step_id, type, thought, requires_followup, content, structured_content, artifacts, citations, and completed.";
             return false;
         }
         if (fields.find("content") == fields.end() || fields["content"].kind != JsonKind::string) {
-            error = "final_answer requires a string content field.";
+            error = "result requires a string content field.";
             return false;
         }
         return true;
@@ -149,6 +150,154 @@ std::string firstValidReActStepObject(const std::string &text) {
             return object;
         }
     }
+    return "";
+}
+
+static std::string tagValue(const std::string &text, const std::string &tag) {
+    const std::string open = "<" + tag + ">";
+    const std::string close = "</" + tag + ">";
+    const size_t start = text.find(open);
+    if (start == std::string::npos) {
+        return "";
+    }
+    const size_t valueStart = start + open.size();
+    const size_t end = text.find(close, valueStart);
+    if (end == std::string::npos) {
+        return "";
+    }
+    return trim(text.substr(valueStart, end - valueStart));
+}
+
+static std::string xmlAttributeValue(const std::string &header, const std::string &name) {
+    const std::string key = name + "=\"";
+    const size_t start = header.find(key);
+    if (start == std::string::npos) {
+        return "";
+    }
+    const size_t valueStart = start + key.size();
+    const size_t valueEnd = header.find("\"", valueStart);
+    if (valueEnd == std::string::npos) {
+        return "";
+    }
+    return header.substr(valueStart, valueEnd - valueStart);
+}
+
+static std::string toolUseTagValue(
+    const std::string &text,
+    std::string &toolName,
+    bool &requiresConfirmation,
+    bool &hasRequiresConfirmation
+) {
+    const std::string open = "<tool_use";
+    const size_t start = text.find(open);
+    if (start == std::string::npos) {
+        return "";
+    }
+    const size_t openEnd = text.find(">", start);
+    if (openEnd == std::string::npos) {
+        return "";
+    }
+    const std::string header = text.substr(start, openEnd - start + 1);
+    toolName = xmlAttributeValue(header, "name");
+    std::string confirmation = lowercased(xmlAttributeValue(header, "requires_confirmation"));
+    if (confirmation.empty()) {
+        confirmation = lowercased(xmlAttributeValue(header, "requires-confirmation"));
+    }
+    if (!confirmation.empty()) {
+        hasRequiresConfirmation = true;
+        requiresConfirmation = confirmation == "true" || confirmation == "1" || confirmation == "yes";
+    }
+    const std::string close = "</tool_use>";
+    const size_t valueStart = openEnd + 1;
+    const size_t end = text.find(close, valueStart);
+    if (end == std::string::npos) {
+        return "";
+    }
+    return trim(text.substr(valueStart, end - valueStart));
+}
+
+static std::string normalizeXmlTags(const std::string &text, std::string &error) {
+    if (text.find("<observation") != std::string::npos || text.find("<tool_result") != std::string::npos) {
+        error = "model output may not contain runtime-owned observation/tool_result tags.";
+        return "";
+    }
+    const std::string thought = tagValue(text, "thought");
+    std::string toolName;
+    bool requiresConfirmation = false;
+    bool hasRequiresConfirmation = false;
+    const std::string toolParameters = toolUseTagValue(text, toolName, requiresConfirmation, hasRequiresConfirmation);
+    if (!toolName.empty()) {
+        const std::string parameters = toolParameters.empty() ? "{}" : toolParameters;
+        std::map<std::string, JsonField> fields;
+        if (!parseFieldsOrEmpty(parameters, fields)) {
+            error = "tool_use tag content must be a JSON object.";
+            return "";
+        }
+        return "{\"type\":\"tool_use\",\"thought\":" + jsonString(thought) +
+            ",\"tool_name\":" + jsonString(toolName) +
+            ",\"parameters\":" + parameters +
+            (hasRequiresConfirmation ? ",\"requires_confirmation\":" + jsonBool(requiresConfirmation) : "") +
+            "}";
+    }
+    const std::string askUser = tagValue(text, "ask_user");
+    if (!askUser.empty()) {
+        std::map<std::string, JsonField> fields;
+        if (!parseFieldsOrEmpty(askUser, fields)) {
+            error = "ask_user tag content must be a JSON object.";
+            return "";
+        }
+        return "{\"type\":\"ask_user\",\"thought\":" + jsonString(thought) +
+            ",\"questions\":" + rawField(fields, "questions", "[]") +
+            ",\"reason\":" + jsonString(stringField(fields, "reason")) +
+            ",\"sensitivity\":" + jsonString(stringField(fields, "sensitivity", "normal")) +
+            ",\"timeout_seconds\":" + rawField(fields, "timeout_seconds", rawField(fields, "timeoutSeconds", "0")) +
+            ",\"allow_custom_answer\":" + rawField(fields, "allow_custom_answer", "true") +
+            "}";
+    }
+    const std::string result = tagValue(text, "result");
+    if (!result.empty()) {
+        return "{\"type\":\"result\",\"thought\":" + jsonString(thought) +
+            ",\"content\":" + jsonString(result) +
+            ",\"completed\":true}";
+    }
+    const std::string cannotComplete = tagValue(text, "cannot_complete");
+    if (!cannotComplete.empty()) {
+        return "{\"type\":\"cannot_complete\",\"thought\":" + jsonString(thought) +
+            ",\"reason\":" + jsonString(cannotComplete) + "}";
+    }
+    if (!thought.empty()) {
+        return "{\"type\":\"reasoning\",\"thought\":" + jsonString(thought) + ",\"requires_followup\":true}";
+    }
+    error = "no supported XML ReAct tag found.";
+    return "";
+}
+
+std::string normalizeReActStepText(const std::string &text, const std::string &dialect, std::string &error) {
+    const std::string normalizedDialect = lowercased(trim(dialect).empty() ? "canonical_json" : dialect);
+    if (normalizedDialect == "canonical_json") {
+        const std::string object = firstValidReActStepObject(text);
+        if (object.empty()) {
+            error = "no canonical ReAct JSON object found.";
+        }
+        return object;
+    }
+    if (normalizedDialect == "xml_tags") {
+        std::string object = normalizeXmlTags(text, error);
+        if (object.empty()) {
+            return "";
+        }
+        std::string validationError;
+        if (!validateReActStepObject(object, true, validationError)) {
+            error = validationError;
+            return "";
+        }
+        return object;
+    }
+    if (normalizedDialect == "provider_native_tool_call" || normalizedDialect == "custom_adapter") {
+        error = "dialect requires caller-side adapter before runtime normalization.";
+        return "";
+    }
+    error = "unsupported ReAct dialect: " + normalizedDialect;
     return "";
 }
 

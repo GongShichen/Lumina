@@ -19,11 +19,22 @@ enum LocalModelBootstrap {
         readinessStore: LuminaModelReadinessStore? = nil,
         metricsStore: LuminaModelInferenceMetricsStore? = nil,
         memoryStore: LuminaMemoryStore,
+        localModelSelection: LuminaLocalModelSelectionStore,
         remoteSettings: LuminaRemoteInferenceSettingsStore? = nil
     ) -> any LuminaReActStepGenerator {
-        let local = LuminaLazyReActStepGenerator(fallback: unavailableStepGenerator(), readinessStore: readinessStore) {
-            makeEagerStepGenerator(memoryStore: memoryStore, metricsStore: metricsStore)
-        }
+        let local = LuminaSelectableLocalReActStepGenerator(
+            selectionStore: localModelSelection,
+            readinessStore: readinessStore,
+            makeGenerator: { selection in
+                LuminaLazyReActStepGenerator(fallback: unavailableStepGenerator(), readinessStore: readinessStore) {
+                    makeEagerStepGenerator(
+                        memoryStore: memoryStore,
+                        metricsStore: metricsStore,
+                        selection: selection
+                    )
+                }
+            }
+        )
         guard let remoteSettings else { return local }
         return LuminaRemoteFallbackReActStepGenerator(
             settings: remoteSettings,
@@ -39,9 +50,13 @@ enum LocalModelBootstrap {
         }
     }
 
-    private static func makeEagerStepGenerator(memoryStore: LuminaMemoryStore, metricsStore: LuminaModelInferenceMetricsStore?) -> LuminaLazyReActStepGenerator.LoadResult {
+    private static func makeEagerStepGenerator(
+        memoryStore: LuminaMemoryStore,
+        metricsStore: LuminaModelInferenceMetricsStore?,
+        selection: LuminaLocalModelSelection
+    ) -> LuminaLazyReActStepGenerator.LoadResult {
         let promptBuilder = LuminaAppReActPromptBuilder()
-        if let miniCPMURL = miniCPMV46ModelURL() {
+        if let miniCPMURL = miniCPMV46ModelURL(selection: selection) {
             if #available(iOS 18.0, macOS 15.0, *) {
                 do {
                     let stepMaxNewTokens = 2_048
@@ -56,7 +71,7 @@ enum LocalModelBootstrap {
                         }
                     ))
                     log("Loaded MiniCPM-V 4.6 model bundle at \(miniCPMURL.path)")
-                    let source = "MiniCPM-V 4.6 GGUF · \(model.bundleInfo.contextLength) ctx · \(model.bundleInfo.quantization)"
+                    let source = "\(selection.displayName) · MiniCPM-V 4.6 GGUF · \(model.bundleInfo.contextLength) ctx · \(model.bundleInfo.quantization)"
                     let maxOutputFrom2KPrompt = model.bundleInfo.maximumSupportedOutputTokens(
                         inputTokenCount: 2_000,
                         safetyMargin: 256,
@@ -69,19 +84,19 @@ enum LocalModelBootstrap {
                             fallback: LuminaUnavailableReActStepGenerator()
                         ),
                         source: source,
-                        message: "MiniCPM-V 4.6 已连接：architecture \(model.bundleInfo.architecture)，context \(model.bundleInfo.contextLength)，\(model.bundleInfo.quantization)，动态单步输出上限当前最高 \(maxOutputFrom2KPrompt) tokens，推理入口为 LuminaModelRuntimeCore 原生 C++ engine。"
+                        message: "\(selection.displayName) 已连接：architecture \(model.bundleInfo.architecture)，context \(model.bundleInfo.contextLength)，\(model.bundleInfo.quantization)，动态单步输出上限当前最高 \(maxOutputFrom2KPrompt) tokens，推理入口为 LuminaModelRuntimeCore 原生 C++ engine。"
                     )
                 } catch {
                     log("MiniCPM-V 4.6 model failed to initialize: \(error.localizedDescription)")
                     return .fallback(
                         unavailableStepGenerator(),
-                        message: "MiniCPM-V 4.6 model 初始化失败：\(error.localizedDescription)。当前没有可用模型。"
+                        message: "\(selection.displayName) 初始化失败：\(error.localizedDescription)。当前没有可用模型。"
                     )
                 }
             } else {
                 return .fallback(
                     unavailableStepGenerator(),
-                    message: "当前系统版本不支持 MiniCPM-V 4.6；当前没有可用模型。"
+                    message: "当前系统版本不支持 \(selection.displayName)；当前没有可用模型。"
                 )
             }
         }
@@ -89,7 +104,7 @@ enum LocalModelBootstrap {
         log("Local ReAct model was not found. Requests will fail instead of using app-side rules.")
         return .fallback(
             unavailableStepGenerator(),
-            message: "没有找到 MiniCPM-V 4.6 模型；当前没有可用模型。请运行 scripts/setup_models.sh 生成或安装 MiniCPMV46ReActModel。"
+            message: "没有找到 \(selection.displayName)；当前没有可用模型。请确认对应 GGUF bundle 已安装在 app/Resources/Models。"
         )
     }
 
@@ -201,21 +216,36 @@ enum LocalModelBootstrap {
         return nil
     }
 
-    private static func miniCPMV46ModelURL() -> URL? {
-        if let value = ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_MODEL"], !value.isEmpty {
+    private static func miniCPMV46ModelURL(selection: LuminaLocalModelSelection) -> URL? {
+        print("[Lumina][Bootstrap] Resolving URL for selection: \(selection.rawValue)")
+        let environmentKeys: [String]
+        let bundleCandidates: [String]
+        switch selection {
+        case .original:
+            environmentKeys = ["LUMINA_MINICPMV46_ORIGINAL_MODEL", "LUMINA_MINICPMV46_MODEL"]
+            bundleCandidates = ["MiniCPMV46ReActModel", "MiniCPMV46Model"]
+        case .agenticDPO:
+            environmentKeys = ["LUMINA_MINICPMV46_AGENTIC_DPO_MODEL"]
+            bundleCandidates = ["MiniCPMV46ReActModel-AgenticSFTDPO-Q8", "MiniCPMV46AgenticDPOReActModel", "MiniCPMV46AgenticDPOModel"]
+        }
+
+        for key in environmentKeys {
+            guard let value = ProcessInfo.processInfo.environment[key], !value.isEmpty else { continue }
             let url = URL(fileURLWithPath: value)
             if FileManager.default.fileExists(atPath: url.path) {
+                print("[Lumina][Bootstrap] Found model via ENV (\(key)): \(url.path)")
                 return url
             }
         }
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniCPMV46ReActModel"),
-           FileManager.default.fileExists(atPath: url.path) {
-            return url
+
+        for candidate in bundleCandidates {
+            if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/\(candidate)"),
+               FileManager.default.fileExists(atPath: url.path) {
+                print("[Lumina][Bootstrap] Found model via Bundle (\(candidate)): \(url.path)")
+                return url
+            }
         }
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/MiniCPMV46Model"),
-           FileManager.default.fileExists(atPath: url.path) {
-            return url
-        }
+        print("[Lumina][Bootstrap] ERROR: No model found for selection: \(selection.rawValue)")
         return nil
     }
 
@@ -431,7 +461,7 @@ struct LuminaRemoteFallbackReActStepGenerator: LuminaReActStepGenerator {
             let step = try await generator.nextStep(context: context)
             await readinessStore?.markModelReady(
                 source: "OpenAI-compatible API · \(configuration.model)",
-                message: "本次由远程 API 流式生成标准 ReAct action/final。"
+                message: "本次由远程 API 流式生成标准 ReAct action/result。"
             )
             return step
         } catch {
@@ -531,10 +561,24 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
             } catch let error as LuminaOpenAICompatibleStreamingError {
                 lastError = error
                 guard attempt < maxAttempts, error.isRetryable else { throw error }
+                progress(LuminaStructuredInferenceProgress(
+                    phase: "remote.api.retrying",
+                    elapsedMilliseconds: 0,
+                    promptTokens: Self.estimateTokens(prompt),
+                    outputTokens: 0,
+                    partialOutput: "retry attempt \(attempt + 1) after \(error.localizedDescription.truncatedForLuminaRemoteProgress(to: 120))"
+                ))
                 try await sleepBeforeRetry(attempt: attempt, retryAfter: error.retryAfter)
             } catch {
                 lastError = error
                 guard attempt < maxAttempts, isRetryableTransportError(error) else { throw error }
+                progress(LuminaStructuredInferenceProgress(
+                    phase: "remote.api.retrying",
+                    elapsedMilliseconds: 0,
+                    promptTokens: Self.estimateTokens(prompt),
+                    outputTokens: 0,
+                    partialOutput: "retry attempt \(attempt + 1) after \(error.localizedDescription.truncatedForLuminaRemoteProgress(to: 120))"
+                ))
                 try await sleepBeforeRetry(attempt: attempt, retryAfter: nil)
             }
         }

@@ -17,6 +17,7 @@ struct LuminaLazyReActStepGenerator: LuminaReActStepGenerator {
     func nextStep(context: LuminaReActStepContext) async throws -> LuminaReActStep {
         try Task.checkCancellation()
         let result = await loader.stepGenerator()
+        print("[Lumina][LazyGenerator] Model loaded from source: \(result.source)")
         switch result.source {
         case "Model unavailable":
             await readinessStore?.markModelFallback(result.message)

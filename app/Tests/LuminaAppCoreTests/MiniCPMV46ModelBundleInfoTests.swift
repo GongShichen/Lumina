@@ -70,7 +70,7 @@ final class MiniCPMV46ModelBundleInfoTests: XCTestCase {
         do {
             _ = try await model.generateJSON(
                 prompt: """
-                You are Lumina. Return {"type":"final_answer","answer":"ok"}.
+                You are Lumina. Return {"type":"result","answer":"ok"}.
                 """
             )
             XCTFail("The synthetic GGUF test bundle should fail inside the native MiniCPM-V engine.")

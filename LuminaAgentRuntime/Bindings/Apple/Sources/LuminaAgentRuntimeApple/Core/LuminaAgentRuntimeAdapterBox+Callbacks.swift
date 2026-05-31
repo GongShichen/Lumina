@@ -179,8 +179,8 @@ extension LuminaAgentRuntimeAdapterBox {
                 currentEventSink?(.thoughtGenerated(step))
             case .action:
                 if let call = step.action { currentEventSink?(.actionProposed(call)) }
-            case .final:
-                currentEventSink?(.finalGenerated(step.finalMarkdown ?? ""))
+            case .result:
+                currentEventSink?(.resultGenerated(step.resultMarkdown ?? ""))
             case .observation:
                 if let observation = step.observation { currentEventSink?(.observationCreated(observation)) }
             }
@@ -327,10 +327,10 @@ extension LuminaAgentRuntimeAdapterBox {
                 thought: thought ?? "",
                 call: LuminaToolCall(toolName: toolName, arguments: arguments, requiresConfirmation: payload["requires_confirmation"] as? Bool ?? false)
             )
-        case "final_answer":
-            return .final(payload["content"] as? String ?? "", thought: thought)
+        case "result":
+            return .result(payload["content"] as? String ?? "", thought: thought)
         case "cannot_complete":
-            return .final("### 无法完成\n\n\(payload["reason"] as? String ?? "")", thought: thought)
+            return .result("### 无法完成\n\n\(payload["reason"] as? String ?? "")", thought: thought)
         default:
             return nil
         }
@@ -358,7 +358,7 @@ extension LuminaAgentRuntimeAdapterBox {
         case "tool_will_execute": return .toolWillExecute
         case "tool_did_execute": return .toolDidExecute
         case "observation_created": return .observationCreated
-        case "final_generated": return .finalGenerated
+        case "result_generated": return .resultGenerated
         case "run_finished": return .runEnded
         case "cancelled": return .cancelled
         default: return .failed

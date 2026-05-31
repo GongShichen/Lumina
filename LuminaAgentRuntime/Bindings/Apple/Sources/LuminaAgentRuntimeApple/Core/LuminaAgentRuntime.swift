@@ -14,7 +14,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         permissionGate: any LuminaPermissionGate = LuminaDefaultPermissionGate(),
         confirmationCoordinator: any LuminaConfirmationCoordinator = LuminaAlwaysConfirmCoordinator(),
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
-        hooks: [any LuminaAgentRuntimeHook] = []
+        hooks: [any LuminaAgentRuntimeHook] = [],
+        observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled
     ) {
         self.box = LuminaAgentRuntimeAdapterBox(
             tools: tools,
@@ -25,7 +26,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             permissionGate: permissionGate,
             confirmationCoordinator: confirmationCoordinator,
             auditLogger: auditLogger,
-            hooks: hooks
+            hooks: hooks,
+            observabilitySinks: observabilitySinks
         )
         self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
         configureRuntime()
@@ -214,6 +216,24 @@ let luminaAgentSwiftAdapterAuditCallback: LuminaAgentAuditCallback = { auditJSON
     guard let box = box(from: context), let auditJSON else { return }
     let input = String(cString: auditJSON)
     Task { await box.writeAudit(auditJSON: input) }
+}
+
+let luminaAgentSwiftAdapterTraceCallback: LuminaAgentTraceCallback = { traceJSON, context in
+    guard let box = box(from: context), let traceJSON, let sink = box.observabilitySinks.trace else { return }
+    let input = String(cString: traceJSON)
+    Task { await sink.recordTrace(input) }
+}
+
+let luminaAgentSwiftAdapterMetricsCallback: LuminaAgentMetricsCallback = { metricJSON, context in
+    guard let box = box(from: context), let metricJSON, let sink = box.observabilitySinks.metrics else { return }
+    let input = String(cString: metricJSON)
+    Task { await sink.recordMetric(input) }
+}
+
+let luminaAgentSwiftAdapterSpanCallback: LuminaAgentSpanCallback = { spanJSON, context in
+    guard let box = box(from: context), let spanJSON, let sink = box.observabilitySinks.span else { return }
+    let input = String(cString: spanJSON)
+    Task { await sink.recordSpan(input) }
 }
 
 let luminaAgentSwiftAdapterRollbackCallback: LuminaAgentRollbackCallback = { _, _ in
