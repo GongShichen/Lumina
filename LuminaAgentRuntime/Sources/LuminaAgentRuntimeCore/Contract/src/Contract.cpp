@@ -15,7 +15,7 @@ std::string responderSchemaJson() {
 }
 
 std::string runtimeConfigurationSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer","maxOutputTokens":"integer","reservedOutputTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer","maxOutputTokens":"integer","reservedOutputTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean","toolSchemaProfile":"full|compact|name-only"}})";
 }
 
 std::string agentRequestSchemaJson() {
@@ -83,7 +83,7 @@ std::string reactObservationSchemaJson() {
 }
 
 std::string runEventSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["type"],"fields":{"type":"string","payload":"object","timestamp":"string"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["type","sequence","timestamp","session_id","run_id"],"fields":{"type":"string","sequence":"integer","timestamp":"integer","session_id":"string","run_id":"string","payload":"object"}})";
 }
 
 std::string runResultSchemaJson() {
@@ -99,11 +99,27 @@ std::string traceSchemaJson() {
 }
 
 std::string hookEventSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","fields":{"lifecycle":"string","payload":"object"}})";
+    return R"({"schema_version":"1.0","type":"object","fields":{"route_id":"string","lifecycle":"string","payload":"object"}})";
 }
 
 std::string hookDirectiveSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","fields":{"appendContextSection":"RuntimeContextSection","terminate":"object","annotate":"object","mergeRequestMetadata":"object"}})";
+    return R"({"schema_version":"1.0","type":"object","allowed_types":["proceed","append_context","rewrite_tool_call","reject_tool_call","require_confirmation","pause","fail"],"fields":{"type":"string","context":"RuntimeContext","tool_name":"string","parameters":"object","reason":"string","markdown":"string","payload":"object","kind":"string","requires_confirmation":"boolean"}})";
+}
+
+std::string guardrailDecisionSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","allowed_decisions":["allow","reject","rewrite","tripwire_failure"],"fields":{"decision":"string","message":"string","payload":"object"}})";
+}
+
+std::string runtimeStateSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","scopes":["temp","session","user","app"],"rules":["Models cannot mutate state directly.","Mutations occur through host calls, tools, hooks, or runtime APIs.","Persistence is caller-owned through checkpoints or host storage."]})";
+}
+
+std::string checkpointSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
+}
+
+std::string externalToolProviderSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","fields":{"namespace":"string","allowed_tools":"string[]","schemas":"ToolSchema[]","health":"object","token_redaction":"required"},"rules":["Transport is implemented by the provider or binding, not by Runtime Core.","Provider tools are registered as normal runtime tools.","Secrets and tokens must never enter trace, audit, events, or benchmark reports."]})";
 }
 
 std::string contractJson() {
@@ -139,7 +155,11 @@ std::string allContractsJson() {
         R"("audit_record":)" + auditRecordSchemaJson() + ","
         R"("trace":)" + traceSchemaJson() + ","
         R"("hook_event":)" + hookEventSchemaJson() + ","
-        R"("hook_directive":)" + hookDirectiveSchemaJson() +
+        R"("hook_directive":)" + hookDirectiveSchemaJson() + ","
+        R"("guardrail_decision":)" + guardrailDecisionSchemaJson() + ","
+        R"("runtime_state":)" + runtimeStateSchemaJson() + ","
+        R"("runtime_checkpoint":)" + checkpointSchemaJson() + ","
+        R"("external_tool_provider":)" + externalToolProviderSchemaJson() +
         "}}";
 }
 

@@ -830,6 +830,9 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(json.contains("tool_use"))
         XCTAssertTrue(json.contains("multi_tool_use"))
         XCTAssertTrue(json.contains("cannot_complete"))
+        XCTAssertTrue(json.contains("guardrail_decision"))
+        XCTAssertTrue(json.contains("runtime_checkpoint"))
+        XCTAssertTrue(json.contains("external_tool_provider"))
     }
 }
 
