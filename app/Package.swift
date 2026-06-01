@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "PersonalMemory", targets: ["PersonalMemory"]),
         .library(name: "LuminaModelRuntime", targets: ["LuminaModelRuntime"]),
         .library(name: "LuminaMarkdownUI", targets: ["LuminaMarkdownUI"]),
+        .library(name: "LuminaBenchmarkMetrics", targets: ["LuminaBenchmarkMetrics"]),
         .library(name: "LuminaAppCore", targets: ["LuminaAppCore"])
     ],
     dependencies: [
@@ -56,6 +57,12 @@ let package = Package(
             ],
             exclude: ["Info.plist"]
         ),
+        .target(
+            name: "LuminaBenchmarkMetrics",
+            dependencies: [
+                "LuminaModelRuntime"
+            ]
+        ),
         .testTarget(
             name: "LuminaMarkdownUITests",
             dependencies: ["LuminaMarkdownUI"]
@@ -71,7 +78,8 @@ let package = Package(
                 .product(name: "LuminaAgentRuntime", package: "LuminaAgentRuntime"),
                 .product(name: "LuminaAgentRuntimeCore", package: "LuminaAgentRuntime"),
                 "PersonalMemory",
-                "LuminaModelRuntime"
+                "LuminaModelRuntime",
+                "LuminaBenchmarkMetrics"
             ]
         )
     ]

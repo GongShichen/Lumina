@@ -197,7 +197,10 @@ struct RuntimeStatusScreen: View {
             }
             HStack(spacing: 10) {
                 LuminaMetricTile(title: "P95", value: "\(Int(report.latencyP95Milliseconds))ms", caption: "end-to-end", tint: LuminaTheme.amber)
-                LuminaMetricTile(title: "Pass", value: "\(report.succeededCount)/\(report.completedCount)", caption: "runtime status", tint: LuminaTheme.lavender)
+                LuminaMetricTile(title: "Pass@1", value: percent(report.passAt1Rate), caption: "\(report.passAt1Count)/\(report.completedCount)", tint: LuminaTheme.lavender)
+            }
+            HStack(spacing: 10) {
+                LuminaMetricTile(title: "Exec@1", value: percent(report.toolExecutionAt1Rate), caption: "\(report.toolExecutionAt1Count) tool task(s)", tint: LuminaTheme.rose)
             }
             if let url = report.markdownReportURL ?? report.jsonReportURL {
                 Text("已导出：\(url.lastPathComponent)")

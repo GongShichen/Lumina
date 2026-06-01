@@ -13,6 +13,8 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let toolExecutionCount: Int
     let toolReplayCount: Int
     let status: String
+    let passAt1: Bool
+    let toolExecutedAt1: Bool
     let exactMatch: Bool
     let semanticPassed: Bool
     let semanticFailures: [String]
@@ -66,6 +68,8 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.precision = truePositive + falsePositive == 0 ? 0 : truePositive / (truePositive + falsePositive)
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
+        self.passAt1 = status == "succeeded" && exactMatch && semanticFailures.isEmpty
+        self.toolExecutedAt1 = !expected.isEmpty && toolExecutionCount > 0
         self.status = status == "succeeded" && (expected.isEmpty || exactMatch) && semanticFailures.isEmpty ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
         self.totalMilliseconds = totalMilliseconds
         self.activeRuntimeMilliseconds = observedTimings.activeRuntimeMilliseconds

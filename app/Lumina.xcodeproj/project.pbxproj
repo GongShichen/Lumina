@@ -763,6 +763,7 @@
 				7F965BA320DE4871600192F1 /* Models */,
 				6575E71338A635C6EA6AC03E /* LuminaApp */,
 				6A97550F5653F60A0DA4BAF3 /* LuminaAppCore */,
+				C1A7B3F6C35C49DC8A6E21D1 /* LuminaBenchmarkMetrics */,
 				110A7812B741449250EE361D /* LuminaMarkdownUI */,
 				47CB5D2901806A037B3B88E3 /* LuminaModelRuntime */,
 				AE3B17E52718D14D0CFD6C2B /* LuminaWidgets */,
@@ -957,6 +958,17 @@
 			path = Sources/LuminaAppCore;
 			sourceTree = "<group>";
 		};
+		C1A7B3F6C35C49DC8A6E21D1 /* LuminaBenchmarkMetrics */ = {
+			isa = PBXGroup;
+			children = (
+				344CD3EC638B03BF43DD02A2 /* LuminaBenchmarkReport.swift */,
+				AB59B6A47FC3F0E03CF265B0 /* LuminaBenchmarkTask.swift */,
+				0D10FE093EA3AC9B4EF7C70B /* LuminaBenchmarkTaskResult.swift */,
+				177D586B14973BF02208D324 /* LuminaObservedRunTimings.swift */,
+			);
+			path = Sources/LuminaBenchmarkMetrics;
+			sourceTree = "<group>";
+		};
 		6AE126F4D4044DCEAF779BE3 /* Permissions */ = {
 			isa = PBXGroup;
 			children = (
@@ -1091,11 +1103,8 @@
 				C1B000000000000000000001 /* LuminaAppSystemInstructions.swift */,
 				104EE802CC184AE297D62115 /* LuminaAppReActPromptBuilder.swift */,
 				9197BA6F874FD64B69E74274 /* LuminaAppRuntimePermissionGate.swift */,
-				344CD3EC638B03BF43DD02A2 /* LuminaBenchmarkReport.swift */,
 				5BF5CFB0693D6C6DC06A7A35 /* LuminaBenchmarkSnapshot.swift */,
 				133DE85D856DEC3A59BF39E6 /* LuminaBenchmarkSuite.swift */,
-				AB59B6A47FC3F0E03CF265B0 /* LuminaBenchmarkTask.swift */,
-				0D10FE093EA3AC9B4EF7C70B /* LuminaBenchmarkTaskResult.swift */,
 				B3AB17752169AF45E8850D0E /* LuminaCalendarCreateTool.swift */,
 				C4FA086EC50366AA07900C41 /* LuminaCalendarSearchTool.swift */,
 				98CF9B17AE97394F79ADDB90 /* LuminaClipboardReadTool.swift */,
@@ -1128,7 +1137,6 @@
 				FBE1024BCACD3842EFBEB63B /* LuminaModelReadinessState.swift */,
 				028F7D9B24ED34B88B3C5DBB /* LuminaModelReadinessStore.swift */,
 				83265B0187D0F5302106F41B /* LuminaNotificationScheduleTool.swift */,
-				177D586B14973BF02208D324 /* LuminaObservedRunTimings.swift */,
 				35F74D569FE8726FCC043808 /* LuminaPermissionTimingRecorder.swift */,
 				FCE92908CFBC42F3B2080BF1 /* LuminaSystemPermissionRequest.swift */,
 				4B2A84EAB4E98B0D19F6A850 /* LuminaReminderCreateTool.swift */,

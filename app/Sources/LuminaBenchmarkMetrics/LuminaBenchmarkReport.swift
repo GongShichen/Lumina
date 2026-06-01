@@ -6,6 +6,10 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let completedCount: Int
     let succeededCount: Int
     let failedCount: Int
+    let passAt1Count: Int
+    let passAt1Rate: Double
+    let toolExecutionAt1Count: Int
+    let toolExecutionAt1Rate: Double
     let semanticPassedCount: Int
     let semanticPassRate: Double
     let exactToolMatch: Double
@@ -49,6 +53,9 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let completed = results.count
         let succeeded = results.filter { $0.status == "succeeded" }.count
         let failed = results.filter { $0.status != "succeeded" }.count
+        let passAt1 = results.filter(\.passAt1).count
+        let toolRequired = results.filter { !$0.expectedTools.isEmpty }.count
+        let toolExecutionAt1 = results.filter(\.toolExecutedAt1).count
         let semanticPassed = results.filter(\.semanticPassed).count
         let exact = ratio(results.filter(\.exactMatch).count, completed)
         let modelMetrics = results.flatMap(\.modelMetrics)
@@ -76,6 +83,10 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             completedCount: completed,
             succeededCount: succeeded,
             failedCount: failed,
+            passAt1Count: passAt1,
+            passAt1Rate: ratio(passAt1, completed),
+            toolExecutionAt1Count: toolExecutionAt1,
+            toolExecutionAt1Rate: ratio(toolExecutionAt1, toolRequired),
             semanticPassedCount: semanticPassed,
             semanticPassRate: ratio(semanticPassed, completed),
             exactToolMatch: exact,

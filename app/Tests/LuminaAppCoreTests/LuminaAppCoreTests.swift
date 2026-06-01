@@ -1,5 +1,6 @@
 import XCTest
 import LuminaAgentRuntime
+@testable import LuminaBenchmarkMetrics
 @testable import LuminaAppCore
 @testable import PersonalMemory
 
@@ -591,6 +592,99 @@ final class LuminaAppCoreTests: XCTestCase {
         let events = await calendar.allEvents()
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.title, "出门")
+    }
+
+    func testBenchmarkReportComputesPassAt1AndToolExecutionAt1() {
+        let passed = benchmarkResult(
+            id: "passed",
+            expectedTools: ["calendar.search"],
+            actualTools: ["calendar.search"]
+        )
+        let toolMismatch = benchmarkResult(
+            id: "tool-mismatch",
+            expectedTools: ["calendar.search"],
+            actualTools: ["reminder.search"]
+        )
+        let semanticFailure = benchmarkResult(
+            id: "semantic-failure",
+            expectedTools: ["file.save_note"],
+            actualTools: ["file.save_note"],
+            semanticFailures: ["note body missing"]
+        )
+        let skippedTool = benchmarkResult(
+            id: "skipped-tool",
+            expectedTools: ["contacts.search"],
+            actualTools: []
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [passed, toolMismatch, semanticFailure, skippedTool],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertTrue(passed.passAt1)
+        XCTAssertTrue(passed.toolExecutedAt1)
+        XCTAssertFalse(toolMismatch.passAt1)
+        XCTAssertTrue(toolMismatch.toolExecutedAt1)
+        XCTAssertFalse(semanticFailure.passAt1)
+        XCTAssertFalse(skippedTool.toolExecutedAt1)
+        XCTAssertEqual(report.passAt1Count, 1)
+        XCTAssertEqual(report.passAt1Rate, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(report.toolExecutionAt1Count, 3)
+        XCTAssertEqual(report.toolExecutionAt1Rate, 0.75, accuracy: 0.0001)
+    }
+
+    func testBenchmarkToolExecutionAt1HandlesTasksWithoutExpectedTools() {
+        let noToolTask = benchmarkResult(
+            id: "no-tool",
+            expectedTools: [],
+            actualTools: []
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [noToolTask],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertTrue(noToolTask.passAt1)
+        XCTAssertFalse(noToolTask.toolExecutedAt1)
+        XCTAssertEqual(report.passAt1Count, 1)
+        XCTAssertEqual(report.passAt1Rate, 1, accuracy: 0.0001)
+        XCTAssertEqual(report.toolExecutionAt1Count, 0)
+        XCTAssertEqual(report.toolExecutionAt1Rate, 0, accuracy: 0.0001)
+    }
+
+    private func benchmarkResult(
+        id: String,
+        expectedTools: [String],
+        actualTools: [String],
+        semanticFailures: [String] = [],
+        status: String = "succeeded"
+    ) -> LuminaBenchmarkTaskResult {
+        LuminaBenchmarkTaskResult(
+            task: LuminaBenchmarkTask(
+                id: id,
+                text: "benchmark \(id)",
+                expectedTools: expectedTools,
+                category: "test",
+                sideEffect: false,
+                cleanupPrefixes: []
+            ),
+            toolAttempts: actualTools,
+            actualTools: actualTools,
+            toolReplays: [],
+            semanticFailures: semanticFailures,
+            status: status,
+            totalMilliseconds: 1,
+            observedTimings: .empty,
+            stepGenerationMilliseconds: 1,
+            toolMilliseconds: 1,
+            modelMetrics: [],
+            runtimeMetrics: LuminaBenchmarkRuntimeMetrics(),
+            failureSummary: semanticFailures.first
+        )
     }
 }
 

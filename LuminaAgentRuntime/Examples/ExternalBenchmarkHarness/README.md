@@ -15,6 +15,7 @@ or latency aggregation. A harness can register only the sinks it needs:
 This example returns a `BenchmarkSummary`, not just raw run results. It calculates:
 
 - runtime status and task completion
+- pass@1 and tool execution@1
 - tool exact match, micro precision/recall/F1
 - semantic verifier pass/fail
 - wall-clock p95

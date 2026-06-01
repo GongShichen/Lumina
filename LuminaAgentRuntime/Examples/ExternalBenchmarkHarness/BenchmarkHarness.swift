@@ -34,7 +34,9 @@ public struct BenchmarkCaseResult: Sendable {
     public var result: String
     public var expectedTools: [String]
     public var toolNames: [String]
+    public var passAt1: Bool
     public var exactToolMatch: Bool
+    public var toolExecutedAt1: Bool
     public var precision: Double
     public var recall: Double
     public var f1: Double
@@ -50,6 +52,8 @@ public struct BenchmarkSummary: Sendable {
     public var results: [BenchmarkCaseResult]
     public var completedCount: Int
     public var succeededCount: Int
+    public var passAt1Rate: Double
+    public var toolExecutionAt1Rate: Double
     public var exactToolMatchRate: Double
     public var semanticPassRate: Double
     public var microPrecision: Double
@@ -89,7 +93,9 @@ public enum ExternalBenchmarkHarness {
                 result: run.plan.summary,
                 expectedTools: benchmarkCase.expectedTools,
                 toolNames: tools,
+                passAt1: run.status == .succeeded && expected == actual && semanticFailures.isEmpty,
                 exactToolMatch: expected == actual,
+                toolExecutedAt1: !expected.isEmpty && !tools.isEmpty,
                 precision: precision,
                 recall: recall,
                 f1: precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall),
@@ -121,6 +127,8 @@ public enum ExternalBenchmarkHarness {
             results: results,
             completedCount: results.count,
             succeededCount: results.filter { $0.status == .succeeded && $0.exactToolMatch && $0.semanticPassed }.count,
+            passAt1Rate: ratio(results.filter(\.passAt1).count, results.count),
+            toolExecutionAt1Rate: ratio(results.filter(\.toolExecutedAt1).count, results.filter { !$0.expectedTools.isEmpty }.count),
             exactToolMatchRate: ratio(results.filter(\.exactToolMatch).count, results.count),
             semanticPassRate: ratio(results.filter(\.semanticPassed).count, results.count),
             microPrecision: precision,

@@ -322,6 +322,8 @@ final class LuminaInAppBenchmarkRunner {
         - Tasks: \(report.completedCount)/\(report.taskCount)
         - Succeeded: \(report.succeededCount)
         - Failed: \(report.failedCount)
+        - Pass@1: \(report.passAt1Count)/\(report.completedCount) (\(format(report.passAt1Rate)))
+        - Tool execution@1: \(report.toolExecutionAt1Count)/\(toolRequiredTaskCount(report)) (\(format(report.toolExecutionAt1Rate)))
         - Semantic pass: \(report.semanticPassedCount)/\(report.completedCount) (\(format(report.semanticPassRate)))
         - Exact tool match: \(format(report.exactToolMatch))
         - Micro precision: \(format(report.microPrecision))
@@ -363,6 +365,10 @@ final class LuminaInAppBenchmarkRunner {
 
     private func format(_ value: Double) -> String {
         String(format: "%.3f", value)
+    }
+
+    private func toolRequiredTaskCount(_ report: LuminaBenchmarkReport) -> Int {
+        report.results.filter { !$0.expectedTools.isEmpty }.count
     }
 
     private func optionalMilliseconds(_ value: Double?) -> String {
