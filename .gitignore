@@ -22,4 +22,10 @@ app/Reports/
 app/optimize/
 agentic_rl/
 TrainingData/
+scripts/generate_training_data.py
+scripts/migrate_training_data_to_current_react_schema.py
+scripts/migrate_training_data_to_xml_tags.py
+scripts/qa_training_xml_data.py
+scripts/repair_training_xml_data_quality.py
+scripts/split_training_data.py
 PLAN.md
