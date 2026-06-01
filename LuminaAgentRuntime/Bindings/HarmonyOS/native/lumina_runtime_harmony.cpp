@@ -15,6 +15,10 @@ struct NativeRuntime {
     LuminaAgentRuntimeRef *runtime = nullptr;
 };
 
+struct NativeSession {
+    LuminaAgentRuntimeSessionRef *session = nullptr;
+};
+
 char *copyCString(const std::string &value) {
     auto *buffer = static_cast<char *>(std::malloc(value.size() + 1));
     if (buffer == nullptr) {
@@ -51,6 +55,12 @@ NativeRuntime *nativeFromExternal(napi_env env, napi_value value) {
     void *data = nullptr;
     napi_get_value_external(env, value, &data);
     return static_cast<NativeRuntime *>(data);
+}
+
+NativeSession *sessionFromExternal(napi_env env, napi_value value) {
+    void *data = nullptr;
+    napi_get_value_external(env, value, &data);
+    return static_cast<NativeSession *>(data);
 }
 
 std::string callStringMethod(NativeRuntime *native, const char *methodName, const char *json) {
@@ -100,12 +110,32 @@ char *confirmationCallback(const char *confirmationRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "confirm", confirmationRequestJson));
 }
 
+char *guardrailCallback(const char *guardrailRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "evaluateGuardrail", guardrailRequestJson));
+}
+
+char *hookCallback(const char *hookEventJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "dispatchHook", hookEventJson));
+}
+
 void auditCallback(const char *auditJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "writeAudit", auditJson);
 }
 
 void eventCallback(const char *eventJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "emitEvent", eventJson);
+}
+
+void traceCallback(const char *traceJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeTrace", traceJson);
+}
+
+void metricsCallback(const char *metricJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeMetric", metricJson);
+}
+
+void spanCallback(const char *spanJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeSpan", spanJson);
 }
 
 napi_value create(napi_env env, napi_callback_info info) {
@@ -126,8 +156,13 @@ napi_value create(napi_env env, napi_callback_info info) {
     LuminaAgentRuntimeSetContextCallback(native->runtime, contextCallback, native);
     LuminaAgentRuntimeSetPermissionCallback(native->runtime, permissionCallback, native);
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
+    LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);
     LuminaAgentRuntimeSetAuditCallback(native->runtime, auditCallback, native);
     LuminaAgentRuntimeSetEventCallback(native->runtime, eventCallback, native);
+    LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
+    LuminaAgentRuntimeSetMetricsCallback(native->runtime, metricsCallback, native);
+    LuminaAgentRuntimeSetSpanCallback(native->runtime, spanCallback, native);
+    LuminaAgentRuntimeSetHookCallback(native->runtime, hookCallback, native);
 
     napi_value external = nullptr;
     napi_create_external(env, native, nullptr, nullptr, &external);
@@ -158,6 +193,24 @@ napi_value registerToolSchema(napi_env env, napi_callback_info info) {
     return stringValueAndRelease(env, LuminaAgentRuntimeRegisterToolSchema(native->runtime, schema.c_str()));
 }
 
+napi_value registerExternalToolProvider(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string provider = stringFromValue(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRegisterExternalToolProvider(native->runtime, provider.c_str()));
+}
+
+napi_value registerHookRoute(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string route = stringFromValue(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRegisterHookRoute(native->runtime, route.c_str()));
+}
+
 napi_value run(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2] = {};
@@ -165,6 +218,132 @@ napi_value run(napi_env env, napi_callback_info info) {
     NativeRuntime *native = nativeFromExternal(env, args[0]);
     std::string request = stringFromValue(env, args[1]);
     return stringValueAndRelease(env, LuminaAgentRuntimeRun(native->runtime, request.c_str()));
+}
+
+napi_value runReplay(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string request = stringFromValue(env, args[1]);
+    std::string replay = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRunReplay(native->runtime, request.c_str(), replay.c_str()));
+}
+
+napi_value createSession(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string request = stringFromValue(env, args[1]);
+    auto *session = new NativeSession();
+    session->session = LuminaAgentRuntimeCreateSession(native->runtime, request.c_str());
+    napi_value external = nullptr;
+    napi_create_external(env, session, nullptr, nullptr, &external);
+    return external;
+}
+
+napi_value createSessionFromCheckpoint(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string checkpoint = stringFromValue(env, args[1]);
+    auto *session = new NativeSession();
+    session->session = LuminaAgentRuntimeCreateSessionFromCheckpoint(native->runtime, checkpoint.c_str());
+    napi_value external = nullptr;
+    napi_create_external(env, session, nullptr, nullptr, &external);
+    return external;
+}
+
+napi_value runSession(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRunSession(native->runtime, session->session));
+}
+
+napi_value runSessionReplay(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    std::string replay = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRunSessionReplay(native->runtime, session->session, replay.c_str()));
+}
+
+napi_value resumeSession(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    std::string observation = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeResumeSession(native->runtime, session->session, observation.c_str()));
+}
+
+napi_value snapshotSession(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeSnapshotSession(session->session));
+}
+
+napi_value exportSessionCheckpoint(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+}
+
+napi_value sessionSetState(napi_env env, napi_callback_info info) {
+    size_t argc = 5;
+    napi_value args[5] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    std::string scope = stringFromValue(env, args[2]);
+    std::string key = stringFromValue(env, args[3]);
+    std::string value = stringFromValue(env, args[4]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeSessionSetState(native->runtime, session->session, scope.c_str(), key.c_str(), value.c_str()));
+}
+
+napi_value sessionGetState(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    std::string scope = stringFromValue(env, args[1]);
+    std::string key = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeSessionGetState(session->session, scope.c_str(), key.c_str()));
+}
+
+napi_value sessionDeleteState(napi_env env, napi_callback_info info) {
+    size_t argc = 4;
+    napi_value args[4] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    std::string scope = stringFromValue(env, args[2]);
+    std::string key = stringFromValue(env, args[3]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeSessionDeleteState(native->runtime, session->session, scope.c_str(), key.c_str()));
+}
+
+napi_value destroySession(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    if (session != nullptr) {
+        LuminaAgentRuntimeDestroySession(session->session);
+        delete session;
+    }
+    return nullptr;
 }
 
 napi_value cancel(napi_env env, napi_callback_info info) {
@@ -185,7 +364,21 @@ napi_value init(napi_env env, napi_value exports) {
         {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerToolSchema", nullptr, registerToolSchema, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"registerExternalToolProvider", nullptr, registerExternalToolProvider, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"registerHookRoute", nullptr, registerHookRoute, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"run", nullptr, run, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"runReplay", nullptr, runReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"createSession", nullptr, createSession, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"createSessionFromCheckpoint", nullptr, createSessionFromCheckpoint, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"runSession", nullptr, runSession, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"runSessionReplay", nullptr, runSessionReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"resumeSession", nullptr, resumeSession, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"snapshotSession", nullptr, snapshotSession, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"exportSessionCheckpoint", nullptr, exportSessionCheckpoint, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sessionSetState", nullptr, sessionSetState, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sessionGetState", nullptr, sessionGetState, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"sessionDeleteState", nullptr, sessionDeleteState, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"destroySession", nullptr, destroySession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"cancel", nullptr, cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"exportContracts", nullptr, exportContracts, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
@@ -195,4 +388,4 @@ napi_value init(napi_env env, napi_value exports) {
 
 } // namespace
 
-NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
+NAPI_MODULE(lumina_agent_runtime_harmony, init)

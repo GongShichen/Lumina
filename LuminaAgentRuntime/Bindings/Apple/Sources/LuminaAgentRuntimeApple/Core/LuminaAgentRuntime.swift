@@ -16,14 +16,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
         hooks: [any LuminaAgentRuntimeHook] = [],
         observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
-        guardrails: LuminaRuntimeGuardrails = .empty,
-        runtimeState: LuminaRuntimeState = LuminaRuntimeState(),
-        sessionStore: (any LuminaRuntimeSessionStore)? = nil,
-        checkpointPolicy: LuminaRuntimeCheckpointPolicy = .none
+        guardrails: LuminaRuntimeGuardrails = .empty
     ) {
-        _ = runtimeState
-        _ = sessionStore
-        _ = checkpointPolicy
         self.box = LuminaAgentRuntimeAdapterBox(
             tools: tools,
             stepGenerator: stepGenerator,
@@ -45,6 +39,11 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.tools.map(\.schema)
     }
 
+    @discardableResult
+    public func registerExternalToolProvider(providerJSON: String) -> String {
+        runtimeHandle?.registerExternalToolProvider(providerJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+    }
+
     public func createSession(request: LuminaAgentRequest) -> LuminaAgentRuntimeSession? {
         guard let runtimeHandle else { return nil }
         let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
@@ -62,6 +61,14 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
     public func run(request: LuminaAgentRequest) async -> LuminaAgentRunResult {
         await withTaskCancellationHandler {
             await run(request: request, eventSink: nil)
+        } onCancel: {
+            self.cancelCurrentRun()
+        }
+    }
+
+    public func runReplay(request: LuminaAgentRequest, replayJSON: String) async -> LuminaAgentRunResult {
+        await withTaskCancellationHandler {
+            await runReplay(request: request, replayJSON: replayJSON, eventSink: nil)
         } onCancel: {
             self.cancelCurrentRun()
         }
@@ -101,6 +108,35 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.timingStartedAt = ContinuousClock.now
         let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
         let resultJSON = runtimeHandle.run(requestJSON: requestJSON)
+        let result = box.makeRunResult(fromRuntimeResultJSON: resultJSON, request: request)
+        box.currentEventSink = nil
+        box.resetCancellation()
+        return result
+    }
+
+    private func runReplay(
+        request: LuminaAgentRequest,
+        replayJSON: String,
+        eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
+    ) async -> LuminaAgentRunResult {
+        guard let runtimeHandle else {
+            return LuminaAgentRunResult(
+                requestID: request.id,
+                plan: LuminaAgentPlan(summary: "Runtime unavailable.", toolCalls: []),
+                toolResults: [],
+                status: .failed
+            )
+        }
+        box.currentEventSink = eventSink
+        box.currentRequest = request
+        box.resetCancellation()
+        box.trace = LuminaReActTrace()
+        box.toolResults = []
+        box.stepGenerationMilliseconds = 0
+        box.toolExecutionMilliseconds = 0
+        box.timingStartedAt = ContinuousClock.now
+        let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
+        let resultJSON = runtimeHandle.runReplay(requestJSON: requestJSON, replayJSON: replayJSON)
         let result = box.makeRunResult(fromRuntimeResultJSON: resultJSON, request: request)
         box.currentEventSink = nil
         box.resetCancellation()

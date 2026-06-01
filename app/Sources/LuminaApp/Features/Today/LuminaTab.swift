@@ -9,6 +9,7 @@ enum LuminaTab {
     case agent
     case memory
     case settings
+    case runtimeLab
     case runtime
 }
 

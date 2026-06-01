@@ -58,12 +58,32 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         }
     }
 
+    func registerExternalToolProvider(_ providerJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return providerJSON.withCString { providerPointer in
+            consumeRuntimeString(LuminaAgentRuntimeRegisterExternalToolProvider(handle, providerPointer))
+        }
+    }
+
     func run(requestJSON: String) -> String {
         guard let handle = currentHandle() else {
             return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
         }
         return requestJSON.withCString { requestPointer in
             consumeRuntimeString(LuminaAgentRuntimeRun(handle, requestPointer))
+        }
+    }
+
+    func runReplay(requestJSON: String, replayJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
+        }
+        return requestJSON.withCString { requestPointer in
+            replayJSON.withCString { replayPointer in
+                consumeRuntimeString(LuminaAgentRuntimeRunReplay(handle, requestPointer, replayPointer))
+            }
         }
     }
 
@@ -88,6 +108,15 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
             return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
         }
         return consumeRuntimeString(LuminaAgentRuntimeRunSession(handle, session))
+    }
+
+    func run(session: OpaquePointer, replayJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
+        }
+        return replayJSON.withCString { replayPointer in
+            consumeRuntimeString(LuminaAgentRuntimeRunSessionReplay(handle, session, replayPointer))
+        }
     }
 
     func resume(session: OpaquePointer, resumeJSON: String) -> String {
@@ -183,6 +212,10 @@ public final class LuminaAgentRuntimeSession: @unchecked Sendable {
         handle.run()
     }
 
+    public func run(replayJSON: String) async -> String {
+        handle.run(replayJSON: replayJSON)
+    }
+
     public func resume(observationJSON: String) async -> String {
         handle.resume(observationJSON: observationJSON)
     }
@@ -243,6 +276,11 @@ final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
     func run() -> String {
         guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
         return runtime.run(session: session)
+    }
+
+    func run(replayJSON: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.run(session: session, replayJSON: replayJSON)
     }
 
     func resume(observationJSON: String) -> String {

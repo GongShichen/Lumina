@@ -13,6 +13,10 @@ struct NativeRuntime {
     jobject bridge = nullptr;
 };
 
+struct NativeSession {
+    LuminaAgentRuntimeSessionRef *session = nullptr;
+};
+
 JavaVM *gJvm = nullptr;
 
 char *copyCString(const std::string &value) {
@@ -33,7 +37,7 @@ JNIEnv *envForCallback(bool &didAttach) {
     if (gJvm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) {
         return env;
     }
-    if (gJvm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+    if (gJvm->AttachCurrentThread(reinterpret_cast<void **>(&env), nullptr) == JNI_OK) {
         didAttach = true;
         return env;
     }
@@ -121,6 +125,14 @@ char *confirmationCallback(const char *confirmationRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "confirm", confirmationRequestJson));
 }
 
+char *guardrailCallback(const char *guardrailRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "evaluateGuardrail", guardrailRequestJson));
+}
+
+char *hookCallback(const char *hookEventJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "dispatchHook", hookEventJson));
+}
+
 void auditCallback(const char *auditJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "writeAudit", auditJson);
 }
@@ -129,8 +141,24 @@ void eventCallback(const char *eventJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "emitEvent", eventJson);
 }
 
+void traceCallback(const char *traceJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeTrace", traceJson);
+}
+
+void metricsCallback(const char *metricJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeMetric", metricJson);
+}
+
+void spanCallback(const char *spanJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "writeSpan", spanJson);
+}
+
 NativeRuntime *nativeFromHandle(jlong handle) {
     return reinterpret_cast<NativeRuntime *>(handle);
+}
+
+NativeSession *sessionFromHandle(jlong handle) {
+    return reinterpret_cast<NativeSession *>(handle);
 }
 
 jstring toJString(JNIEnv *env, char *runtimeString) {
@@ -168,8 +196,13 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_create(
     LuminaAgentRuntimeSetContextCallback(native->runtime, contextCallback, native);
     LuminaAgentRuntimeSetPermissionCallback(native->runtime, permissionCallback, native);
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
+    LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);
     LuminaAgentRuntimeSetAuditCallback(native->runtime, auditCallback, native);
     LuminaAgentRuntimeSetEventCallback(native->runtime, eventCallback, native);
+    LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
+    LuminaAgentRuntimeSetMetricsCallback(native->runtime, metricsCallback, native);
+    LuminaAgentRuntimeSetSpanCallback(native->runtime, spanCallback, native);
+    LuminaAgentRuntimeSetHookCallback(native->runtime, hookCallback, native);
     return reinterpret_cast<jlong>(native);
 }
 
@@ -203,6 +236,38 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_registerToolSchema(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_registerExternalToolProvider(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring providerJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *provider = env->GetStringUTFChars(providerJson, nullptr);
+    char *result = LuminaAgentRuntimeRegisterExternalToolProvider(native->runtime, provider == nullptr ? "{}" : provider);
+    if (provider != nullptr) {
+        env->ReleaseStringUTFChars(providerJson, provider);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_registerHookRoute(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring routeJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *route = env->GetStringUTFChars(routeJson, nullptr);
+    char *result = LuminaAgentRuntimeRegisterHookRoute(native->runtime, route == nullptr ? "{}" : route);
+    if (route != nullptr) {
+        env->ReleaseStringUTFChars(routeJson, route);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
 Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_run(
     JNIEnv *env,
     jobject,
@@ -216,6 +281,187 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_run(
         env->ReleaseStringUTFChars(requestJson, request);
     }
     return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runReplay(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring requestJson,
+    jstring replayJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *request = env->GetStringUTFChars(requestJson, nullptr);
+    const char *replay = env->GetStringUTFChars(replayJson, nullptr);
+    char *result = LuminaAgentRuntimeRunReplay(
+        native->runtime,
+        request == nullptr ? "{}" : request,
+        replay == nullptr ? "{}" : replay
+    );
+    if (request != nullptr) {
+        env->ReleaseStringUTFChars(requestJson, request);
+    }
+    if (replay != nullptr) {
+        env->ReleaseStringUTFChars(replayJson, replay);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_createSession(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring requestJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *request = env->GetStringUTFChars(requestJson, nullptr);
+    auto *nativeSession = new NativeSession();
+    nativeSession->session = LuminaAgentRuntimeCreateSession(native->runtime, request == nullptr ? "{}" : request);
+    if (request != nullptr) {
+        env->ReleaseStringUTFChars(requestJson, request);
+    }
+    return reinterpret_cast<jlong>(nativeSession);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_createSessionFromCheckpoint(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring checkpointJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *checkpoint = env->GetStringUTFChars(checkpointJson, nullptr);
+    auto *nativeSession = new NativeSession();
+    nativeSession->session = LuminaAgentRuntimeCreateSessionFromCheckpoint(native->runtime, checkpoint == nullptr ? "{}" : checkpoint);
+    if (checkpoint != nullptr) {
+        env->ReleaseStringUTFChars(checkpointJson, checkpoint);
+    }
+    return reinterpret_cast<jlong>(nativeSession);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runSession(JNIEnv *env, jobject, jlong handle, jlong sessionHandle) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    return toJString(env, LuminaAgentRuntimeRunSession(native->runtime, session->session));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runSessionReplay(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle,
+    jstring replayJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *replay = env->GetStringUTFChars(replayJson, nullptr);
+    char *result = LuminaAgentRuntimeRunSessionReplay(native->runtime, session->session, replay == nullptr ? "{}" : replay);
+    if (replay != nullptr) {
+        env->ReleaseStringUTFChars(replayJson, replay);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_resumeSession(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle,
+    jstring observationJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *observation = env->GetStringUTFChars(observationJson, nullptr);
+    char *result = LuminaAgentRuntimeResumeSession(native->runtime, session->session, observation == nullptr ? "{}" : observation);
+    if (observation != nullptr) {
+        env->ReleaseStringUTFChars(observationJson, observation);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_snapshotSession(JNIEnv *env, jobject, jlong sessionHandle) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    return toJString(env, LuminaAgentRuntimeSnapshotSession(session->session));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportSessionCheckpoint(JNIEnv *env, jobject, jlong sessionHandle) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    return toJString(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_sessionSetState(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle,
+    jstring scopeString,
+    jstring keyString,
+    jstring valueJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *scope = env->GetStringUTFChars(scopeString, nullptr);
+    const char *key = env->GetStringUTFChars(keyString, nullptr);
+    const char *value = env->GetStringUTFChars(valueJson, nullptr);
+    char *result = LuminaAgentRuntimeSessionSetState(native->runtime, session->session, scope, key, value == nullptr ? "null" : value);
+    if (scope != nullptr) env->ReleaseStringUTFChars(scopeString, scope);
+    if (key != nullptr) env->ReleaseStringUTFChars(keyString, key);
+    if (value != nullptr) env->ReleaseStringUTFChars(valueJson, value);
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_sessionGetState(
+    JNIEnv *env,
+    jobject,
+    jlong sessionHandle,
+    jstring scopeString,
+    jstring keyString
+) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *scope = env->GetStringUTFChars(scopeString, nullptr);
+    const char *key = env->GetStringUTFChars(keyString, nullptr);
+    char *result = LuminaAgentRuntimeSessionGetState(session->session, scope, key);
+    if (scope != nullptr) env->ReleaseStringUTFChars(scopeString, scope);
+    if (key != nullptr) env->ReleaseStringUTFChars(keyString, key);
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_sessionDeleteState(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle,
+    jstring scopeString,
+    jstring keyString
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *scope = env->GetStringUTFChars(scopeString, nullptr);
+    const char *key = env->GetStringUTFChars(keyString, nullptr);
+    char *result = LuminaAgentRuntimeSessionDeleteState(native->runtime, session->session, scope, key);
+    if (scope != nullptr) env->ReleaseStringUTFChars(scopeString, scope);
+    if (key != nullptr) env->ReleaseStringUTFChars(keyString, key);
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_destroySession(JNIEnv *, jobject, jlong sessionHandle) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    if (session != nullptr) {
+        LuminaAgentRuntimeDestroySession(session->session);
+        delete session;
+    }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -238,4 +484,3 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportContracts(JNIEnv *env, jobject) {
     return toJString(env, LuminaAgentRuntimeExportContracts());
 }
-

@@ -2207,7 +2207,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.local.Lumina.test.gsc.widgets;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.local.Lumina.test.gsc.1.widgets;
 				PRODUCT_NAME = LuminaWidgets;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
@@ -2260,7 +2260,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = dev.local.Lumina.test.gsc.widgets;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.local.Lumina.test.gsc.1.widgets;
 				PRODUCT_NAME = LuminaWidgets;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 6.0;
