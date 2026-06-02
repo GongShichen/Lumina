@@ -23,19 +23,23 @@ type NativeRuntimeModule = {
   registerHookRoute(handle: Object, routeJson: string): string
   run(handle: Object, requestJson: string): string
   runReplay(handle: Object, requestJson: string, replayJson: string): string
+  runReplayArtifact(handle: Object, artifactJson: string, optionsJson: string): string
   createSession(handle: Object, requestJson: string): Object
   createSessionFromCheckpoint(handle: Object, checkpointJson: string): Object
+  createSessionFromReplayArtifact(handle: Object, artifactJson: string, forkOptionsJson: string): Object
   runSession(handle: Object, session: Object): string
   runSessionReplay(handle: Object, session: Object, replayJson: string): string
   resumeSession(handle: Object, session: Object, observationJson: string): string
   snapshotSession(session: Object): string
   exportSessionCheckpoint(session: Object): string
+  exportReplayArtifact(session: Object, optionsJson: string): string
   sessionSetState(handle: Object, session: Object, scope: string, key: string, valueJson: string): string
   sessionGetState(session: Object, scope: string, key: string): string
   sessionDeleteState(handle: Object, session: Object, scope: string, key: string): string
   destroySession(session: Object): void
   cancel(handle: Object, requestId?: string): string
   exportContracts(): string
+  diffReplayArtifacts(expectedJson: string, actualJson: string, optionsJson: string): string
 }
 
 declare const luminaRuntimeNative: NativeRuntimeModule
@@ -70,12 +74,20 @@ export class LuminaAgentRuntime {
     return luminaRuntimeNative.runReplay(this.requireHandle(), requestJson, replayJson)
   }
 
+  runReplayArtifact(artifactJson: string, optionsJson: string = '{}'): string {
+    return luminaRuntimeNative.runReplayArtifact(this.requireHandle(), artifactJson, optionsJson)
+  }
+
   createSession(requestJson: string): LuminaAgentRuntimeSession {
     return new LuminaAgentRuntimeSession(this.requireHandle(), luminaRuntimeNative.createSession(this.requireHandle(), requestJson))
   }
 
   createSessionFromCheckpoint(checkpointJson: string): LuminaAgentRuntimeSession {
     return new LuminaAgentRuntimeSession(this.requireHandle(), luminaRuntimeNative.createSessionFromCheckpoint(this.requireHandle(), checkpointJson))
+  }
+
+  createSessionFromReplayArtifact(artifactJson: string, forkOptionsJson: string = '{}'): LuminaAgentRuntimeSession {
+    return new LuminaAgentRuntimeSession(this.requireHandle(), luminaRuntimeNative.createSessionFromReplayArtifact(this.requireHandle(), artifactJson, forkOptionsJson))
   }
 
   cancel(requestId?: string): string {
@@ -150,6 +162,10 @@ export class LuminaAgentRuntime {
     return luminaRuntimeNative.exportContracts()
   }
 
+  static diffReplayArtifacts(expectedJson: string, actualJson: string, optionsJson: string = '{}'): string {
+    return luminaRuntimeNative.diffReplayArtifacts(expectedJson, actualJson, optionsJson)
+  }
+
   private requireHandle(): Object {
     if (this.handle === null) {
       throw new Error('LuminaAgentRuntime is closed')
@@ -182,6 +198,10 @@ export class LuminaAgentRuntimeSession {
 
   exportCheckpoint(): string {
     return luminaRuntimeNative.exportSessionCheckpoint(this.requireHandle())
+  }
+
+  exportReplayArtifact(optionsJson: string = '{}'): string {
+    return luminaRuntimeNative.exportReplayArtifact(this.requireHandle(), optionsJson)
   }
 
   setState(scope: string, key: string, valueJson: string): string {

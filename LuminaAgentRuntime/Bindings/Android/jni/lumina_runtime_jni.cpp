@@ -318,6 +318,31 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runReplay(
     return toJString(env, result);
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runReplayArtifact(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring artifactJson,
+    jstring optionsJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *artifact = env->GetStringUTFChars(artifactJson, nullptr);
+    const char *options = env->GetStringUTFChars(optionsJson, nullptr);
+    char *result = LuminaAgentRuntimeRunReplayArtifact(
+        native->runtime,
+        artifact == nullptr ? "{}" : artifact,
+        options == nullptr ? "{}" : options
+    );
+    if (artifact != nullptr) {
+        env->ReleaseStringUTFChars(artifactJson, artifact);
+    }
+    if (options != nullptr) {
+        env->ReleaseStringUTFChars(optionsJson, options);
+    }
+    return toJString(env, result);
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_createSession(
     JNIEnv *env,
@@ -331,6 +356,32 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_createSession(
     nativeSession->session = LuminaAgentRuntimeCreateSession(native->runtime, request == nullptr ? "{}" : request);
     if (request != nullptr) {
         env->ReleaseStringUTFChars(requestJson, request);
+    }
+    return reinterpret_cast<jlong>(nativeSession);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_createSessionFromReplayArtifact(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring artifactJson,
+    jstring forkOptionsJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *artifact = env->GetStringUTFChars(artifactJson, nullptr);
+    const char *options = env->GetStringUTFChars(forkOptionsJson, nullptr);
+    auto *nativeSession = new NativeSession();
+    nativeSession->session = LuminaAgentRuntimeCreateSessionFromReplayArtifact(
+        native->runtime,
+        artifact == nullptr ? "{}" : artifact,
+        options == nullptr ? "{}" : options
+    );
+    if (artifact != nullptr) {
+        env->ReleaseStringUTFChars(artifactJson, artifact);
+    }
+    if (options != nullptr) {
+        env->ReleaseStringUTFChars(forkOptionsJson, options);
     }
     return reinterpret_cast<jlong>(nativeSession);
 }
@@ -405,6 +456,22 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportSessionCheckpoint(JNIEnv *env, jobject, jlong sessionHandle) {
     NativeSession *session = sessionFromHandle(sessionHandle);
     return toJString(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportReplayArtifact(
+    JNIEnv *env,
+    jobject,
+    jlong sessionHandle,
+    jstring optionsJson
+) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *options = env->GetStringUTFChars(optionsJson, nullptr);
+    char *result = LuminaAgentRuntimeExportReplayArtifact(session->session, options == nullptr ? "{}" : options);
+    if (options != nullptr) {
+        env->ReleaseStringUTFChars(optionsJson, options);
+    }
+    return toJString(env, result);
 }
 
 extern "C" JNIEXPORT jstring JNICALL
@@ -493,4 +560,32 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_cancel(
 extern "C" JNIEXPORT jstring JNICALL
 Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportContracts(JNIEnv *env, jobject) {
     return toJString(env, LuminaAgentRuntimeExportContracts());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_diffReplayArtifacts(
+    JNIEnv *env,
+    jobject,
+    jstring expectedJson,
+    jstring actualJson,
+    jstring optionsJson
+) {
+    const char *expected = env->GetStringUTFChars(expectedJson, nullptr);
+    const char *actual = env->GetStringUTFChars(actualJson, nullptr);
+    const char *options = env->GetStringUTFChars(optionsJson, nullptr);
+    char *result = LuminaAgentRuntimeDiffReplayArtifacts(
+        expected == nullptr ? "{}" : expected,
+        actual == nullptr ? "{}" : actual,
+        options == nullptr ? "{}" : options
+    );
+    if (expected != nullptr) {
+        env->ReleaseStringUTFChars(expectedJson, expected);
+    }
+    if (actual != nullptr) {
+        env->ReleaseStringUTFChars(actualJson, actual);
+    }
+    if (options != nullptr) {
+        env->ReleaseStringUTFChars(optionsJson, options);
+    }
+    return toJString(env, result);
 }

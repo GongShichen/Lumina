@@ -60,6 +60,13 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         return LuminaAgentRuntimeSession(handle: handle)
     }
 
+    public func createSession(replayArtifactJSON: String, forkOptionsJSON: String = "{}") -> LuminaAgentRuntimeSession? {
+        guard let runtimeHandle,
+              let handle = runtimeHandle.createSession(replayArtifactJSON: replayArtifactJSON, forkOptionsJSON: forkOptionsJSON)
+        else { return nil }
+        return LuminaAgentRuntimeSession(handle: handle)
+    }
+
     public func run(request: LuminaAgentRequest) async -> LuminaAgentRunResult {
         await withTaskCancellationHandler {
             await run(request: request, eventSink: nil)
@@ -74,6 +81,17 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         } onCancel: {
             self.cancelCurrentRun()
         }
+    }
+
+    public func runReplayArtifact(artifactJSON: String, optionsJSON: String = "{}") async -> String {
+        guard let runtimeHandle else {
+            return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
+        }
+        return runtimeHandle.runReplayArtifact(artifactJSON: artifactJSON, optionsJSON: optionsJSON)
+    }
+
+    public static func diffReplayArtifacts(expectedJSON: String, actualJSON: String, optionsJSON: String = "{}") -> String {
+        LuminaAgentRuntimeHandle.diffReplayArtifacts(expectedJSON: expectedJSON, actualJSON: actualJSON, optionsJSON: optionsJSON)
     }
 
     public nonisolated func runStream(request: LuminaAgentRequest) -> AsyncStream<LuminaAgentRunEvent> {

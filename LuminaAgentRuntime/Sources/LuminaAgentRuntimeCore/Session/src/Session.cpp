@@ -65,6 +65,8 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"status\":" << jsonString(runStatusName(status())) << ","
            << "\"canContinue\":" << jsonBool(canContinue()) << ","
            << "\"paused\":" << jsonBool(paused_) << ","
+           << "\"request\":" << (trim(requestJson_).empty() ? "{}" : requestJson_) << ","
+           << "\"context\":" << (trim(contextJson_).empty() ? "null" : contextJson_) << ","
            << "\"pending\":" << pendingJson() << ","
            << "\"stepCount\":" << stepCount_ << ","
            << "\"actionCount\":" << actionCount_ << ","
@@ -612,6 +614,38 @@ std::string RuntimeSession::toolResultCandidatesJson(int maxItems, int minCharac
                << "\"summary\":" << jsonString(truncateToCharacters(entry.summary, config_.maximumObservationCharacters)) << ","
                << "\"raw_result_characters\":" << entry.rawResultJson.size() << ","
                << "\"raw_result_excerpt\":" << jsonString(truncateToCharacters(entry.rawResultJson, config_.maximumObservationCharacters)) << ","
+               << "\"timestamp\":" << jsonString(entry.timestamp) << ","
+               << "\"replayable\":" << jsonBool(entry.replayable)
+               << "}";
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string RuntimeSession::toolReplayObservationsJson() const {
+    std::vector<const ToolCallLedgerEntry *> entries;
+    for (const auto &entry : toolCallLedger_) {
+        if (entry.second.replayable) {
+            entries.push_back(&entry.second);
+        }
+    }
+    std::sort(entries.begin(), entries.end(), [](const ToolCallLedgerEntry *lhs, const ToolCallLedgerEntry *rhs) {
+        return lhs->timestamp < rhs->timestamp;
+    });
+    std::ostringstream output;
+    output << "[";
+    for (size_t index = 0; index < entries.size(); index++) {
+        if (index > 0) {
+            output << ",";
+        }
+        const ToolCallLedgerEntry &entry = *entries[index];
+        output << "{"
+               << "\"tool_name\":" << jsonString(entry.toolName) << ","
+               << "\"call_id\":" << jsonString(entry.callId) << ","
+               << "\"canonical_parameters\":" << jsonString(entry.canonicalParameters) << ","
+               << "\"result\":" << (trim(entry.rawResultJson).empty() ? "{}" : entry.rawResultJson) << ","
+               << "\"status\":" << jsonString(entry.status) << ","
+               << "\"summary\":" << jsonString(truncateToCharacters(entry.summary, config_.maximumObservationCharacters)) << ","
                << "\"timestamp\":" << jsonString(entry.timestamp) << ","
                << "\"replayable\":" << jsonBool(entry.replayable)
                << "}";

@@ -383,6 +383,14 @@ private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
 }
 
+private let luminaAllowPermissionCallback: LuminaAgentPermissionCallback = { _, _ in
+    luminaRuntimeCString(#"{"decision":"allowed"}"#)
+}
+
+private let luminaConfirmingCallback: LuminaAgentConfirmationCallback = { _, _ in
+    luminaRuntimeCString(#"{"confirmed":true}"#)
+}
+
 private let luminaLargeToolResultCallback: LuminaAgentToolCallback = { call, _ in
     if let call {
         LuminaRuntimeCaptureStore.shared.appendToolCall(String(cString: call))
@@ -1258,6 +1266,185 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(result.contains("Replay complete"))
         XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("model_output_replayed"))
         XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("tool_observation_replayed"))
+    }
+
+    func testNormalRunDoesNotTriggerExternalReplay() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"normal","text":"normal"}"#)
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let events = LuminaRuntimeCaptureStore.shared.snapshot().events.joined(separator: "\n")
+        XCTAssertFalse(events.contains("replay_started"))
+        XCTAssertFalse(events.contains("model_output_replayed"))
+        XCTAssertFalse(events.contains("tool_observation_replayed"))
+    }
+
+    func testStrictReplayMissingToolObservationFailsWithoutLiveTool() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"data.lookup","description":"Lookup data.","category":"data","sideEffect":"readOnly","readOnly":true,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let replay = #"""
+        {
+          "mode":"replay_strict",
+          "model_outputs":[
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"missing"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Should not reach","completed":true,"requires_followup":false}}
+          ],
+          "tool_observations":[]
+        }
+        """#
+        let resultPointer = LuminaAgentRuntimeRunReplay(runtime, #"{"id":"strict","text":"strict"}"#, replay)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue(result.contains("replay script did not provide a matching tool observation"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("replay_missing_entry"))
+    }
+
+    func testMixedReplayMissingReadOnlyObservationCanFallbackLive() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"data.lookup","description":"Lookup data.","category":"data","sideEffect":"readOnly","readOnly":true,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let artifact = #"""
+        {
+          "artifact_type":"lumina_replay_artifact",
+          "request":{"id":"mixed","text":"mixed"},
+          "model_outputs":[
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"live"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Mixed replay complete","completed":true,"requires_followup":false}}
+          ],
+          "tool_observations":[]
+        }
+        """#
+        let resultPointer = LuminaAgentRuntimeRunReplayArtifact(
+            runtime,
+            artifact,
+            #"{"mode":"replay_mixed","allow_live_readonly_tool":true}"#
+        )
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(result.contains("Mixed replay complete"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("replay_live_fallback"))
+    }
+
+    func testSideEffectReplayFallbackRequiresConfirmationBeforeLiveTool() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        LuminaAgentRuntimeSetPermissionCallback(runtime, luminaAllowPermissionCallback, nil)
+        LuminaAgentRuntimeSetConfirmationCallback(runtime, luminaConfirmingCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"unsafe.write","description":"Write data.","category":"data","sideEffect":"appLocalWrite","readOnly":false,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let artifact = #"""
+        {
+          "artifact_type":"lumina_replay_artifact",
+          "request":{"id":"write","text":"write"},
+          "model_outputs":[
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Write.","tool_name":"unsafe.write","parameters":{"query":"create"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Write replay complete","completed":true,"requires_followup":false}}
+          ],
+          "tool_observations":[]
+        }
+        """#
+        let resultPointer = LuminaAgentRuntimeRunReplayArtifact(
+            runtime,
+            artifact,
+            #"{"mode":"replay_mixed","allow_live_side_effect_tool_after_confirmation":true}"#
+        )
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(result.contains("Write replay complete"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains(#""requires_confirmation":true"#))
+    }
+
+    func testReplayArtifactExportForkAndDiffThroughCABI() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 2)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"artifact","text":"artifact"}"#) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+        let setPointer = LuminaAgentRuntimeSessionSetState(runtime, session, "session", "topic", #"{"value":"replay"}"#)
+        if let setPointer { LuminaAgentRuntimeReleaseString(setPointer) }
+
+        let artifactPointer = LuminaAgentRuntimeExportReplayArtifact(session, #"{"redaction_level":"summary"}"#)
+        let artifact = artifactPointer.map { String(cString: $0) } ?? "{}"
+        if let artifactPointer { LuminaAgentRuntimeReleaseString(artifactPointer) }
+        XCTAssertTrue(artifact.contains("lumina_replay_artifact"))
+        XCTAssertTrue(artifact.contains("runtime_checkpoint"))
+        XCTAssertTrue(artifact.contains("state_snapshot"))
+
+        guard let forked = LuminaAgentRuntimeCreateSessionFromReplayArtifact(
+            runtime,
+            artifact,
+            #"{"overrides":{"request":{"id":"fork","text":"forked"}}}"#
+        ) else {
+            XCTFail("Failed to fork from replay artifact")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(forked) }
+        let snapshotPointer = LuminaAgentRuntimeSnapshotSession(forked)
+        let snapshot = snapshotPointer.map { String(cString: $0) } ?? "{}"
+        if let snapshotPointer { LuminaAgentRuntimeReleaseString(snapshotPointer) }
+        XCTAssertTrue(snapshot.contains("forked"))
+
+        let diffSamePointer = LuminaAgentRuntimeDiffReplayArtifacts(artifact, artifact, "{}")
+        let diffSame = diffSamePointer.map { String(cString: $0) } ?? "{}"
+        if let diffSamePointer { LuminaAgentRuntimeReleaseString(diffSamePointer) }
+        XCTAssertTrue(diffSame.contains(#""exact_match":true"#))
+
+        let changed = artifact.replacingOccurrences(of: #""tool_observations":[]"#, with: #""tool_observations":[{"tool_name":"x","result":{"status":"succeeded","content":"changed"}}]"#)
+        let diffChangedPointer = LuminaAgentRuntimeDiffReplayArtifacts(artifact, changed, "{}")
+        let diffChanged = diffChangedPointer.map { String(cString: $0) } ?? "{}"
+        if let diffChangedPointer { LuminaAgentRuntimeReleaseString(diffChangedPointer) }
+        XCTAssertTrue(diffChanged.contains(#""tool_drift":true"#))
     }
 
     func testCheckpointPolicyEmitsCoreCheckpointEvent() throws {

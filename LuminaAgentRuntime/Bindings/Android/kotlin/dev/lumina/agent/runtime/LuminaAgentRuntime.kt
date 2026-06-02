@@ -94,11 +94,17 @@ class LuminaAgentRuntime(
     fun runReplay(requestJson: String, replayJson: String): String =
         Native.runReplay(nativeHandle, requestJson, replayJson)
 
+    fun runReplayArtifact(artifactJson: String, optionsJson: String = "{}"): String =
+        Native.runReplayArtifact(nativeHandle, artifactJson, optionsJson)
+
     fun createSession(requestJson: String): AgentSession =
         AgentSession(this, Native.createSession(nativeHandle, requestJson))
 
     fun createSessionFromCheckpoint(checkpointJson: String): AgentSession =
         AgentSession(this, Native.createSessionFromCheckpoint(nativeHandle, checkpointJson))
+
+    fun createSessionFromReplayArtifact(artifactJson: String, forkOptionsJson: String = "{}"): AgentSession =
+        AgentSession(this, Native.createSessionFromReplayArtifact(nativeHandle, artifactJson, forkOptionsJson))
 
     fun cancel(requestId: String? = null): String =
         Native.cancel(nativeHandle, requestId)
@@ -167,6 +173,7 @@ class LuminaAgentRuntime(
         fun resume(observationJson: String): String = Native.resumeSession(runtime.nativeHandle, sessionHandle, observationJson)
         fun snapshot(): String = Native.snapshotSession(sessionHandle)
         fun exportCheckpoint(): String = Native.exportSessionCheckpoint(sessionHandle)
+        fun exportReplayArtifact(optionsJson: String = "{}"): String = Native.exportReplayArtifact(sessionHandle, optionsJson)
         fun setState(scope: String, key: String, valueJson: String): String =
             Native.sessionSetState(runtime.nativeHandle, sessionHandle, scope, key, valueJson)
         fun getState(scope: String, key: String): String =
@@ -195,22 +202,28 @@ class LuminaAgentRuntime(
         external fun registerHookRoute(handle: Long, routeJson: String): String
         external fun run(handle: Long, requestJson: String): String
         external fun runReplay(handle: Long, requestJson: String, replayJson: String): String
+        external fun runReplayArtifact(handle: Long, artifactJson: String, optionsJson: String): String
         external fun createSession(handle: Long, requestJson: String): Long
         external fun createSessionFromCheckpoint(handle: Long, checkpointJson: String): Long
+        external fun createSessionFromReplayArtifact(handle: Long, artifactJson: String, forkOptionsJson: String): Long
         external fun runSession(handle: Long, sessionHandle: Long): String
         external fun runSessionReplay(handle: Long, sessionHandle: Long, replayJson: String): String
         external fun resumeSession(handle: Long, sessionHandle: Long, observationJson: String): String
         external fun snapshotSession(sessionHandle: Long): String
         external fun exportSessionCheckpoint(sessionHandle: Long): String
+        external fun exportReplayArtifact(sessionHandle: Long, optionsJson: String): String
         external fun sessionSetState(handle: Long, sessionHandle: Long, scope: String, key: String, valueJson: String): String
         external fun sessionGetState(sessionHandle: Long, scope: String, key: String): String
         external fun sessionDeleteState(handle: Long, sessionHandle: Long, scope: String, key: String): String
         external fun destroySession(sessionHandle: Long)
         external fun cancel(handle: Long, requestId: String?): String
         external fun exportContracts(): String
+        external fun diffReplayArtifacts(expectedJson: String, actualJson: String, optionsJson: String): String
     }
 
     companion object {
         fun exportContracts(): String = Native.exportContracts()
+        fun diffReplayArtifacts(expectedJson: String, actualJson: String, optionsJson: String = "{}"): String =
+            Native.diffReplayArtifacts(expectedJson, actualJson, optionsJson)
     }
 }

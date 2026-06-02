@@ -240,6 +240,16 @@ napi_value runReplay(napi_env env, napi_callback_info info) {
     return stringValueAndRelease(env, LuminaAgentRuntimeRunReplay(native->runtime, request.c_str(), replay.c_str()));
 }
 
+napi_value runReplayArtifact(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string artifact = stringFromValue(env, args[1]);
+    std::string options = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRunReplayArtifact(native->runtime, artifact.c_str(), options.c_str()));
+}
+
 napi_value createSession(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2] = {};
@@ -261,6 +271,20 @@ napi_value createSessionFromCheckpoint(napi_env env, napi_callback_info info) {
     std::string checkpoint = stringFromValue(env, args[1]);
     auto *session = new NativeSession();
     session->session = LuminaAgentRuntimeCreateSessionFromCheckpoint(native->runtime, checkpoint.c_str());
+    napi_value external = nullptr;
+    napi_create_external(env, session, nullptr, nullptr, &external);
+    return external;
+}
+
+napi_value createSessionFromReplayArtifact(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string artifact = stringFromValue(env, args[1]);
+    std::string options = stringFromValue(env, args[2]);
+    auto *session = new NativeSession();
+    session->session = LuminaAgentRuntimeCreateSessionFromReplayArtifact(native->runtime, artifact.c_str(), options.c_str());
     napi_value external = nullptr;
     napi_create_external(env, session, nullptr, nullptr, &external);
     return external;
@@ -309,6 +333,15 @@ napi_value exportSessionCheckpoint(napi_env env, napi_callback_info info) {
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     NativeSession *session = sessionFromExternal(env, args[0]);
     return stringValueAndRelease(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+}
+
+napi_value exportReplayArtifact(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    std::string options = stringFromValue(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeExportReplayArtifact(session->session, options.c_str()));
 }
 
 napi_value sessionSetState(napi_env env, napi_callback_info info) {
@@ -369,6 +402,16 @@ napi_value exportContracts(napi_env env, napi_callback_info) {
     return stringValueAndRelease(env, LuminaAgentRuntimeExportContracts());
 }
 
+napi_value diffReplayArtifacts(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    std::string expected = stringFromValue(env, args[0]);
+    std::string actual = stringFromValue(env, args[1]);
+    std::string options = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeDiffReplayArtifacts(expected.c_str(), actual.c_str(), options.c_str()));
+}
+
 napi_value init(napi_env env, napi_value exports) {
     napi_property_descriptor descriptors[] = {
         {"create", nullptr, create, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -378,19 +421,23 @@ napi_value init(napi_env env, napi_value exports) {
         {"registerHookRoute", nullptr, registerHookRoute, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"run", nullptr, run, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runReplay", nullptr, runReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"runReplayArtifact", nullptr, runReplayArtifact, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"createSession", nullptr, createSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"createSessionFromCheckpoint", nullptr, createSessionFromCheckpoint, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"createSessionFromReplayArtifact", nullptr, createSessionFromReplayArtifact, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runSession", nullptr, runSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runSessionReplay", nullptr, runSessionReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resumeSession", nullptr, resumeSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"snapshotSession", nullptr, snapshotSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"exportSessionCheckpoint", nullptr, exportSessionCheckpoint, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"exportReplayArtifact", nullptr, exportReplayArtifact, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionSetState", nullptr, sessionSetState, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionGetState", nullptr, sessionGetState, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"sessionDeleteState", nullptr, sessionDeleteState, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"destroySession", nullptr, destroySession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"cancel", nullptr, cancel, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"exportContracts", nullptr, exportContracts, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"diffReplayArtifacts", nullptr, diffReplayArtifacts, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(descriptors) / sizeof(descriptors[0]), descriptors);
     return exports;

@@ -250,6 +250,17 @@ extern "C" char *LuminaAgentRuntimeRunReplay(
     return LuminaAgent::copyCString(runtime->runtime.runReplay(request_json, replay_json));
 }
 
+extern "C" char *LuminaAgentRuntimeRunReplayArtifact(
+    LuminaAgentRuntimeRef *runtime,
+    const char *artifact_json,
+    const char *options_json
+) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.runReplayArtifact(artifact_json, options_json));
+}
+
 extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSession(
     LuminaAgentRuntimeRef *runtime,
     const char *request_json
@@ -336,6 +347,24 @@ extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromChec
         delete sessionRef;
         return nullptr;
     }
+    return sessionRef;
+}
+
+extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromReplayArtifact(
+    LuminaAgentRuntimeRef *runtime,
+    const char *artifact_json,
+    const char *fork_options_json
+) {
+    if (runtime == nullptr || artifact_json == nullptr) {
+        return nullptr;
+    }
+    LuminaAgent::RuntimeSession *session = runtime->runtime.createSessionFromReplayArtifact(artifact_json, fork_options_json);
+    if (session == nullptr) {
+        return nullptr;
+    }
+    auto *sessionRef = new LuminaAgentRuntimeSessionRef(runtime->runtime.sessionConfig());
+    sessionRef->session = *session;
+    delete session;
     return sessionRef;
 }
 
@@ -449,6 +478,24 @@ extern "C" char *LuminaAgentRuntimeExportSessionTrace(LuminaAgentRuntimeSessionR
     }
     const std::string requested = format == nullptr ? "" : LuminaAgent::lowercased(format);
     return LuminaAgent::copyCString(requested == "jsonl" ? session->session.traceJsonl() : session->session.traceJson());
+}
+
+extern "C" char *LuminaAgentRuntimeExportReplayArtifact(
+    LuminaAgentRuntimeSessionRef *session,
+    const char *options_json
+) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime session.");
+    }
+    return LuminaAgent::copyCString(LuminaAgent::Runtime::exportReplayArtifact(session->session, options_json));
+}
+
+extern "C" char *LuminaAgentRuntimeDiffReplayArtifacts(
+    const char *expected_json,
+    const char *actual_json,
+    const char *options_json
+) {
+    return LuminaAgent::copyCString(LuminaAgent::Runtime::diffReplayArtifacts(expected_json, actual_json, options_json));
 }
 
 extern "C" char *LuminaAgentRuntimeExportContracts(void) {

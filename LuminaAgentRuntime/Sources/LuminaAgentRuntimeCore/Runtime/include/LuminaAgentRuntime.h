@@ -491,6 +491,20 @@ char *LuminaAgentRuntimeRunReplay(
 );
 
 /**
+ * Runs one complete task using a caller-provided replay artifact and options.
+ *
+ * This is an explicit replay entrypoint. Normal `LuminaAgentRuntimeRun` never
+ * consumes external replay artifacts. `artifact_json` should be a JSON object
+ * containing request/checkpoint/trace/model_outputs/tool_observations. The
+ * optional `options_json` controls strict/mixed/fork style replay behavior.
+ */
+char *LuminaAgentRuntimeRunReplayArtifact(
+    LuminaAgentRuntimeRef *runtime,
+    const char *artifact_json,
+    const char *options_json
+);
+
+/**
  * Creates an explicit pausable task session.
  *
  * `request_json` is copied by the runtime session and should contain caller
@@ -558,6 +572,19 @@ char *LuminaAgentRuntimeExportSessionCheckpoint(LuminaAgentRuntimeSessionRef *se
 LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromCheckpoint(
     LuminaAgentRuntimeRef *runtime,
     const char *checkpoint_json
+);
+
+/**
+ * Creates a session from a replay artifact and optional fork options.
+ *
+ * The core restores the artifact checkpoint when present and applies simple
+ * request/context overrides from `fork_options_json`. Callers remain
+ * responsible for storing artifacts.
+ */
+LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromReplayArtifact(
+    LuminaAgentRuntimeRef *runtime,
+    const char *artifact_json,
+    const char *fork_options_json
 );
 
 /**
@@ -643,6 +670,23 @@ char *LuminaReActNormalizeStepText(const char *text, const char *dialect);
  * `LuminaAgentRuntimeReleaseString`.
  */
 char *LuminaAgentRuntimeExportSessionTrace(LuminaAgentRuntimeSessionRef *session, const char *format);
+
+/**
+ * Exports a replay artifact JSON for caller-owned persistence.
+ */
+char *LuminaAgentRuntimeExportReplayArtifact(
+    LuminaAgentRuntimeSessionRef *session,
+    const char *options_json
+);
+
+/**
+ * Diffs two replay artifact JSON values and returns drift flags.
+ */
+char *LuminaAgentRuntimeDiffReplayArtifacts(
+    const char *expected_json,
+    const char *actual_json,
+    const char *options_json
+);
 
 /**
  * Exports runtime protocol contracts for model adapters and training tools.

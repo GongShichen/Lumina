@@ -127,6 +127,7 @@ public:
     const ToolCallLedgerEntry *findReplayableToolCall(const std::string &dedupKey) const;
     void recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry);
     std::string toolResultCandidatesJson(int maxItems, int minCharacters) const;
+    std::string toolReplayObservationsJson() const;
     std::string recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry);
 
     // Terminal state helpers for cancellation and unrecoverable failures.

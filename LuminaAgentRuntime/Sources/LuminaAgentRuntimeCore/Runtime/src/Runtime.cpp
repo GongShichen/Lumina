@@ -503,6 +503,72 @@ std::string Runtime::runReplay(const char *requestJson, const char *replayJson) 
     return runSession(session, requestJson, false, replayJson);
 }
 
+std::string Runtime::runReplayArtifact(const char *artifactJson, const char *optionsJson) {
+    if (!sessionConfig_.isConfigured) {
+        return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
+    }
+    const std::string artifact = artifactJson == nullptr ? "{}" : std::string(artifactJson);
+    const std::string request = RuntimeReplayController::requestFromArtifact(artifact);
+    const std::string replay = RuntimeReplayController::replayScriptFromArtifact(artifact, optionsJson == nullptr ? "{}" : std::string(optionsJson));
+    RuntimeSession session(sessionConfig_);
+    const std::string checkpoint = RuntimeReplayController::checkpointFromArtifact(artifact);
+    if (!trim(checkpoint).empty()) {
+        std::string error;
+        session.restoreFromCheckpointJson(checkpoint, error);
+    }
+    return runSession(session, request.c_str(), false, replay.c_str());
+}
+
+RuntimeSession *Runtime::createSessionFromReplayArtifact(const char *artifactJson, const char *forkOptionsJson) const {
+    const std::string artifact = artifactJson == nullptr ? "{}" : std::string(artifactJson);
+    const std::string checkpoint = RuntimeReplayController::checkpointFromArtifact(artifact);
+    auto *session = new RuntimeSession(sessionConfig_);
+    if (!trim(checkpoint).empty()) {
+        std::string error;
+        if (!session->restoreFromCheckpointJson(checkpoint, error)) {
+            delete session;
+            return nullptr;
+        }
+    } else {
+        session->setRequestJson(RuntimeReplayController::requestFromArtifact(artifact));
+    }
+    std::map<std::string, JsonField> fields;
+    if (parseFieldsOrEmpty(forkOptionsJson == nullptr ? "{}" : std::string(forkOptionsJson), fields)) {
+        const std::string overrides = rawField(fields, "overrides", "{}");
+        std::map<std::string, JsonField> overrideFields;
+        if (parseFieldsOrEmpty(overrides, overrideFields)) {
+            const std::string request = rawField(overrideFields, "request", "");
+            if (!request.empty() && request != "null") {
+                session->setRequestJson(request);
+            }
+            const std::string context = rawField(overrideFields, "context", "");
+            if (!context.empty() && context != "null") {
+                session->setContextJson(context);
+            }
+        }
+    }
+    session->appendTrace("replay_session_created", "{\"source\":\"artifact\"}");
+    return session;
+}
+
+std::string Runtime::exportReplayArtifact(const RuntimeSession &session, const char *optionsJson) {
+    return RuntimeReplayController::artifactFromSession(
+        session.checkpointJson(),
+        session.traceJson(),
+        session.toolReplayObservationsJson(),
+        session.stateSnapshotJson(),
+        optionsJson == nullptr ? "{}" : std::string(optionsJson)
+    );
+}
+
+std::string Runtime::diffReplayArtifacts(const char *expectedJson, const char *actualJson, const char *optionsJson) {
+    return RuntimeReplayController::diffArtifacts(
+        expectedJson == nullptr ? "{}" : std::string(expectedJson),
+        actualJson == nullptr ? "{}" : std::string(actualJson),
+        optionsJson == nullptr ? "{}" : std::string(optionsJson)
+    );
+}
+
 std::string Runtime::runSession(RuntimeSession &session, const char *requestJson, bool allowPause, const char *replayJson) {
     if (!sessionConfig_.isConfigured) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
@@ -512,7 +578,10 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     }
     RuntimeReplayController replay = RuntimeReplayController::fromJson(replayJson == nullptr ? "{}" : replayJson);
     RuntimeReplayController *replayController = replay.isConfigured() ? &replay : nullptr;
-    if (!callbacks_.hasModel() && !callbacks_.hasStreamingModel() && !replay.hasModelReplay()) {
+    if (!callbacks_.hasModel() &&
+        !callbacks_.hasStreamingModel() &&
+        !replay.hasModelReplay() &&
+        (replayController == nullptr || replayController->allowsLiveModel())) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\n没有可用的模型回调。\"}";
     }
 
@@ -625,6 +694,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 stepJson = replayController->nextModelStep();
                 events.emitEvent("model_output_replayed", "{\"iteration\":" + std::to_string(session.stepCount()) + "}");
             } else if (replayController != nullptr && !replayController->allowsLiveModel()) {
+                events.emitEvent("replay_missing_entry", "{\"kind\":\"model_output\",\"iteration\":" + std::to_string(session.stepCount()) + "}");
                 events.emitEvent("model_generation_failed", "{\"reason\":\"replay-missing-model-output\"}");
                 session.failWithResult("replay-missing-model-output", "### 无法执行\n\nReplay script did not provide a matching model output.");
                 break;

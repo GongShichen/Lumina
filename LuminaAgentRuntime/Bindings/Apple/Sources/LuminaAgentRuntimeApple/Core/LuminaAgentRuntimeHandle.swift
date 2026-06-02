@@ -90,6 +90,17 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         }
     }
 
+    func runReplayArtifact(artifactJSON: String, optionsJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
+        }
+        return artifactJSON.withCString { artifactPointer in
+            optionsJSON.withCString { optionsPointer in
+                consumeRuntimeString(LuminaAgentRuntimeRunReplayArtifact(handle, artifactPointer, optionsPointer))
+            }
+        }
+    }
+
     func createSession(requestJSON: String) -> LuminaAgentRuntimeSessionHandle? {
         guard let handle = currentHandle() else { return nil }
         return requestJSON.withCString { requestPointer in
@@ -103,6 +114,16 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         return checkpointJSON.withCString { checkpointPointer in
             guard let session = LuminaAgentRuntimeCreateSessionFromCheckpoint(handle, checkpointPointer) else { return nil }
             return LuminaAgentRuntimeSessionHandle(runtime: self, session: session)
+        }
+    }
+
+    func createSession(replayArtifactJSON: String, forkOptionsJSON: String) -> LuminaAgentRuntimeSessionHandle? {
+        guard let handle = currentHandle() else { return nil }
+        return replayArtifactJSON.withCString { artifactPointer in
+            forkOptionsJSON.withCString { optionsPointer in
+                guard let session = LuminaAgentRuntimeCreateSessionFromReplayArtifact(handle, artifactPointer, optionsPointer) else { return nil }
+                return LuminaAgentRuntimeSessionHandle(runtime: self, session: session)
+            }
         }
     }
 
@@ -146,6 +167,12 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         consumeRuntimeString(LuminaAgentRuntimeExportSessionCheckpoint(session))
     }
 
+    func exportReplayArtifact(session: OpaquePointer, optionsJSON: String) -> String {
+        optionsJSON.withCString { optionsPointer in
+            consumeRuntimeString(LuminaAgentRuntimeExportReplayArtifact(session, optionsPointer))
+        }
+    }
+
     func stateSnapshot(session: OpaquePointer) -> String {
         consumeRuntimeString(LuminaAgentRuntimeSessionStateSnapshot(session))
     }
@@ -185,6 +212,16 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
     func exportTrace(session: OpaquePointer, format: String) -> String {
         format.withCString { formatPointer in
             consumeRuntimeString(LuminaAgentRuntimeExportSessionTrace(session, formatPointer))
+        }
+    }
+
+    static func diffReplayArtifacts(expectedJSON: String, actualJSON: String, optionsJSON: String) -> String {
+        expectedJSON.withCString { expectedPointer in
+            actualJSON.withCString { actualPointer in
+                optionsJSON.withCString { optionsPointer in
+                    consumeRuntimeString(LuminaAgentRuntimeDiffReplayArtifacts(expectedPointer, actualPointer, optionsPointer))
+                }
+            }
         }
     }
 
@@ -237,6 +274,10 @@ public final class LuminaAgentRuntimeSession: @unchecked Sendable {
 
     public func exportCheckpoint() -> String {
         handle.exportCheckpoint()
+    }
+
+    public func exportReplayArtifact(optionsJSON: String = "{}") -> String {
+        handle.exportReplayArtifact(optionsJSON: optionsJSON)
     }
 
     public func stateSnapshot() -> String {
@@ -304,6 +345,11 @@ final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
     func exportCheckpoint() -> String {
         guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
         return runtime.exportCheckpoint(session: session)
+    }
+
+    func exportReplayArtifact(optionsJSON: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.exportReplayArtifact(session: session, optionsJSON: optionsJSON)
     }
 
     func stateSnapshot() -> String {

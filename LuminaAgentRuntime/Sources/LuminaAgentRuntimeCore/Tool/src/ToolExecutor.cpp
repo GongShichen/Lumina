@@ -305,13 +305,36 @@ std::string ToolExecutor::runToolCall(
             HookDispatcher(callbacks_).dispatch("observation_created", observation);
             return replayedResult;
         }
-        if (!replay_->allowsLiveTool()) {
+        const bool toolReadOnly = tools_.isReadOnly(activeToolName);
+        const bool toolDestructive = tools_.isDestructive(activeToolName);
+        if (!replay_->allowsLiveTool(toolReadOnly, toolDestructive)) {
             const std::string error = "replay script did not provide a matching tool observation";
             const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
             const std::string observation = session.recordObservation(activeToolName, "failed", "", error, confirmationRequired, false);
+            callbacks_.emitEvent(
+                "replay_missing_entry",
+                "{\"kind\":\"tool_observation\",\"tool_name\":" + jsonString(activeToolName) +
+                    ",\"call_id\":" + jsonString(callId) +
+                    ",\"canonical_parameters\":" + jsonString(excerpt(canonicalParameters, 800)) +
+                    ",\"allow_live_tool\":false}"
+            );
             callbacks_.emitEvent("observation_created", observation);
+            if (replay_->failOnMissingObservation()) {
+                session.failWithResult("replay-missing-observation", "### 无法回放\n\n" + error);
+            }
             return result;
         }
+        if (replay_->requiresConfirmationForLiveSideEffect(toolReadOnly, toolDestructive)) {
+            confirmationRequired = true;
+        }
+        callbacks_.emitEvent(
+            "replay_live_fallback",
+            "{\"kind\":\"tool_observation\",\"tool_name\":" + jsonString(activeToolName) +
+                ",\"call_id\":" + jsonString(callId) +
+                ",\"read_only\":" + jsonBool(toolReadOnly) +
+                ",\"destructive\":" + jsonBool(toolDestructive) +
+                ",\"requires_confirmation\":" + jsonBool(confirmationRequired) + "}"
+        );
     }
 
     if (idempotencyPolicy != "always_execute") {
