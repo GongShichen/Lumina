@@ -13,6 +13,7 @@ export type LuminaRuntimeProviders = {
   trace?: (traceJson: string) => void
   metrics?: (metricJson: string) => void
   span?: (spanJson: string) => void
+  sessionHistory?: (historyEventJson: string) => void
 }
 
 type NativeRuntimeModule = {
@@ -31,7 +32,7 @@ type NativeRuntimeModule = {
   runSessionReplay(handle: Object, session: Object, replayJson: string): string
   resumeSession(handle: Object, session: Object, observationJson: string): string
   snapshotSession(session: Object): string
-  exportSessionCheckpoint(session: Object): string
+  exportSessionCheckpoint(handle: Object, session: Object): string
   exportReplayArtifact(session: Object, optionsJson: string): string
   sessionSetState(handle: Object, session: Object, scope: string, key: string, valueJson: string): string
   sessionGetState(session: Object, scope: string, key: string): string
@@ -158,6 +159,10 @@ export class LuminaAgentRuntime {
     this.providers.span?.(spanJson)
   }
 
+  recordSessionHistory(historyEventJson: string): void {
+    this.providers.sessionHistory?.(historyEventJson)
+  }
+
   static exportContracts(): string {
     return luminaRuntimeNative.exportContracts()
   }
@@ -197,7 +202,7 @@ export class LuminaAgentRuntimeSession {
   }
 
   exportCheckpoint(): string {
-    return luminaRuntimeNative.exportSessionCheckpoint(this.requireHandle())
+    return luminaRuntimeNative.exportSessionCheckpoint(this.runtimeHandle, this.requireHandle())
   }
 
   exportReplayArtifact(optionsJson: string = '{}'): string {

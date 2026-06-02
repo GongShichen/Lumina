@@ -146,6 +146,10 @@ void spanCallback(const char *spanJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "writeSpan", spanJson);
 }
 
+void sessionHistoryCallback(const char *historyJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "recordSessionHistory", historyJson);
+}
+
 napi_value create(napi_env env, napi_callback_info info) {
     size_t argc = 2;
     napi_value args[2] = {};
@@ -172,6 +176,7 @@ napi_value create(napi_env env, napi_callback_info info) {
     LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
     LuminaAgentRuntimeSetMetricsCallback(native->runtime, metricsCallback, native);
     LuminaAgentRuntimeSetSpanCallback(native->runtime, spanCallback, native);
+    LuminaAgentRuntimeSetSessionHistoryCallback(native->runtime, sessionHistoryCallback, native);
     LuminaAgentRuntimeSetHookCallback(native->runtime, hookCallback, native);
 
     napi_value external = nullptr;
@@ -328,11 +333,12 @@ napi_value snapshotSession(napi_env env, napi_callback_info info) {
 }
 
 napi_value exportSessionCheckpoint(napi_env env, napi_callback_info info) {
-    size_t argc = 1;
-    napi_value args[1] = {};
+    size_t argc = 2;
+    napi_value args[2] = {};
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    NativeSession *session = sessionFromExternal(env, args[0]);
-    return stringValueAndRelease(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeExportSessionCheckpointWithHistory(native->runtime, session->session));
 }
 
 napi_value exportReplayArtifact(napi_env env, napi_callback_info info) {

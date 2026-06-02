@@ -65,6 +65,7 @@ public:
     void setTrace(LuminaAgentTraceCallback callback, void *context);
     void setMetrics(LuminaAgentMetricsCallback callback, void *context);
     void setSpan(LuminaAgentSpanCallback callback, void *context);
+    void setSessionHistory(LuminaAgentSessionHistoryCallback callback, void *context);
     void setRollback(LuminaAgentRollbackCallback callback, void *context);
     void setEvent(LuminaAgentEventCallback callback, void *context);
     void setHook(LuminaAgentHookCallback callback, void *context);
@@ -86,6 +87,7 @@ public:
     bool hasTrace() const;
     bool hasMetrics() const;
     bool hasSpan() const;
+    bool hasSessionHistory() const;
 
     // Invoke model callbacks and return runtime-owned std::string values.
     std::string callModel(const std::string &plannerInput) const;
@@ -112,6 +114,13 @@ public:
     void trace(const std::string &type, const std::string &payload = "{}") const;
     void metric(const std::string &name, double value, const std::string &payload = "{}") const;
     void span(const std::string &phase, const std::string &name, const std::string &payload = "{}") const;
+    void recordHistory(const std::string &event, const std::string &payload = "{}") const;
+    void recordHistoryFor(
+        const std::string &sessionId,
+        const std::string &runId,
+        const std::string &event,
+        const std::string &payload = "{}"
+    ) const;
 
 private:
     CallbackSlot model_;
@@ -128,6 +137,7 @@ private:
     CallbackSlot trace_;
     CallbackSlot metrics_;
     CallbackSlot span_;
+    CallbackSlot sessionHistory_;
     CallbackSlot rollback_;
     CallbackSlot event_;
     CallbackSlot hook_;
@@ -135,6 +145,7 @@ private:
     std::string currentSessionId_;
     std::string currentRunId_;
     mutable long long telemetrySequence_ = 0;
+    mutable long long historySequence_ = 0;
     mutable std::vector<std::pair<std::string, std::string>> spanStack_;
 };
 

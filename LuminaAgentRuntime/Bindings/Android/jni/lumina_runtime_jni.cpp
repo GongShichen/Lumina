@@ -161,6 +161,10 @@ void spanCallback(const char *spanJson, void *context) {
     callVoidMethod(static_cast<NativeRuntime *>(context), "writeSpan", spanJson);
 }
 
+void sessionHistoryCallback(const char *historyJson, void *context) {
+    callVoidMethod(static_cast<NativeRuntime *>(context), "recordSessionHistory", historyJson);
+}
+
 NativeRuntime *nativeFromHandle(jlong handle) {
     return reinterpret_cast<NativeRuntime *>(handle);
 }
@@ -212,6 +216,7 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_create(
     LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
     LuminaAgentRuntimeSetMetricsCallback(native->runtime, metricsCallback, native);
     LuminaAgentRuntimeSetSpanCallback(native->runtime, spanCallback, native);
+    LuminaAgentRuntimeSetSessionHistoryCallback(native->runtime, sessionHistoryCallback, native);
     LuminaAgentRuntimeSetHookCallback(native->runtime, hookCallback, native);
     return reinterpret_cast<jlong>(native);
 }
@@ -453,9 +458,15 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_snapshotSession(JNI
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportSessionCheckpoint(JNIEnv *env, jobject, jlong sessionHandle) {
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportSessionCheckpoint(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
     NativeSession *session = sessionFromHandle(sessionHandle);
-    return toJString(env, LuminaAgentRuntimeExportSessionCheckpoint(session->session));
+    return toJString(env, LuminaAgentRuntimeExportSessionCheckpointWithHistory(native->runtime, session->session));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

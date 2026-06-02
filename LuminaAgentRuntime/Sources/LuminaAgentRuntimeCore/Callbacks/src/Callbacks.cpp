@@ -16,6 +16,115 @@ static long long timestampMilliseconds() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
 
+static bool isSensitiveHistoryKey(const std::string &key) {
+    const std::string normalized = lowercased(key);
+    return normalized == "api_key" ||
+        normalized == "apikey" ||
+        normalized == "token" ||
+        normalized == "secret" ||
+        normalized == "password" ||
+        normalized == "authorization" ||
+        normalized.find("api_key") != std::string::npos ||
+        normalized.find("apikey") != std::string::npos ||
+        normalized.find("token") != std::string::npos ||
+        normalized.find("secret") != std::string::npos ||
+        normalized.find("password") != std::string::npos ||
+        normalized.find("authorization") != std::string::npos;
+}
+
+static std::vector<std::string> splitTopLevelArrayValues(const std::string &arrayJson) {
+    std::vector<std::string> values;
+    const std::string text = trim(arrayJson);
+    if (text.size() < 2 || text.front() != '[' || text.back() != ']') {
+        return values;
+    }
+    size_t start = 1;
+    int objectDepth = 0;
+    int arrayDepth = 0;
+    bool insideString = false;
+    bool escaped = false;
+    for (size_t index = 1; index + 1 < text.size(); index++) {
+        const char c = text[index];
+        if (insideString) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                insideString = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            insideString = true;
+            continue;
+        }
+        if (c == '{') {
+            objectDepth++;
+        } else if (c == '}') {
+            objectDepth--;
+        } else if (c == '[') {
+            arrayDepth++;
+        } else if (c == ']') {
+            arrayDepth--;
+        } else if (c == ',' && objectDepth == 0 && arrayDepth == 0) {
+            values.push_back(text.substr(start, index - start));
+            start = index + 1;
+        }
+    }
+    const std::string tail = trim(text.substr(start, text.size() - start - 1));
+    if (!tail.empty()) {
+        values.push_back(tail);
+    }
+    return values;
+}
+
+static std::string redactHistoryJsonValue(const std::string &json);
+
+static std::string redactHistoryObject(const std::map<std::string, JsonField> &fields) {
+    std::string output = "{";
+    bool first = true;
+    for (const auto &entry : fields) {
+        if (!first) {
+            output += ",";
+        }
+        first = false;
+        output += jsonString(entry.first) + ":";
+        output += isSensitiveHistoryKey(entry.first)
+            ? jsonString("[redacted]")
+            : redactHistoryJsonValue(entry.second.raw);
+    }
+    output += "}";
+    return output;
+}
+
+static std::string redactHistoryJsonValue(const std::string &json) {
+    const std::string text = trim(json);
+    if (text.empty()) {
+        return "{}";
+    }
+    if (text.front() == '{') {
+        std::map<std::string, JsonField> fields;
+        if (parseFieldsOrEmpty(text, fields)) {
+            return redactHistoryObject(fields);
+        }
+        return "{}";
+    }
+    if (text.front() == '[') {
+        const std::vector<std::string> values = splitTopLevelArrayValues(text);
+        std::string output = "[";
+        for (size_t index = 0; index < values.size(); index++) {
+            if (index > 0) {
+                output += ",";
+            }
+            output += redactHistoryJsonValue(values[index]);
+        }
+        output += "]";
+        return output;
+    }
+    return text;
+}
+
 void RuntimeCallbacks::setModel(LuminaAgentModelCallback callback, void *context) {
     model_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -72,6 +181,10 @@ void RuntimeCallbacks::setSpan(LuminaAgentSpanCallback callback, void *context) 
     span_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setSessionHistory(LuminaAgentSessionHistoryCallback callback, void *context) {
+    sessionHistory_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setRollback(LuminaAgentRollbackCallback callback, void *context) {
     rollback_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -88,6 +201,7 @@ void RuntimeCallbacks::setCorrelationContext(const std::string &sessionId, const
     currentSessionId_ = sessionId;
     currentRunId_ = runId;
     telemetrySequence_ = 0;
+    historySequence_ = 0;
     spanStack_.clear();
 }
 
@@ -112,6 +226,7 @@ bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
 bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
 bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
 bool RuntimeCallbacks::hasSpan() const { return span_.function != nullptr; }
+bool RuntimeCallbacks::hasSessionHistory() const { return sessionHistory_.function != nullptr; }
 
 std::string RuntimeCallbacks::callModel(const std::string &plannerInput) const {
     auto callback = reinterpret_cast<LuminaAgentModelCallback>(model_.function);
@@ -627,6 +742,9 @@ void RuntimeCallbacks::clearHookRoutes() {
 }
 
 void RuntimeCallbacks::emitEvent(const std::string &type, const std::string &payload) const {
+    if (type == "observation_created") {
+        recordHistory("observation_created", payload);
+    }
     auto callback = reinterpret_cast<LuminaAgentEventCallback>(event_.function);
     if (callback == nullptr) {
         return;
@@ -730,6 +848,31 @@ void RuntimeCallbacks::span(const std::string &phase, const std::string &name, c
         ",\"run_id\":" + jsonString(currentRunId_) +
         ",\"payload\":" + (trim(payload).empty() ? "{}" : payload) + "}";
     callback(record.c_str(), span_.context);
+}
+
+void RuntimeCallbacks::recordHistory(const std::string &event, const std::string &payload) const {
+    recordHistoryFor(currentSessionId_, currentRunId_, event, payload);
+}
+
+void RuntimeCallbacks::recordHistoryFor(
+    const std::string &sessionId,
+    const std::string &runId,
+    const std::string &event,
+    const std::string &payload
+) const {
+    auto callback = reinterpret_cast<LuminaAgentSessionHistoryCallback>(sessionHistory_.function);
+    if (callback == nullptr) {
+        return;
+    }
+    const long long sequence = ++historySequence_;
+    const std::string redactedPayload = redactHistoryJsonValue(trim(payload).empty() ? "{}" : payload);
+    const std::string record = "{\"event\":" + jsonString(event) +
+        ",\"session_id\":" + jsonString(sessionId) +
+        ",\"run_id\":" + jsonString(runId) +
+        ",\"sequence\":" + std::to_string(sequence) +
+        ",\"timestamp\":" + std::to_string(timestampMilliseconds()) +
+        ",\"payload\":" + redactedPayload + "}";
+    callback(record.c_str(), sessionHistory_.context);
 }
 
 } // namespace LuminaAgent

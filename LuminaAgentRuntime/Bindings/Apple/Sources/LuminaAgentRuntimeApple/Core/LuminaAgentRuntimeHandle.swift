@@ -38,6 +38,7 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetTraceCallback(handle, luminaAgentSwiftAdapterTraceCallback, context)
         LuminaAgentRuntimeSetMetricsCallback(handle, luminaAgentSwiftAdapterMetricsCallback, context)
         LuminaAgentRuntimeSetSpanCallback(handle, luminaAgentSwiftAdapterSpanCallback, context)
+        LuminaAgentRuntimeSetSessionHistoryCallback(handle, luminaAgentSwiftAdapterSessionHistoryCallback, context)
         LuminaAgentRuntimeSetRollbackCallback(handle, luminaAgentSwiftAdapterRollbackCallback, context)
         LuminaAgentRuntimeSetEventCallback(handle, luminaAgentSwiftAdapterEventCallback, context)
         LuminaAgentRuntimeSetHookCallback(handle, luminaAgentSwiftAdapterHookCallback, context)
@@ -164,7 +165,10 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
     }
 
     func exportCheckpoint(session: OpaquePointer) -> String {
-        consumeRuntimeString(LuminaAgentRuntimeExportSessionCheckpoint(session))
+        guard let handle = currentHandle() else {
+            return consumeRuntimeString(LuminaAgentRuntimeExportSessionCheckpoint(session))
+        }
+        return consumeRuntimeString(LuminaAgentRuntimeExportSessionCheckpointWithHistory(handle, session))
     }
 
     func exportReplayArtifact(session: OpaquePointer, optionsJSON: String) -> String {

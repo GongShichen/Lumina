@@ -12,6 +12,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var traces: [String] = []
     private var metrics: [String] = []
     private var spans: [String] = []
+    private var historyEvents: [String] = []
     private var retryRequests: [String] = []
     private var compactionRequests: [String] = []
     private var toolCalls: [String] = []
@@ -25,6 +26,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         traces = []
         metrics = []
         spans = []
+        historyEvents = []
         retryRequests = []
         compactionRequests = []
         toolCalls = []
@@ -60,6 +62,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     func appendSpan(_ value: String) {
         lock.lock()
         spans.append(value)
+        lock.unlock()
+    }
+
+    func appendHistoryEvent(_ value: String) {
+        lock.lock()
+        historyEvents.append(value)
         lock.unlock()
     }
 
@@ -105,10 +113,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], retryRequests: [String], compactionRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], historyEvents: [String], retryRequests: [String], compactionRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, spans, retryRequests, compactionRequests, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, historyEvents, retryRequests, compactionRequests, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -131,6 +139,12 @@ private let luminaMetricsCallback: LuminaAgentMetricsCallback = { metric, _ in
 private let luminaSpanCallback: LuminaAgentSpanCallback = { span, _ in
     if let span {
         LuminaRuntimeCaptureStore.shared.appendSpan(String(cString: span))
+    }
+}
+
+private let luminaHistoryCallback: LuminaAgentSessionHistoryCallback = { event, _ in
+    if let event {
+        LuminaRuntimeCaptureStore.shared.appendHistoryEvent(String(cString: event))
     }
 }
 
@@ -601,6 +615,81 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertFalse(snapshot.traces.isEmpty)
         XCTAssertFalse(snapshot.metrics.isEmpty)
         XCTAssertTrue(snapshot.traces.contains { $0.contains("run_finished") })
+    }
+
+    func testSessionHistoryCallbackReceivesLifecycleEventsAndRedactsSecrets() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetSessionHistoryCallback(runtime, luminaHistoryCallback, nil)
+
+        let request = #"{"text":"history test","api_key":"sk-test-secret","nested":{"token":"bearer-token","password":"pw"}}"#
+        let result = request.withCString { LuminaAgentRuntimeRun(runtime, $0) }
+        if let result { LuminaAgentRuntimeReleaseString(result) }
+
+        let history = LuminaRuntimeCaptureStore.shared.snapshot().historyEvents
+        let eventNames = history.compactMap { event -> String? in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(event.utf8)) as? [String: Any] else { return nil }
+            XCTAssertNotNil(object["session_id"])
+            XCTAssertNotNil(object["run_id"])
+            XCTAssertNotNil(object["sequence"])
+            XCTAssertNotNil(object["timestamp"])
+            return object["event"] as? String
+        }
+        XCTAssertTrue(eventNames.contains("run_started"))
+        XCTAssertTrue(eventNames.contains("step_recorded"))
+        XCTAssertTrue(eventNames.contains("run_finished"))
+        let joined = history.joined(separator: "\n")
+        XCTAssertFalse(joined.contains("sk-test-secret"))
+        XCTAssertFalse(joined.contains("bearer-token"))
+        XCTAssertFalse(joined.contains(#""password":"pw""#))
+        XCTAssertTrue(joined.contains(#""api_key":"[redacted]""#))
+        XCTAssertTrue(joined.contains(#""token":"[redacted]""#))
+    }
+
+    func testSessionHistoryRecordsObservationCreated() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 2)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaAskUserModelCallback, nil)
+        LuminaAgentRuntimeSetSessionHistoryCallback(runtime, luminaHistoryCallback, nil)
+
+        let result = "{}".withCString { LuminaAgentRuntimeRun(runtime, $0) }
+        if let result { LuminaAgentRuntimeReleaseString(result) }
+
+        let history = LuminaRuntimeCaptureStore.shared.snapshot().historyEvents
+        XCTAssertTrue(history.contains { $0.contains(#""event":"observation_created""#) })
+        XCTAssertTrue(history.contains { $0.contains(#""toolName":"ask_user""#) || $0.contains(#""tool_name":"ask_user""#) })
+    }
+
+    func testCheckpointExportWithHistoryIsExplicit() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetSessionHistoryCallback(runtime, luminaHistoryCallback, nil)
+
+        guard let session = "{}".withCString({ LuminaAgentRuntimeCreateSession(runtime, $0) }) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+
+        let oldExport = LuminaAgentRuntimeExportSessionCheckpoint(session)
+        if let oldExport { LuminaAgentRuntimeReleaseString(oldExport) }
+        XCTAssertTrue(LuminaRuntimeCaptureStore.shared.snapshot().historyEvents.isEmpty)
+
+        let newExport = LuminaAgentRuntimeExportSessionCheckpointWithHistory(runtime, session)
+        if let newExport { LuminaAgentRuntimeReleaseString(newExport) }
+        let history = LuminaRuntimeCaptureStore.shared.snapshot().historyEvents
+        XCTAssertEqual(history.count, 1)
+        XCTAssertTrue(history[0].contains(#""event":"checkpoint_exported""#))
     }
 
     func testTaskEnvelopeIsSemanticAndMultimodalWithoutRawRequest() throws {

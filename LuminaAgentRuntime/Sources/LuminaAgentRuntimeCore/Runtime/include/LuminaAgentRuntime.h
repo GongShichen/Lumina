@@ -182,6 +182,15 @@ typedef void (*LuminaAgentMetricsCallback)(const char *metric_json, void *user_c
 typedef void (*LuminaAgentSpanCallback)(const char *span_json, void *user_context);
 
 /**
+ * Callback used by caller-owned session history stores.
+ *
+ * History records are optional, emitted only when this sink is installed, and
+ * intended for conversation/session persistence. The core runtime never writes
+ * them to disk, retries delivery, or changes run status based on this callback.
+ */
+typedef void (*LuminaAgentSessionHistoryCallback)(const char *history_event_json, void *user_context);
+
+/**
  * Callback used by the runtime to request best-effort rollback.
  *
  * The input is a UTF-8 JSON object containing rollback metadata emitted by a
@@ -414,6 +423,15 @@ void LuminaAgentRuntimeSetSpanCallback(
 );
 
 /**
+ * Installs the optional session history sink.
+ */
+void LuminaAgentRuntimeSetSessionHistoryCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentSessionHistoryCallback callback,
+    void *user_context
+);
+
+/**
  * Installs the rollback callback used after failed side-effect tool execution.
  *
  * The runtime passes generic rollback JSON. The caller decides whether rollback
@@ -565,6 +583,15 @@ char *LuminaAgentRuntimeSnapshotSession(LuminaAgentRuntimeSessionRef *session);
  * Exports a complete core checkpoint JSON for caller-owned persistence.
  */
 char *LuminaAgentRuntimeExportSessionCheckpoint(LuminaAgentRuntimeSessionRef *session);
+
+/**
+ * Exports a core checkpoint JSON and emits a checkpoint_exported history event
+ * when the runtime has an optional session history sink installed.
+ */
+char *LuminaAgentRuntimeExportSessionCheckpointWithHistory(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session
+);
 
 /**
  * Creates a session from a previously exported core checkpoint JSON.

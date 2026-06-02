@@ -18,7 +18,8 @@ class LuminaAgentRuntime(
         val audit: AuditSink = AuditSink {},
         val trace: TraceSink = TraceSink {},
         val metrics: MetricsSink = MetricsSink {},
-        val span: SpanSink = SpanSink {}
+        val span: SpanSink = SpanSink {},
+        val sessionHistory: SessionHistoryStore = SessionHistoryStore {}
     )
 
     fun interface ModelProvider {
@@ -75,6 +76,10 @@ class LuminaAgentRuntime(
 
     fun interface SpanSink {
         fun append(spanJson: String)
+    }
+
+    fun interface SessionHistoryStore {
+        fun record(historyEventJson: String)
     }
 
     private var nativeHandle: Long = Native.create(configurationJson, this)
@@ -164,6 +169,10 @@ class LuminaAgentRuntime(
         providers.span.append(spanJson)
     }
 
+    private fun recordSessionHistory(historyEventJson: String) {
+        providers.sessionHistory.record(historyEventJson)
+    }
+
     class AgentSession internal constructor(
         private val runtime: LuminaAgentRuntime,
         private var sessionHandle: Long
@@ -172,7 +181,7 @@ class LuminaAgentRuntime(
         fun runReplay(replayJson: String): String = Native.runSessionReplay(runtime.nativeHandle, sessionHandle, replayJson)
         fun resume(observationJson: String): String = Native.resumeSession(runtime.nativeHandle, sessionHandle, observationJson)
         fun snapshot(): String = Native.snapshotSession(sessionHandle)
-        fun exportCheckpoint(): String = Native.exportSessionCheckpoint(sessionHandle)
+        fun exportCheckpoint(): String = Native.exportSessionCheckpoint(runtime.nativeHandle, sessionHandle)
         fun exportReplayArtifact(optionsJson: String = "{}"): String = Native.exportReplayArtifact(sessionHandle, optionsJson)
         fun setState(scope: String, key: String, valueJson: String): String =
             Native.sessionSetState(runtime.nativeHandle, sessionHandle, scope, key, valueJson)
@@ -210,7 +219,7 @@ class LuminaAgentRuntime(
         external fun runSessionReplay(handle: Long, sessionHandle: Long, replayJson: String): String
         external fun resumeSession(handle: Long, sessionHandle: Long, observationJson: String): String
         external fun snapshotSession(sessionHandle: Long): String
-        external fun exportSessionCheckpoint(sessionHandle: Long): String
+        external fun exportSessionCheckpoint(handle: Long, sessionHandle: Long): String
         external fun exportReplayArtifact(sessionHandle: Long, optionsJson: String): String
         external fun sessionSetState(handle: Long, sessionHandle: Long, scope: String, key: String, valueJson: String): String
         external fun sessionGetState(sessionHandle: Long, scope: String, key: String): String

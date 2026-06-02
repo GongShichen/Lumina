@@ -35,6 +35,7 @@ public:
     void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
     void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);
     void setSpanCallback(LuminaAgentSpanCallback callback, void *context);
+    void setSessionHistoryCallback(LuminaAgentSessionHistoryCallback callback, void *context);
     void setRollbackCallback(LuminaAgentRollbackCallback callback, void *context);
     void setEventCallback(LuminaAgentEventCallback callback, void *context);
     void setHookCallback(LuminaAgentHookCallback callback, void *context);
@@ -47,6 +48,7 @@ public:
     std::string runReplayArtifact(const char *artifactJson, const char *optionsJson);
     RuntimeSession *createSessionFromReplayArtifact(const char *artifactJson, const char *forkOptionsJson) const;
     static std::string exportReplayArtifact(const RuntimeSession &session, const char *optionsJson);
+    std::string exportSessionCheckpointWithHistory(const RuntimeSession &session) const;
     static std::string diffReplayArtifacts(const char *expectedJson, const char *actualJson, const char *optionsJson);
 
     // Advances an explicit session until completion, failure, cancellation, or pause.

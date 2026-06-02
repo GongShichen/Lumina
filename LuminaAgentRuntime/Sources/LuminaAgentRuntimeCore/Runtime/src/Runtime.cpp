@@ -187,6 +187,7 @@ static void emitCheckpointIfNeeded(
         ",\"checkpoint\":" + session.checkpointJson() + "}";
     events.emitControl("checkpoint_created", payload);
     callbacks.trace("checkpoint_created", payload);
+    callbacks.recordHistory("checkpoint_created", payload);
 }
 
 static void applyModelMetadataIfAvailable(RuntimeSession &session, RuntimeCallbacks &callbacks, const std::string &requestJson) {
@@ -467,6 +468,10 @@ void Runtime::setSpanCallback(LuminaAgentSpanCallback callback, void *context) {
     callbacks_.setSpan(callback, context);
 }
 
+void Runtime::setSessionHistoryCallback(LuminaAgentSessionHistoryCallback callback, void *context) {
+    callbacks_.setSessionHistory(callback, context);
+}
+
 void Runtime::setRollbackCallback(LuminaAgentRollbackCallback callback, void *context) {
     callbacks_.setRollback(callback, context);
 }
@@ -561,6 +566,12 @@ std::string Runtime::exportReplayArtifact(const RuntimeSession &session, const c
     );
 }
 
+std::string Runtime::exportSessionCheckpointWithHistory(const RuntimeSession &session) const {
+    const std::string checkpoint = session.checkpointJson();
+    callbacks_.recordHistoryFor(session.sessionId(), session.runId(), "checkpoint_exported", checkpoint);
+    return checkpoint;
+}
+
 std::string Runtime::diffReplayArtifacts(const char *expectedJson, const char *actualJson, const char *optionsJson) {
     return RuntimeReplayController::diffArtifacts(
         expectedJson == nullptr ? "{}" : std::string(expectedJson),
@@ -599,7 +610,9 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         request = requestGuardrail.payloadJson;
         events.emitEvent("guardrail_rewritten", "{\"stage\":\"request\"}");
     } else if (applyTerminalGuardrailDecision(session, callbacks_, "request", requestGuardrail)) {
-        return session.finishIfNeeded();
+        const std::string failed = session.finishIfNeeded();
+        callbacks_.recordHistory("run_failed", failed);
+        return failed;
     }
     session.setRequestJson(request);
     applyModelMetadataIfAvailable(session, callbacks_, request);
@@ -608,6 +621,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     events.emitEvent("run_started", request.empty() ? "{}" : request);
     callbacks_.audit("run_started", request.empty() ? "{}" : request);
     callbacks_.trace("run_started", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"request\":" + (request.empty() ? "{}" : request) + "}");
+    callbacks_.recordHistory("run_started", request.empty() ? "{}" : request);
     if (replay.isConfigured()) {
         events.emitControl("replay_started", replay.summaryJson());
         callbacks_.trace("replay_started", replay.summaryJson());
@@ -801,6 +815,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         const std::string recordJson = session.recordStep(stepJson);
         callbacks_.audit("step_recorded", recordJson);
         callbacks_.trace("step_recorded", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
+        callbacks_.recordHistory("step_recorded", "{\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
         emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_step");
 
         if (type == "result" || type == "cannot_complete") {
@@ -835,6 +850,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             lastObservation = session.recordObservation("runtime.tool_discovery", "succeeded", discovery, "", false, true);
             execution.setLastObservationJson(lastObservation);
             events.emitControl("tool_discovery_completed", lastObservation);
+            callbacks_.recordHistory("observation_created", lastObservation);
             continue;
         }
         if (type == "tool_use") {
@@ -853,6 +869,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 lastObservation = session.recordObservation("ask_user", "failed", "", "ask_user tool is not registered", false, false);
                 execution.setLastObservationJson(lastObservation);
                 events.emitControl("ask_user_unavailable", lastObservation);
+                callbacks_.recordHistory("observation_created", lastObservation);
                 continue;
             }
             const std::string askParameters = "{\"questions\":" + rawField(fields, "questions", "[]") +
@@ -887,6 +904,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_pause");
         events.emitControl("run_paused", snapshot);
         callbacks_.audit("run_paused", snapshot);
+        callbacks_.recordHistory("run_paused", snapshot);
         HookDispatcher(callbacks_).dispatch("run_paused", snapshot);
         return snapshot;
     }
@@ -914,6 +932,10 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     events.emitEvent("run_finished", finished);
     callbacks_.audit("run_finished", finished);
     callbacks_.trace("run_finished", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"result\":" + finished + "}");
+    callbacks_.recordHistory(
+        session.status() == RunStatus::succeeded || session.status() == RunStatus::partiallySucceeded ? "run_finished" : "run_failed",
+        finished
+    );
     callbacks_.span("end", "runtime.result", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
     callbacks_.span("end", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":" + jsonString(runStatusName(session.status())) + "}");
     HookDispatcher(callbacks_).dispatch("run_finished", finished);

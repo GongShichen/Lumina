@@ -1,6 +1,10 @@
 import Foundation
 import LuminaAgentRuntimeCore
 
+public protocol LuminaSessionHistoryStore: Sendable {
+    func record(historyEventJSON: String)
+}
+
 public final class LuminaAgentRuntime: @unchecked Sendable {
     private let box: LuminaAgentRuntimeAdapterBox
     private let runtimeHandle: LuminaAgentRuntimeHandle?
@@ -17,7 +21,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         hooks: [any LuminaAgentRuntimeHook] = [],
         observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
         guardrails: LuminaRuntimeGuardrails = .empty,
-        retryProvider: (any LuminaRuntimeRetryProvider)? = nil
+        retryProvider: (any LuminaRuntimeRetryProvider)? = nil,
+        sessionHistoryStore: (any LuminaSessionHistoryStore)? = nil
     ) {
         self.box = LuminaAgentRuntimeAdapterBox(
             tools: tools,
@@ -31,7 +36,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             hooks: hooks,
             observabilitySinks: observabilitySinks,
             guardrails: guardrails,
-            retryProvider: retryProvider
+            retryProvider: retryProvider,
+            sessionHistoryStore: sessionHistoryStore
         )
         self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
         configureRuntime()
@@ -357,6 +363,12 @@ let luminaAgentSwiftAdapterSpanCallback: LuminaAgentSpanCallback = { spanJSON, c
     guard let box = box(from: context), let spanJSON, let sink = box.observabilitySinks.span else { return }
     let input = String(cString: spanJSON)
     Task { await sink.recordSpan(input) }
+}
+
+let luminaAgentSwiftAdapterSessionHistoryCallback: LuminaAgentSessionHistoryCallback = { historyJSON, context in
+    guard let box = box(from: context), let historyJSON, let store = box.sessionHistoryStore else { return }
+    let input = String(cString: historyJSON)
+    store.record(historyEventJSON: input)
 }
 
 let luminaAgentSwiftAdapterRollbackCallback: LuminaAgentRollbackCallback = { _, _ in

@@ -604,7 +604,8 @@ std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::s
     const std::vector<std::string> calls = extractObjectArrayItems(toolCallsJson);
     if (calls.empty()) {
         const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contained no tool calls\"}";
-        session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contained no tool calls", false, false);
+        const std::string observation = session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contained no tool calls", false, false);
+        callbacks_.recordHistory("observation_created", observation);
         return result;
     }
 
@@ -614,19 +615,22 @@ std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::s
         std::map<std::string, JsonField> fields;
         if (!parseFieldsOrEmpty(calls[index], fields)) {
             const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an invalid tool call object\"}";
-            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an invalid tool call object", false, false);
+            const std::string observation = session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an invalid tool call object", false, false);
+            callbacks_.recordHistory("observation_created", observation);
             return result;
         }
         const std::string toolName = stringField(fields, "tool_name");
         const std::string parameters = rawField(fields, "parameters", "{}");
         if (toolName.empty() || !tools_.contains(toolName)) {
             const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an unregistered tool\"}";
-            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an unregistered tool", false, false);
+            const std::string observation = session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an unregistered tool", false, false);
+            callbacks_.recordHistory("observation_created", observation);
             return result;
         }
         if (!tools_.isReadOnly(toolName)) {
             const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use may only execute read-only tools\"}";
-            session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use may only execute read-only tools", false, false);
+            const std::string observation = session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use may only execute read-only tools", false, false);
+            callbacks_.recordHistory("observation_created", observation);
             return result;
         }
         if (index > 0) {

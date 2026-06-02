@@ -189,6 +189,16 @@ extern "C" void LuminaAgentRuntimeSetSpanCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetSessionHistoryCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentSessionHistoryCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setSessionHistoryCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetRollbackCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentRollbackCallback callback,
@@ -332,6 +342,16 @@ extern "C" char *LuminaAgentRuntimeExportSessionCheckpoint(LuminaAgentRuntimeSes
         return LuminaAgent::failureResponse("missing session.");
     }
     return LuminaAgent::copyCString(session->session.checkpointJson());
+}
+
+extern "C" char *LuminaAgentRuntimeExportSessionCheckpointWithHistory(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session
+) {
+    if (runtime == nullptr || session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime or session.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.exportSessionCheckpointWithHistory(session->session));
 }
 
 extern "C" LuminaAgentRuntimeSessionRef *LuminaAgentRuntimeCreateSessionFromCheckpoint(
