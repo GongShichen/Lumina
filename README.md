@@ -2,7 +2,7 @@
 
 Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它把模型输出、工具 schema、权限确认、上下文、审计、事件流和 session 状态组织成一套稳定的执行契约，让宿主应用可以在端侧运行可控、可观察、可恢复的 Agent。
 
-![Lumina Agent Runtime 架构](docs/runtime-architecture.png)
+![Lumina Agent Runtime 架构](docs/lumina-agent-runtime-architecture.png)
 
 ## Runtime 概览
 
