@@ -1,70 +1,106 @@
 # Lumina Agent Runtime
 
-Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它负责 ReAct 执行循环、工具注册与调度、权限检查、用户确认、审计记录和运行时事件。
+Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它把模型输出、工具 schema、权限确认、上下文、审计、事件流和 session 状态组织成一套稳定的执行契约，让宿主应用可以在端侧运行可控、可观察、可恢复的 Agent。
 
-Lumina Agent Runtime 架构
+![Lumina Agent Runtime 架构](docs/runtime-architecture.png)
 
 ## Runtime 概览
 
-Runtime 将模型输出转换为结构化 ReAct step，校验 step，按工具 schema 路由工具调用，并把工具结果整理成 observation 反馈给下一轮规划。宿主应用负责提供模型适配器和具体工具实现；Runtime 负责围绕这些能力建立稳定的执行契约。
+Runtime Core 是跨端的 C/C++ 执行核心。宿主负责提供模型、工具和 UI 策略，Runtime 负责执行循环与契约治理：
 
-核心职责：
+- 组装 planner input：用户请求、上下文、工具 schema、trace、预算和历史 observation。
+- 消费 blocking 或 streaming model callback，解析并校验 canonical ReAct step。
+- 调度工具调用，执行参数校验、权限检查、用户确认和幂等控制。
+- 将 tool result 转成 runtime-owned observation，模型不得伪造 observation。
+- 管理 session、checkpoint、snapshot、cancel、resume 和 replay。
+- 根据 provider/model 的上下文窗口动态管理预算，并在接近上限或 prompt-too-long 时压缩上下文。
+- 通过可选 sinks 暴露 event、trace、metrics、audit、span，未注册时不强制持久化。
+- 通过 hook、guardrail、retry provider 和 compaction provider 让宿主控制运行时行为。
 
-- 根据用户请求、上下文、trace、预算和已注册工具 schema 组装 planner input。
-- 消费 blocking 或 streaming model callback，生成标准 ReAct step。
-- 在工具执行前校验参数、执行权限和确认策略。
-- 将工具结果校验、脱敏、截断，并整理成 observation。
-- 记录 audit、runtime events、hooks 和 trace，便于调试、评估与回放。
-- 通过稳定的 Runtime 契约接入宿主应用。
+Canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi_tool_use`、`ask_user`、`result`、`cannot_complete`。最终产物统一是 `result`，不接受 `final_answer`。
 
 ## Runtime 架构
 
-Runtime 包含 session loop、planner input builder、ReAct transport、tool registry、tool executor、context/budget manager、trace recorder、audit/event callbacks、contract export，以及 status/cancellation 处理。Core loop 支持 reasoning、tool discovery、tool use、只读 multi-tool use、ask_user、result 和 cannot-complete 状态。
-
-宿主应用只需要提供模型适配器、工具实现、上下文加载、权限/确认策略和事件消费。Runtime 负责把这些能力组织成一次可控、可审计、可回放的 Agent 执行过程。
-
 一次任务的执行流：
 
-1. 宿主应用把 request 送入 Runtime session。
-2. Runtime 从 request、context、tool schemas、trace 和 budget 组装 planner input。
-3. Model adapter 返回结构化 ReAct step。
-4. Runtime 校验 step，执行 permission / confirmation 策略，并调度工具调用。
-5. 工具结果被校验、审计脱敏、按策略去重回放，并转换成 observation。
-6. Observation 进入下一轮规划，直到 result、failure 或 cancellation。
+1. 宿主创建 Runtime session，并传入 Agent request。
+2. Runtime 读取 context、state、tool schemas 和 budget，生成 planner input。
+3. Model provider 返回 ReAct step；Runtime 完成 dialect normalization 和 schema validation。
+4. Hook / guardrail 可以在固定 lifecycle 点拦截、补上下文、改写工具调用、拒绝或暂停。
+5. Tool registry 根据 schema 路由工具调用；permission / confirmation 决定是否执行。
+6. Tool result 被校验、脱敏、截断，并记录为 observation。
+7. Runtime 继续下一轮规划，直到 `result`、`cannot_complete`、failure、pause 或 cancellation。
 
-## 开箱即用
+核心能力：
 
-接入 Agent Runtime 的核心是同一套执行契约，而不是某一个具体 UI 或端侧框架。宿主应用需要提供模型适配器、工具实现、上下文来源、权限/确认策略，并消费 Runtime 事件流。
+- **Tool Registry & Executor**：工具 schema、参数校验、副作用、幂等策略、external provider。
+- **Session / Checkpoint / Replay**：Core 导出 checkpoint JSON，宿主负责持久化；replay 可固定 model output 或 tool observation。
+- **RuntimeState**：`temp`、`session`、`user`、`app` 四类 scope；模型不能直接写 state。
+- **Context Budget & Compaction**：从 provider/model 读取 `max_context_tokens`，动态计算可用窗口和压缩阈值；默认先清理大型工具结果，再按预算摘要压缩。
+- **RuntimeHook**：按 lifecycle、tool name、sensitivity、side effect 匹配；支持 proceed、append context、rewrite、reject、require confirmation、pause、fail。
+- **Guardrails**：request 入站、tool 输入、tool 输出、result 输出前的策略校验。
+- **Retry Provider**：Core 暴露 retry request / decision contract，默认策略处理 provider、normalization、tool execution 的可重试失败。
+- **Observability**：event、trace、metrics、audit、span、snapshot 都是可插拔接口，外部按需订阅。
 
-最小接入流程：
+## 上下文压缩
 
-1. 定义工具 schema，描述工具名称、参数、副作用和敏感字段。
-2. 实现工具 provider，把 Runtime 的 tool call 映射到真实系统或应用能力。
-3. 接入 model adapter，返回结构化 ReAct step。
-4. 配置 permission / confirmation / audit / event sink。
-5. 创建 Runtime session，发送 request，并监听运行事件和最终结果。
+上下文压缩是 Runtime Core 的可插拔能力，不依赖某一端的 UI 或模型实现。Runtime 优先通过 `LuminaAgentModelMetadataCallback` 从当前 provider/model metadata 读取 `max_context_tokens`、`model_id` 和 `provider_native_context_management`；如果 provider 不提供，才使用宿主配置的 fallback 窗口。
 
-iOS、Android 和 HarmonyOS 都按这套 Runtime 契约接入：端侧负责提供本地工具与系统能力，Runtime 负责规划输入、ReAct step 校验、工具调度、observation 回传、审计和事件流。
+预算计算：
+
+```text
+effective_context_window = max_context_tokens - reserved_output_tokens
+auto_compact_threshold = effective_context_window - auto_compact_buffer_tokens
+```
+
+默认 pipeline 参考 Claude Code 风格，按顺序执行：
+
+- `snip_projection`：过滤已隐藏、已移除或不应暴露给模型的历史片段。
+- `microcompact`：优先清理旧的大型工具结果和历史大段 context，保留工具调用结构、摘要和最近 observation。
+- `provider_native`：如果模型 provider metadata 声明支持原生上下文管理，则允许 provider 自己清理 tool result / thinking。
+- `summarizing_compact`：超过动态阈值时，把旧上下文压缩成 compact summary，并保留最近上下文。
+- `partial_summarize`：支持只压缩一段历史窗口。
+- `reactive_compact`：模型请求因为 prompt-too-long 失败时触发恢复压缩。
+
+宿主可以注册 `LuminaAgentCompactionProviderCallback`，替换完整 pipeline 或只处理某个 strategy；返回 `{"status":"skipped"}` 时 Core 会继续执行默认策略。压缩请求会携带 redacted `context_frame`、`trace_summary`、`tool_result_candidates` 和预算快照；API key、token、secret 会在进入 compaction payload 前脱敏。压缩事件、边界、tokens saved estimate 和失败原因会通过可选 observability sinks 暴露，未注册 sink 时不做持久化输出。
+
+## 开箱即用接入
+
+接入 Runtime 的核心是同一套 JSON contract 和 C ABI。iOS 可以直接使用 Swift Package；Android / HarmonyOS 通过 native binding 或 C ABI 接入 Core。
 
 ### iOS
 
-通过 Swift Package 引入 `LuminaAgentRuntime`，在宿主侧提供 tools、step generator 和 runtime policy：
+通过 Swift Package 引入 `LuminaAgentRuntime`，提供 tools、model、context、permission、confirmation，以及可选 context compactor / hook / guardrail / observability / retry provider：
 
 ```swift
 let runtime = LuminaAgentRuntime(
     tools: tools.map(AnyLuminaAgentTool.init),
     stepGenerator: stepGenerator,
-    configuration: configuration
+    contextProvider: contextProvider,
+    contextCompactor: contextCompactor,
+    configuration: configuration,
+    permissionGate: permissionGate,
+    confirmationCoordinator: confirmation,
+    hooks: hooks,
+    observabilitySinks: sinks,
+    guardrails: guardrails,
+    retryProvider: retryProvider
 )
 
 for await event in runtime.runStream(request: request) {
-    // 更新 UI、观察工具事件或收集运行状态。
+    // 更新 UI、记录指标或展示工具执行状态。
 }
+```
+
+运行测试：
+
+```bash
+swift test --package-path LuminaAgentRuntime
 ```
 
 ### Android
 
-Android 侧使用 Runtime Core 的 CMake 构建，并打开 JNI 入口：
+Android 侧使用 Runtime Core 的 CMake 构建，并打开 JNI binding：
 
 ```bash
 cmake -S LuminaAgentRuntime -B build/android-arm64 \
@@ -77,52 +113,63 @@ cmake -S LuminaAgentRuntime -B build/android-arm64 \
 cmake --build build/android-arm64
 ```
 
-宿主侧实现 model、tool、context、permission、confirmation、event、audit 方法，并把 JSON 字符串传给 Runtime：
+宿主侧实现 model、tool、context、permission、confirmation、guardrail、compaction、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 并运行：
 
 ```kotlin
 val runtime = LuminaAgentRuntime(configurationJson, providers)
 runtime.registerToolSchema(calendarSchemaJson)
 val resultJson = runtime.run(requestJson)
+val checkpoint = runtime.exportSessionCheckpoint(session)
 runtime.cancel(requestId)
 ```
 
 ### HarmonyOS
 
-HarmonyOS 侧使用 ETS wrapper 调用 native runtime。编译时需要把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 Harmony native module，并链接 N-API。
+HarmonyOS 侧通过 ETS wrapper 调用 native runtime。编译时把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
 
-ETS 侧提供 `LuminaRuntimeProviders`，把模型、工具、上下文、权限、确认、事件和审计回调交给 Runtime：
+ETS 侧提供 providers，把模型、工具、上下文、权限、确认、压缩、事件和审计回调交给 Runtime：
 
 ```ts
 const runtime = new LuminaAgentRuntime(configurationJson, providers)
 runtime.registerToolSchema(calendarSchemaJson)
 const resultJson = runtime.run(requestJson)
+const snapshot = runtime.snapshotSession(session)
 runtime.cancel(requestId)
 runtime.close()
 ```
 
-## Runtime 核心概念
+## Observability 与 Benchmark
 
-- **Tool Schema**：描述工具名称、参数、副作用、敏感性、幂等策略和展示信息。
-- **Tool Call / Tool Result**：Runtime 与宿主工具适配层之间的 JSON 契约。
-- **ReAct Step**：模型生成的结构化动作、思考、提问或最终回答。
-- **Permission & Confirmation**：决定工具调用可以直接执行、需要用户确认，还是必须拒绝。
-- **Audit & Events**：暴露运行过程，用于调试、检查、benchmark 和信任链路展示。
-- **Trace & Contracts**：支持导出执行 trace 和 Runtime contract，帮助宿主侧保持一致行为。
-- **Conformance Tests**：验证 Runtime contract 和核心执行行为。
+Runtime 不内置 benchmark scoring。Benchmark 是外部 harness，通过 public APIs、events、trace、metrics、snapshot、checkpoint 和 replay 接入。
+
+仓库中提供了外部 benchmark harness 示例：`LuminaAgentRuntime/Examples/ExternalBenchmarkHarness`。它可以通过自定义 sink 计算：
+
+- runtime status、task completion、contract failure。
+- tool exact match、micro precision / recall / F1。
+- semantic pass、pass@1、tool execution@1。
+- TTFT、step p95、tool p95、wall-clock p95。
+- retry count、fallback count、normalization failure rate、replay diff。
+
+观测 payload 默认遵守 redaction：API key、secret、token 不进入 event、trace、audit、metrics 或 benchmark report。
 
 ## Lumina App
 
-app 用来演示端侧 Agent 如何在真实界面中完成任务。用户可以输入自然语言请求，Agent 会根据目标规划步骤、选择合适工具、执行系统或应用能力，并把中间状态和最终结果反馈到界面中。
+Lumina App 展示端侧 Agent 的完整使用体验：
 
-这个 app 覆盖了几类典型能力：对话式任务入口、真实工具调用、用户确认、权限申请、本地或远程推理配置，以及真实任务 benchmark。它的重点不是提供一套固定产品功能，而是展示 Runtime 如何被宿主应用接入、驱动和观察。
+- Chat 入口：用户输入自然语言任务，Agent 规划步骤并返回最终结果。
+- 真实工具执行：日历、提醒、联系人、通知、位置、文件、网页、剪贴板、消息草稿等工具能力。
+- 权限与确认：在执行敏感或有副作用工具前触发系统权限和用户确认。
+- 推理设置：Settings 中配置本地推理或 OpenAI-compatible 远程流式 API。
+- Benchmark：运行真实任务集，报告 F1、recall、pass@1、tool execution@1、P95、retry / fallback 等指标。
+- Trust / Debug：受代码开关控制，用于查看 runtime trace、checkpoint、observability 和诊断信息。
 
 ## Setup & Run App
 
 要求：
 
-- 已安装 Xcode 的开发环境。
-- Swift Package 支持。
+- 安装 Xcode。
 - 可运行 iOS App 的真机设备。
+- Swift Package 支持。
 
 用 Xcode 运行：
 
@@ -131,7 +178,7 @@ app 用来演示端侧 Agent 如何在真实界面中完成任务。用户可以
 3. 选择已连接的 iPhone 或 iPad。
 4. Build & Run。
 
-本地推理依赖设备侧加速能力，推荐在真机上运行。iOS Simulator 可以用于部分 UI 或编译检查，但不能完整验证 MPS / ANE 推理路径。
+本地推理依赖设备侧加速能力，推荐在真机上运行。iOS Simulator 可以用于 UI 和编译检查，但不能完整验证 MPS / ANE 推理路径。
 
 命令行构建真机版本：
 
@@ -142,8 +189,11 @@ xcodebuild -project app/Lumina.xcodeproj \
   -configuration Debug build
 ```
 
-运行 Runtime 测试：
+命令行构建模拟器版本：
 
 ```bash
-swift test --package-path LuminaAgentRuntime
+xcodebuild -project app/Lumina.xcodeproj \
+  -scheme Lumina \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -configuration Debug build
 ```

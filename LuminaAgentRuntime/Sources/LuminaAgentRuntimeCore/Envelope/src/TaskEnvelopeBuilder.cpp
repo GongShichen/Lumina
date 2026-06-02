@@ -166,7 +166,21 @@ std::string TaskEnvelopeBuilder::contextSectionsJson(const std::string &contextJ
     }
     std::map<std::string, JsonField> fields;
     if (parseFieldsOrEmpty(contextJson, fields) && fields.find("sections") != fields.end()) {
-        return rawField(fields, "sections", "[]");
+        const std::string summary = stringField(fields, "compact_summary");
+        const std::string sections = rawField(fields, "sections", "[]");
+        if (summary.empty()) {
+            return sections;
+        }
+        std::vector<std::string> items = extractObjectArrayItems(sections);
+        std::ostringstream output;
+        output << "[{\"id\":\"runtime.context_compaction\",\"title\":\"Compacted context\",\"summary\":"
+               << jsonString(summary)
+               << ",\"priority\":100,\"disclosure_level\":0}";
+        for (const std::string &item : items) {
+            output << "," << item;
+        }
+        output << "]";
+        return output.str();
     }
     if (!contextJson.empty() && contextJson.front() == '[') {
         return contextJson;
@@ -193,9 +207,13 @@ std::string TaskEnvelopeBuilder::executionBudgetJson() const {
            << "\"remaining_iterations\":" << remainingIterations << ","
            << "\"remaining_tool_calls\":" << remainingToolCalls << ","
            << "\"context_window_tokens\":" << session_.contextWindowTokens() << ","
+           << "\"max_context_tokens\":" << session_.maxContextTokens() << ","
+           << "\"effective_context_window\":" << std::max(1, session_.maxContextTokens() - session_.reservedOutputTokens()) << ","
            << "\"remaining_context_tokens_estimate\":" << session_.remainingContextTokensEstimate() << ","
            << "\"max_output_tokens\":" << session_.maxOutputTokens() << ","
            << "\"reserved_output_tokens\":" << session_.reservedOutputTokens() << ","
+           << "\"auto_compact_buffer_tokens\":" << session_.autoCompactBufferTokens() << ","
+           << "\"warning_buffer_tokens\":" << session_.warningBufferTokens() << ","
            << "\"max_observation_characters\":" << session_.maximumObservationCharacters() << ","
            << "\"tool_result_token_budget\":" << session_.toolResultTokenBudget() << ","
            << "\"compact_threshold_tokens\":" << session_.compactThresholdTokens()

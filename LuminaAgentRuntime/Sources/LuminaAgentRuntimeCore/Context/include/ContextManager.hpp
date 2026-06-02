@@ -7,10 +7,12 @@
 
 namespace LuminaAgent {
 
+class RuntimeCallbacks;
+
 class ContextManager {
 public:
     // Reads session budgets while preparing context requests and compacted context.
-    explicit ContextManager(const RuntimeSession &session);
+    explicit ContextManager(RuntimeSession &session);
 
     // Builds the JSON request sent to the caller's context provider.
     std::string initialRequestJson(const std::string &requestJson) const;
@@ -25,16 +27,18 @@ public:
     std::string mergeContextJson(const std::string &currentContextJson, const std::string &additionalContextJson) const;
 
     // Drops or summarizes low-priority context when the context window is tight.
-    std::string compactIfNeeded(const std::string &contextJson) const;
+    std::string compactIfNeeded(const std::string &contextJson, RuntimeCallbacks *callbacks = nullptr, const std::string &trigger = "auto") const;
     std::string compactIfNeeded(
         const std::string &requestJson,
         const std::string &contextJson,
         const std::string &progressJson,
-        const std::string &lastObservationJson
+        const std::string &lastObservationJson,
+        RuntimeCallbacks *callbacks = nullptr,
+        const std::string &trigger = "auto"
     ) const;
 
 private:
-    const RuntimeSession &session_;
+    RuntimeSession &session_;
 };
 
 } // namespace LuminaAgent

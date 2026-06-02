@@ -252,6 +252,16 @@ let luminaAgentSwiftAdapterContextCallback: LuminaAgentContextCallback = { reque
     return retainedCString(response)
 }
 
+let luminaAgentSwiftAdapterModelMetadataCallback: LuminaAgentModelMetadataCallback = { _, context in
+    guard let box = box(from: context) else {
+        return retainedCString("{}")
+    }
+    let response = """
+    {"model_id":"apple-runtime-provider","max_context_tokens":\(box.configuration.contextWindowTokens),"provider_native_context_management":false}
+    """
+    return retainedCString(response)
+}
+
 let luminaAgentSwiftAdapterRetryProviderCallback: LuminaAgentRetryProviderCallback = { retryJSON, context in
     guard let box = box(from: context), let retryJSON else {
         return retainedCString("")
@@ -259,6 +269,17 @@ let luminaAgentSwiftAdapterRetryProviderCallback: LuminaAgentRetryProviderCallba
     let input = String(cString: retryJSON)
     let response = blockOn(cancellationValue: { "" }) {
         await box.decideRetry(retryJSON: input)
+    }
+    return retainedCString(response)
+}
+
+let luminaAgentSwiftAdapterCompactionProviderCallback: LuminaAgentCompactionProviderCallback = { compactionJSON, context in
+    guard let box = box(from: context), let compactionJSON else {
+        return retainedCString(#"{"status":"skipped","reason":"missing compaction callback context"}"#)
+    }
+    let input = String(cString: compactionJSON)
+    let response = blockOn(cancellationValue: { #"{"status":"skipped","reason":"cancelled"}"# }) {
+        await box.compactContext(compactionJSON: input)
     }
     return retainedCString(response)
 }

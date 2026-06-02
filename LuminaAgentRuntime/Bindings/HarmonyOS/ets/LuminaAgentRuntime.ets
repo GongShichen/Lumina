@@ -1,10 +1,12 @@
 export type LuminaRuntimeProviders = {
   model: (plannerInputJson: string) => string
+  modelMetadata?: (metadataRequestJson: string) => string
   tool?: (toolCallJson: string) => string
   context?: (contextRequestJson: string) => string
   permission?: (permissionRequestJson: string) => string
   confirmation?: (confirmationRequestJson: string) => string
   guardrail?: (guardrailRequestJson: string) => string
+  compaction?: (compactionRequestJson: string) => string
   hook?: (hookEventJson: string) => string
   event?: (eventJson: string) => void
   audit?: (auditJson: string) => void
@@ -92,6 +94,10 @@ export class LuminaAgentRuntime {
     return this.providers.model(plannerInputJson)
   }
 
+  provideModelMetadata(metadataRequestJson: string): string {
+    return this.providers.modelMetadata?.(metadataRequestJson) ?? '{}'
+  }
+
   executeTool(toolCallJson: string): string {
     return this.providers.tool?.(toolCallJson) ?? '{"status":"failed","content":"","errorMessage":"tool provider unavailable"}'
   }
@@ -110,6 +116,10 @@ export class LuminaAgentRuntime {
 
   evaluateGuardrail(guardrailRequestJson: string): string {
     return this.providers.guardrail?.(guardrailRequestJson) ?? '{"decision":"allow"}'
+  }
+
+  compactContext(compactionRequestJson: string): string {
+    return this.providers.compaction?.(compactionRequestJson) ?? '{"status":"skipped"}'
   }
 
   dispatchHook(hookEventJson: string): string {

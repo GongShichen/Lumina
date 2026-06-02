@@ -97,14 +97,20 @@ public:
     int actionCount() const;
     int maximumReActIterations() const;
     int maximumToolCalls() const;
+    int maxContextTokens() const;
     int maxOutputTokens() const;
     int reservedOutputTokens() const;
+    int autoCompactBufferTokens() const;
+    int warningBufferTokens() const;
     int contextWindowTokens() const;
     int compactThresholdTokens() const;
     int maximumCompactFailures() const;
     int maximumObservationCharacters() const;
     int toolResultTokenBudget() const;
     std::string toolSchemaProfile() const;
+    std::string modelId() const;
+    bool providerNativeContextManagement() const;
+    void applyModelMetadata(int providerMaxContextTokens, const std::string &modelId, bool providerNativeContextManagement);
     int remainingContextTokensEstimate() const;
     bool hasResult() const;
     bool isTerminated() const;
@@ -120,6 +126,7 @@ public:
     std::string nextToolCallId();
     const ToolCallLedgerEntry *findReplayableToolCall(const std::string &dedupKey) const;
     void recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry);
+    std::string toolResultCandidatesJson(int maxItems, int minCharacters) const;
     std::string recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry);
 
     // Terminal state helpers for cancellation and unrecoverable failures.

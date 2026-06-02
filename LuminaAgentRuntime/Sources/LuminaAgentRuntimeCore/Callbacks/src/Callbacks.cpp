@@ -24,6 +24,10 @@ void RuntimeCallbacks::setStreamingModel(LuminaAgentStreamingModelCallback callb
     streamingModel_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setModelMetadata(LuminaAgentModelMetadataCallback callback, void *context) {
+    modelMetadata_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setTool(LuminaAgentToolCallback callback, void *context) {
     tool_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -46,6 +50,10 @@ void RuntimeCallbacks::setGuardrail(LuminaAgentGuardrailCallback callback, void 
 
 void RuntimeCallbacks::setRetryProvider(LuminaAgentRetryProviderCallback callback, void *context) {
     retryProvider_ = {reinterpret_cast<void *>(callback), context};
+}
+
+void RuntimeCallbacks::setCompactionProvider(LuminaAgentCompactionProviderCallback callback, void *context) {
+    compactionProvider_ = {reinterpret_cast<void *>(callback), context};
 }
 
 void RuntimeCallbacks::setAudit(LuminaAgentAuditCallback callback, void *context) {
@@ -92,12 +100,14 @@ void RuntimeCallbacks::clearCorrelationContext() {
 
 bool RuntimeCallbacks::hasModel() const { return model_.function != nullptr; }
 bool RuntimeCallbacks::hasStreamingModel() const { return streamingModel_.function != nullptr; }
+bool RuntimeCallbacks::hasModelMetadata() const { return modelMetadata_.function != nullptr; }
 bool RuntimeCallbacks::hasTool() const { return tool_.function != nullptr; }
 bool RuntimeCallbacks::hasContext() const { return context_.function != nullptr; }
 bool RuntimeCallbacks::hasPermission() const { return permission_.function != nullptr; }
 bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function != nullptr; }
 bool RuntimeCallbacks::hasGuardrail() const { return guardrail_.function != nullptr; }
 bool RuntimeCallbacks::hasRetryProvider() const { return retryProvider_.function != nullptr; }
+bool RuntimeCallbacks::hasCompactionProvider() const { return compactionProvider_.function != nullptr; }
 bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
 bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
 bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
@@ -106,6 +116,11 @@ bool RuntimeCallbacks::hasSpan() const { return span_.function != nullptr; }
 std::string RuntimeCallbacks::callModel(const std::string &plannerInput) const {
     auto callback = reinterpret_cast<LuminaAgentModelCallback>(model_.function);
     return callback == nullptr ? "" : consumeCString(callback(plannerInput.c_str(), model_.context));
+}
+
+std::string RuntimeCallbacks::loadModelMetadata(const std::string &metadataRequestJson) const {
+    auto callback = reinterpret_cast<LuminaAgentModelMetadataCallback>(modelMetadata_.function);
+    return callback == nullptr ? "" : consumeCString(callback((trim(metadataRequestJson).empty() ? "{}" : metadataRequestJson).c_str(), modelMetadata_.context));
 }
 
 struct StreamingEmissionState {
@@ -396,6 +411,65 @@ RuntimeRetryDecision RuntimeCallbacks::decideRetry(const std::string &retryReque
     } else if (decision.action == "fallback") {
         metric("runtime.fallback.count", 1, payload);
     }
+    return decision;
+}
+
+static RuntimeCompactionDecision parseCompactionDecision(const std::string &decisionJson, bool &ok) {
+    ok = false;
+    RuntimeCompactionDecision decision;
+    const std::string text = trim(decisionJson);
+    if (text.empty() || text == "null") {
+        return decision;
+    }
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(text, fields)) {
+        decision.status = "failed";
+        decision.failureReason = "compaction provider returned invalid JSON";
+        return decision;
+    }
+    decision.status = lowercased(stringField(fields, "status", stringField(fields, "decision", "skipped")));
+    if (decision.status == "skip") {
+        decision.status = "skipped";
+    }
+    if (decision.status != "compacted" && decision.status != "skipped" && decision.status != "failed") {
+        decision.status = "skipped";
+    }
+    decision.compactedContextJson = rawField(fields, "compacted_context", rawField(fields, "compactedContext", ""));
+    decision.boundaryJson = rawField(fields, "boundary", "");
+    decision.failureReason = stringField(fields, "failure_reason", stringField(fields, "failureReason", stringField(fields, "reason")));
+    decision.tokensSavedEstimate = std::max(0, intField(fields, "tokens_saved_estimate", intField(fields, "tokensSavedEstimate", 0)));
+    ok = true;
+    return decision;
+}
+
+static std::string compactionDecisionJson(const RuntimeCompactionDecision &decision) {
+    std::string output = "{\"status\":" + jsonString(decision.status) +
+        ",\"tokens_saved_estimate\":" + std::to_string(std::max(0, decision.tokensSavedEstimate)) +
+        ",\"failure_reason\":" + jsonString(decision.failureReason);
+    if (!trim(decision.boundaryJson).empty()) {
+        output += ",\"boundary\":" + decision.boundaryJson;
+    }
+    output += "}";
+    return output;
+}
+
+RuntimeCompactionDecision RuntimeCallbacks::compactContext(const std::string &compactionRequestJson) const {
+    RuntimeCompactionDecision decision;
+    bool parsedProviderDecision = false;
+    auto callback = reinterpret_cast<LuminaAgentCompactionProviderCallback>(compactionProvider_.function);
+    if (callback != nullptr) {
+        decision = parseCompactionDecision(
+            consumeCString(callback((trim(compactionRequestJson).empty() ? "{}" : compactionRequestJson).c_str(), compactionProvider_.context)),
+            parsedProviderDecision
+        );
+    }
+    const std::string source = callback != nullptr && parsedProviderDecision ? "provider" : "default";
+    emitEvent(
+        "runtime.context.compaction.provider_decision",
+        "{\"request\":" + (trim(compactionRequestJson).empty() ? "{}" : compactionRequestJson) +
+            ",\"decision\":" + compactionDecisionJson(decision) +
+            ",\"source\":" + jsonString(source) + "}"
+    );
     return decision;
 }
 

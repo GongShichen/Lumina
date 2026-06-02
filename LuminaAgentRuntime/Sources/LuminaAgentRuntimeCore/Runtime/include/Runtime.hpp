@@ -23,12 +23,14 @@ public:
     // Callback setters store function pointers and caller-owned contexts.
     void setModelCallback(LuminaAgentModelCallback callback, void *context);
     void setStreamingModelCallback(LuminaAgentStreamingModelCallback callback, void *context);
+    void setModelMetadataCallback(LuminaAgentModelMetadataCallback callback, void *context);
     void setToolCallback(LuminaAgentToolCallback callback, void *context);
     void setContextCallback(LuminaAgentContextCallback callback, void *context);
     void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context);
     void setRetryProviderCallback(LuminaAgentRetryProviderCallback callback, void *context);
+    void setCompactionProviderCallback(LuminaAgentCompactionProviderCallback callback, void *context);
     void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
     void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
     void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);

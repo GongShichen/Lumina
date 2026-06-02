@@ -7,6 +7,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
     public var contextWindowTokens: Int
     public var maxOutputTokens: Int
     public var reservedOutputTokens: Int
+    public var autoCompactBufferTokens: Int
+    public var warningBufferTokens: Int
     public var toolResultTokenBudget: Int
     public var compactThresholdTokens: Int
     public var maximumCompactFailures: Int
@@ -26,6 +28,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         contextWindowTokens: Int,
         maxOutputTokens: Int,
         reservedOutputTokens: Int,
+        autoCompactBufferTokens: Int? = nil,
+        warningBufferTokens: Int? = nil,
         toolResultTokenBudget: Int,
         compactThresholdTokens: Int,
         maximumCompactFailures: Int,
@@ -44,6 +48,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         self.contextWindowTokens = contextWindowTokens
         self.maxOutputTokens = maxOutputTokens
         self.reservedOutputTokens = reservedOutputTokens
+        self.autoCompactBufferTokens = autoCompactBufferTokens ?? compactThresholdTokens
+        self.warningBufferTokens = warningBufferTokens ?? max(autoCompactBufferTokens ?? compactThresholdTokens, compactThresholdTokens)
         self.toolResultTokenBudget = toolResultTokenBudget
         self.compactThresholdTokens = compactThresholdTokens
         self.maximumCompactFailures = maximumCompactFailures

@@ -62,6 +62,16 @@ typedef char *(*LuminaAgentStreamingModelCallback)(
 );
 
 /**
+ * Callback used by the runtime to read provider/model metadata before a run.
+ *
+ * The callback receives `{"request":...}` and should return JSON such as
+ * `{"model_id":"mimo-v2.5-pro","max_context_tokens":131072,
+ *   "provider_native_context_management":true}`. Missing or invalid metadata
+ * falls back to the caller-supplied runtime configuration.
+ */
+typedef char *(*LuminaAgentModelMetadataCallback)(const char *metadata_request_json, void *user_context);
+
+/**
  * Callback used by the runtime to execute a registered tool call.
  *
  * The input is a UTF-8 JSON object with `tool_name`, `parameters`, and runtime
@@ -123,6 +133,18 @@ typedef char *(*LuminaAgentGuardrailCallback)(const char *guardrail_request_json
  * JSON falls back to the runtime default retry policy.
  */
 typedef char *(*LuminaAgentRetryProviderCallback)(const char *retry_request_json, void *user_context);
+
+/**
+ * Callback used by the runtime to let the host customize context compaction.
+ *
+ * The input is a UTF-8 JSON object with correlation fields, `trigger`,
+ * `strategy`, provider/model context-window metadata, a budget snapshot, and
+ * a context frame. Return `{"status":"skipped"}` to let the core continue
+ * its default pipeline, or `{"status":"compacted","compacted_context":{...}}`
+ * with optional `boundary`, `tokens_saved_estimate`, and `preserved_ids`.
+ * Returning NULL or invalid JSON falls back to the runtime default strategy.
+ */
+typedef char *(*LuminaAgentCompactionProviderCallback)(const char *compaction_request_json, void *user_context);
 
 /**
  * Callback used by the runtime to write audit records.
@@ -260,6 +282,15 @@ void LuminaAgentRuntimeSetStreamingModelCallback(
 );
 
 /**
+ * Installs the model metadata callback used for dynamic context-window budgets.
+ */
+void LuminaAgentRuntimeSetModelMetadataCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentModelMetadataCallback callback,
+    void *user_context
+);
+
+/**
  * Installs the tool execution callback used for all registered tools.
  *
  * The callback receives tool calls as JSON and returns tool results as JSON.
@@ -327,6 +358,19 @@ void LuminaAgentRuntimeSetGuardrailCallback(
 void LuminaAgentRuntimeSetRetryProviderCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentRetryProviderCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional context compaction provider callback.
+ *
+ * The core runtime still owns lifecycle, budget checks, boundary recording,
+ * and observability. Bindings should translate host compaction providers into
+ * this callback without making compaction Apple/Android/Harmony-specific.
+ */
+void LuminaAgentRuntimeSetCompactionProviderCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentCompactionProviderCallback callback,
     void *user_context
 );
 

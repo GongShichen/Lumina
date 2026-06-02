@@ -109,6 +109,10 @@ char *modelCallback(const char *plannerInputJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "provideModelStep", plannerInputJson));
 }
 
+char *modelMetadataCallback(const char *metadataRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "provideModelMetadata", metadataRequestJson));
+}
+
 char *toolCallback(const char *toolCallJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "executeTool", toolCallJson));
 }
@@ -127,6 +131,10 @@ char *confirmationCallback(const char *confirmationRequestJson, void *context) {
 
 char *guardrailCallback(const char *guardrailRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "evaluateGuardrail", guardrailRequestJson));
+}
+
+char *compactionCallback(const char *compactionRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "compactContext", compactionRequestJson));
 }
 
 char *hookCallback(const char *hookEventJson, void *context) {
@@ -192,11 +200,13 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_create(
         env->ReleaseStringUTFChars(configurationJson, configuration);
     }
     LuminaAgentRuntimeSetModelCallback(native->runtime, modelCallback, native);
+    LuminaAgentRuntimeSetModelMetadataCallback(native->runtime, modelMetadataCallback, native);
     LuminaAgentRuntimeSetToolCallback(native->runtime, toolCallback, native);
     LuminaAgentRuntimeSetContextCallback(native->runtime, contextCallback, native);
     LuminaAgentRuntimeSetPermissionCallback(native->runtime, permissionCallback, native);
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
     LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);
+    LuminaAgentRuntimeSetCompactionProviderCallback(native->runtime, compactionCallback, native);
     LuminaAgentRuntimeSetAuditCallback(native->runtime, auditCallback, native);
     LuminaAgentRuntimeSetEventCallback(native->runtime, eventCallback, native);
     LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);

@@ -409,33 +409,6 @@ extension LuminaAgentRuntimeAdapterBox {
            let context = try? JSONDecoder().decode(LuminaRuntimeContext.self, from: contextData) {
             loadedContext = context
         }
-        let estimatedCharacters = LuminaReActContextWindowEstimator.estimateCharacters(
-            request: request,
-            schemas: tools.map(\.schema),
-            trace: trace,
-            loadedContext: loadedContext
-        )
-        let estimatedTokens = max(1, estimatedCharacters / 4)
-        let compactThreshold = configuration.compactThresholdTokens
-        if estimatedTokens > compactThreshold {
-            let compaction = try await contextCompactor.compact(LuminaReActCompactionRequest(
-                agentRequest: request,
-                trace: trace,
-                loadedContext: loadedContext,
-                availableTools: tools.map(\.schema),
-                estimatedCharacters: estimatedCharacters,
-                characterBudget: configuration.contextWindowTokens * 4,
-                preservedStepCount: configuration.preservedStepsAfterCompaction,
-                maximumSummaryCharacters: configuration.maximumObservationCharacters
-            ))
-            if compaction.trace != trace {
-                trace = compaction.trace
-                if let observation = trace.steps.first?.observation,
-                   observation.toolName == "runtime.context_compaction" {
-                    currentEventSink?(.observationCreated(observation))
-                }
-            }
-        }
         let budget = (object?["execution_budget"] as? [String: Any]) ?? (object?["budget"] as? [String: Any])
         let progress = object?["progress"] as? [String: Any]
         if let lastObservation = (progress?["last_observation"] as? [String: Any]) ?? (object?["last_observation"] as? [String: Any]),
@@ -481,9 +454,86 @@ extension LuminaAgentRuntimeAdapterBox {
         )
     }
 
+    func compactContext(compactionJSON: String) async -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(compactionJSON.utf8)) as? [String: Any] else {
+            return #"{"status":"skipped","reason":"invalid compaction request"}"#
+        }
+        let strategy = object["strategy"] as? String ?? ""
+        guard strategy == "summarizing_compact" || strategy == "partial_summarize" else {
+            return #"{"status":"skipped"}"#
+        }
+        let frame = object["context_frame"] as? [String: Any]
+        let requestObject = frame?["request"] as? [String: Any]
+        let request = (try? Self.decodeRequest(fromObject: requestObject)) ?? (currentRequest ?? LuminaAgentRequest(text: ""))
+        var loadedContext = LuminaRuntimeContext.empty
+        if let contextObject = frame?["context"],
+           JSONSerialization.isValidJSONObject(contextObject),
+           let contextData = try? JSONSerialization.data(withJSONObject: contextObject),
+           let context = try? JSONDecoder().decode(LuminaRuntimeContext.self, from: contextData) {
+            loadedContext = context
+        }
+        let estimatedCharacters = LuminaReActContextWindowEstimator.estimateCharacters(
+            request: request,
+            schemas: tools.map(\.schema),
+            trace: trace,
+            loadedContext: loadedContext
+        )
+        do {
+            let compaction = try await contextCompactor.compact(LuminaReActCompactionRequest(
+                agentRequest: request,
+                trace: trace,
+                loadedContext: loadedContext,
+                availableTools: tools.map(\.schema),
+                estimatedCharacters: estimatedCharacters,
+                characterBudget: max(1, configuration.contextWindowTokens - configuration.reservedOutputTokens) * 4,
+                preservedStepCount: configuration.preservedStepsAfterCompaction,
+                maximumSummaryCharacters: configuration.maximumObservationCharacters
+            ))
+            guard compaction.trace != trace || !compaction.summary.isEmpty else {
+                return #"{"status":"skipped"}"#
+            }
+            trace = compaction.trace
+            if let observation = trace.steps.first?.observation,
+               observation.toolName == "runtime.context_compaction" {
+                currentEventSink?(.observationCreated(observation))
+            }
+            let contextEnvelope: [String: Any] = [
+                "sections": [],
+                "compact_summary": compaction.summary,
+                "source": "apple_compaction_provider"
+            ]
+            let response: [String: Any] = [
+                "status": "compacted",
+                "compacted_context": contextEnvelope,
+                "tokens_saved_estimate": max(0, (compaction.estimatedCharactersBefore - compaction.estimatedCharactersAfter) / 4),
+                "boundary": [
+                    "type": "compact_boundary",
+                    "trigger": object["trigger"] as? String ?? "auto",
+                    "strategy": strategy
+                ]
+            ]
+            return Self.jsonString(from: response)
+        } catch {
+            return Self.jsonString(from: [
+                "status": "failed",
+                "failure_reason": String(describing: error)
+            ])
+        }
+    }
+
     static func decodeRequest(fromRuntimeJSON json: String) throws -> LuminaAgentRequest {
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
         return try decodeRequest(fromObject: object) ?? LuminaAgentRequest(text: "")
+    }
+
+    static func jsonString(from object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+        return string
     }
 
     static func decodeRequest(fromObject object: [String: Any]?) throws -> LuminaAgentRequest? {

@@ -40,17 +40,27 @@ struct RuntimeRetryDecision {
     int maxAttemptsOverride = 0;
 };
 
+struct RuntimeCompactionDecision {
+    std::string status = "skipped";
+    std::string compactedContextJson;
+    std::string boundaryJson;
+    std::string failureReason;
+    int tokensSavedEstimate = 0;
+};
+
 class RuntimeCallbacks {
 public:
     // Store caller-provided callbacks. Context ownership remains with the caller.
     void setModel(LuminaAgentModelCallback callback, void *context);
     void setStreamingModel(LuminaAgentStreamingModelCallback callback, void *context);
+    void setModelMetadata(LuminaAgentModelMetadataCallback callback, void *context);
     void setTool(LuminaAgentToolCallback callback, void *context);
     void setContext(LuminaAgentContextCallback callback, void *context);
     void setPermission(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmation(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrail(LuminaAgentGuardrailCallback callback, void *context);
     void setRetryProvider(LuminaAgentRetryProviderCallback callback, void *context);
+    void setCompactionProvider(LuminaAgentCompactionProviderCallback callback, void *context);
     void setAudit(LuminaAgentAuditCallback callback, void *context);
     void setTrace(LuminaAgentTraceCallback callback, void *context);
     void setMetrics(LuminaAgentMetricsCallback callback, void *context);
@@ -64,12 +74,14 @@ public:
     // Lightweight availability checks used by runtime guards and fallback paths.
     bool hasModel() const;
     bool hasStreamingModel() const;
+    bool hasModelMetadata() const;
     bool hasTool() const;
     bool hasContext() const;
     bool hasPermission() const;
     bool hasConfirmation() const;
     bool hasGuardrail() const;
     bool hasRetryProvider() const;
+    bool hasCompactionProvider() const;
     bool hasHook() const;
     bool hasTrace() const;
     bool hasMetrics() const;
@@ -79,6 +91,7 @@ public:
     std::string callModel(const std::string &plannerInput) const;
     std::string callStreamingModel(const std::string &plannerInput) const;
     StreamingModelResult callStreamingModelWithMetrics(const std::string &plannerInput) const;
+    std::string loadModelMetadata(const std::string &metadataRequestJson) const;
 
     // Invoke platform/application callbacks for tools, context, policy, and hooks.
     std::string callTool(const std::string &toolCall) const;
@@ -87,6 +100,7 @@ public:
     std::string confirm(const std::string &confirmationRequest) const;
     RuntimeGuardrailDecision evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const;
     RuntimeRetryDecision decideRetry(const std::string &retryRequestJson) const;
+    RuntimeCompactionDecision compactContext(const std::string &compactionRequestJson) const;
     std::string dispatchHook(const std::string &hookEvent) const;
     std::vector<std::string> matchingHookRouteIds(const std::string &lifecycle, const std::string &payloadJson) const;
     std::string registerHookRoute(const std::string &routeJson);
@@ -102,12 +116,14 @@ public:
 private:
     CallbackSlot model_;
     CallbackSlot streamingModel_;
+    CallbackSlot modelMetadata_;
     CallbackSlot tool_;
     CallbackSlot context_;
     CallbackSlot permission_;
     CallbackSlot confirmation_;
     CallbackSlot guardrail_;
     CallbackSlot retryProvider_;
+    CallbackSlot compactionProvider_;
     CallbackSlot audit_;
     CallbackSlot trace_;
     CallbackSlot metrics_;

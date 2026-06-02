@@ -514,15 +514,40 @@ int RuntimeSession::stepCount() const { return stepCount_; }
 int RuntimeSession::actionCount() const { return actionCount_; }
 int RuntimeSession::maximumReActIterations() const { return config_.maximumReActIterations; }
 int RuntimeSession::maximumToolCalls() const { return config_.maximumToolCalls; }
+int RuntimeSession::maxContextTokens() const { return config_.maxContextTokens > 0 ? config_.maxContextTokens : config_.contextWindowTokens; }
 int RuntimeSession::maxOutputTokens() const { return config_.maxOutputTokens; }
 int RuntimeSession::reservedOutputTokens() const { return config_.reservedOutputTokens; }
+int RuntimeSession::autoCompactBufferTokens() const { return config_.autoCompactBufferTokens; }
+int RuntimeSession::warningBufferTokens() const { return config_.warningBufferTokens; }
 int RuntimeSession::contextWindowTokens() const { return config_.contextWindowTokens; }
 int RuntimeSession::compactThresholdTokens() const { return config_.compactThresholdTokens; }
 int RuntimeSession::maximumCompactFailures() const { return config_.maximumCompactFailures; }
 int RuntimeSession::maximumObservationCharacters() const { return config_.maximumObservationCharacters; }
 int RuntimeSession::toolResultTokenBudget() const { return config_.toolResultTokenBudget; }
 std::string RuntimeSession::toolSchemaProfile() const { return config_.toolSchemaProfile; }
-int RuntimeSession::remainingContextTokensEstimate() const { return std::max(0, config_.contextWindowTokens - contextTokenUsageEstimate_); }
+std::string RuntimeSession::modelId() const { return config_.modelId; }
+bool RuntimeSession::providerNativeContextManagement() const { return config_.providerNativeContextManagement; }
+
+void RuntimeSession::applyModelMetadata(int providerMaxContextTokens, const std::string &modelId, bool providerNativeContextManagement) {
+    if (providerMaxContextTokens > 0) {
+        config_.maxContextTokens = providerMaxContextTokens;
+    }
+    if (!trim(modelId).empty()) {
+        config_.modelId = modelId;
+    }
+    config_.providerNativeContextManagement = config_.providerNativeContextManagement || providerNativeContextManagement;
+    appendTrace(
+        "model_metadata_applied",
+        "{\"model_id\":" + jsonString(config_.modelId) +
+            ",\"max_context_tokens\":" + std::to_string(config_.maxContextTokens > 0 ? config_.maxContextTokens : config_.contextWindowTokens) +
+            ",\"provider_native_context_management\":" + jsonBool(config_.providerNativeContextManagement) + "}"
+    );
+}
+
+int RuntimeSession::remainingContextTokensEstimate() const {
+    const int maxContext = config_.maxContextTokens > 0 ? config_.maxContextTokens : config_.contextWindowTokens;
+    return std::max(0, std::max(1, maxContext - config_.reservedOutputTokens) - contextTokenUsageEstimate_);
+}
 bool RuntimeSession::hasResult() const { return hasResult_; }
 bool RuntimeSession::isTerminated() const { return hasResult_ || !terminationReason_.empty(); }
 int RuntimeSession::consecutiveReasoningCount() const { return consecutiveReasoningCount_; }
@@ -559,6 +584,40 @@ void RuntimeSession::recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry)
     if (!entry.dedupKey.empty()) {
         toolCallLedger_[entry.dedupKey] = entry;
     }
+}
+
+std::string RuntimeSession::toolResultCandidatesJson(int maxItems, int minCharacters) const {
+    std::vector<const ToolCallLedgerEntry *> entries;
+    for (const auto &entry : toolCallLedger_) {
+        const int rawSize = static_cast<int>(entry.second.rawResultJson.size());
+        if (rawSize >= std::max(0, minCharacters)) {
+            entries.push_back(&entry.second);
+        }
+    }
+    std::sort(entries.begin(), entries.end(), [](const ToolCallLedgerEntry *lhs, const ToolCallLedgerEntry *rhs) {
+        return lhs->timestamp > rhs->timestamp;
+    });
+    const int limit = maxItems <= 0 ? static_cast<int>(entries.size()) : std::min(maxItems, static_cast<int>(entries.size()));
+    std::ostringstream output;
+    output << "[";
+    for (int index = 0; index < limit; index++) {
+        if (index > 0) {
+            output << ",";
+        }
+        const ToolCallLedgerEntry &entry = *entries[static_cast<size_t>(index)];
+        output << "{"
+               << "\"call_id\":" << jsonString(entry.callId) << ","
+               << "\"tool_name\":" << jsonString(entry.toolName) << ","
+               << "\"status\":" << jsonString(entry.status) << ","
+               << "\"summary\":" << jsonString(truncateToCharacters(entry.summary, config_.maximumObservationCharacters)) << ","
+               << "\"raw_result_characters\":" << entry.rawResultJson.size() << ","
+               << "\"raw_result_excerpt\":" << jsonString(truncateToCharacters(entry.rawResultJson, config_.maximumObservationCharacters)) << ","
+               << "\"timestamp\":" << jsonString(entry.timestamp) << ","
+               << "\"replayable\":" << jsonBool(entry.replayable)
+               << "}";
+    }
+    output << "]";
+    return output.str();
 }
 
 std::string RuntimeSession::recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry) {

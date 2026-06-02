@@ -149,6 +149,16 @@ static std::string rewrittenResultMarkdown(const std::string &payloadJson) {
     return stringField(fields, "resultMarkdown", stringField(fields, "content"));
 }
 
+static bool isPromptTooLongSignal(const std::string &modelOutput) {
+    const std::string value = lowercased(modelOutput);
+    return value.find("context_length_exceeded") != std::string::npos ||
+        value.find("prompt_too_long") != std::string::npos ||
+        value.find("prompt-too-long") != std::string::npos ||
+        value.find("maximum context length") != std::string::npos ||
+        value.find("too many tokens") != std::string::npos ||
+        value.find("context window") != std::string::npos && value.find("exceed") != std::string::npos;
+}
+
 static std::string normalizedCheckpointPolicy(const std::string &policy) {
     const std::string value = lowercased(policy);
     if (value == "onpause" || value == "on_pause") {
@@ -177,6 +187,28 @@ static void emitCheckpointIfNeeded(
         ",\"checkpoint\":" + session.checkpointJson() + "}";
     events.emitControl("checkpoint_created", payload);
     callbacks.trace("checkpoint_created", payload);
+}
+
+static void applyModelMetadataIfAvailable(RuntimeSession &session, RuntimeCallbacks &callbacks, const std::string &requestJson) {
+    if (!callbacks.hasModelMetadata()) {
+        return;
+    }
+    const std::string metadataJson = callbacks.loadModelMetadata("{\"request\":" + (trim(requestJson).empty() ? "{}" : requestJson) + "}");
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(metadataJson, fields)) {
+        callbacks.emitEvent("runtime.model.metadata.skipped", "{\"reason\":\"invalid metadata json\"}");
+        return;
+    }
+    const int maxContext = std::max(0, intField(fields, "max_context_tokens", intField(fields, "maxContextTokens", intField(fields, "context_window_tokens", 0))));
+    const std::string modelId = stringField(fields, "model_id", stringField(fields, "modelId", stringField(fields, "model")));
+    const bool nativeContext = boolField(fields, "provider_native_context_management", boolField(fields, "providerNativeContextManagement", boolField(fields, "native_context_management", false)));
+    session.applyModelMetadata(maxContext, modelId, nativeContext);
+    callbacks.emitEvent(
+        "runtime.model.metadata.applied",
+        "{\"model_id\":" + jsonString(modelId) +
+            ",\"max_context_tokens\":" + std::to_string(maxContext) +
+            ",\"provider_native_context_management\":" + jsonBool(nativeContext) + "}"
+    );
 }
 
 static std::vector<std::string> stringArrayFromRaw(const std::string &arrayJson) {
@@ -294,18 +326,29 @@ Runtime::Runtime(const char *configurationJson) {
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     requireInt({"maximumToolCalls", "maxToolCalls"}, "maxToolCalls", 1, sessionConfig_.maximumToolCalls);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
-    requireInt({"maximumContextTokens", "contextWindowTokens"}, "contextWindowTokens", 1, sessionConfig_.contextWindowTokens);
+    requireInt({"maximumContextTokens", "contextWindowTokens", "maxContextTokens"}, "contextWindowTokens", 1, sessionConfig_.contextWindowTokens);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
+    sessionConfig_.maxContextTokens = intField(fields, "maxContextTokens", intField(fields, "providerMaxContextTokens", intField(fields, "maximumContextTokens", sessionConfig_.contextWindowTokens)));
+    sessionConfig_.modelId = stringField(fields, "modelId", stringField(fields, "model_id"));
+    sessionConfig_.providerNativeContextManagement = boolField(fields, "providerNativeContextManagement", boolField(fields, "provider_native_context_management", false));
     requireInt({"maxOutputTokens", "maximumOutputTokens"}, "maxOutputTokens", 1, sessionConfig_.maxOutputTokens);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     requireInt({"reservedOutputTokens"}, "reservedOutputTokens", 0, sessionConfig_.reservedOutputTokens);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
+    sessionConfig_.autoCompactBufferTokens = std::max(0, intField(fields, "autoCompactBufferTokens", intField(fields, "auto_compact_buffer_tokens", 0)));
+    sessionConfig_.warningBufferTokens = std::max(0, intField(fields, "warningBufferTokens", intField(fields, "warning_buffer_tokens", 0)));
     requireInt({"maximumObservationCharacters", "maxObservationCharacters"}, "maxObservationCharacters", 1, sessionConfig_.maximumObservationCharacters);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     requireInt({"toolResultTokenBudget"}, "toolResultTokenBudget", 1, sessionConfig_.toolResultTokenBudget);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     requireInt({"compactThresholdTokens"}, "compactThresholdTokens", 0, sessionConfig_.compactThresholdTokens);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
+    if (sessionConfig_.autoCompactBufferTokens <= 0) {
+        sessionConfig_.autoCompactBufferTokens = sessionConfig_.compactThresholdTokens;
+    }
+    if (sessionConfig_.warningBufferTokens <= 0) {
+        sessionConfig_.warningBufferTokens = std::max(sessionConfig_.autoCompactBufferTokens, sessionConfig_.compactThresholdTokens);
+    }
     requireInt({"maximumCompactFailures", "maxCompactFailures"}, "maxCompactFailures", 0, sessionConfig_.maximumCompactFailures);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     requireInt({"maximumConsecutiveReasoningSteps", "maxReasoningSteps"}, "maxReasoningSteps", 1, sessionConfig_.maximumConsecutiveReasoningSteps);
@@ -376,6 +419,10 @@ void Runtime::setStreamingModelCallback(LuminaAgentStreamingModelCallback callba
     callbacks_.setStreamingModel(callback, context);
 }
 
+void Runtime::setModelMetadataCallback(LuminaAgentModelMetadataCallback callback, void *context) {
+    callbacks_.setModelMetadata(callback, context);
+}
+
 void Runtime::setToolCallback(LuminaAgentToolCallback callback, void *context) {
     callbacks_.setTool(callback, context);
 }
@@ -398,6 +445,10 @@ void Runtime::setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *
 
 void Runtime::setRetryProviderCallback(LuminaAgentRetryProviderCallback callback, void *context) {
     callbacks_.setRetryProvider(callback, context);
+}
+
+void Runtime::setCompactionProviderCallback(LuminaAgentCompactionProviderCallback callback, void *context) {
+    callbacks_.setCompactionProvider(callback, context);
 }
 
 void Runtime::setAuditCallback(LuminaAgentAuditCallback callback, void *context) {
@@ -482,6 +533,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         return session.finishIfNeeded();
     }
     session.setRequestJson(request);
+    applyModelMetadataIfAvailable(session, callbacks_, request);
     execution.setRequestJson(request);
     callbacks_.span("start", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     events.emitEvent("run_started", request.empty() ? "{}" : request);
@@ -501,7 +553,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         if (trim(contextJson).empty()) {
             contextJson = "null";
         }
-        contextJson = ContextManager(session).compactIfNeeded(request, contextJson, session.stepsSummaryJson(), session.lastObservationJson());
+        contextJson = ContextManager(session).compactIfNeeded(request, contextJson, session.stepsSummaryJson(), session.lastObservationJson(), &callbacks_, "auto");
         execution.setContextJson(contextJson);
         events.emitEvent("context_loaded", contextJson);
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_loaded", contextJson), &contextJson, request)) {
@@ -516,6 +568,25 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         if (budgetSnapshot.overWindow && !execution.budgetManager().canAttemptCompact(session.compactFailureCount())) {
             session.failWithResult("context-budget", "### 无法继续\n\n上下文超过调用方配置的窗口，且 auto compact 已达到失败上限。");
             break;
+        }
+        if (budgetSnapshot.warning || budgetSnapshot.shouldCompact) {
+            ContextManager contextManager(session);
+            const std::string compactedContext = contextManager.compactIfNeeded(
+                request,
+                contextJson,
+                session.stepsSummaryJson(),
+                lastObservation,
+                &callbacks_,
+                budgetSnapshot.overWindow ? "reactive" : "auto"
+            );
+            if (compactedContext != contextJson) {
+                contextJson = compactedContext;
+                execution.setContextJson(contextJson);
+                events.emitControl("context_compacted", contextJson);
+                if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_compacted", contextJson), &contextJson, request)) {
+                    break;
+                }
+            }
         }
         std::string plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
         events.emitEvent(
@@ -547,6 +618,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         int normalizationAttempt = 1;
         int maxModelAttempts = 3;
         int maxNormalizationAttempts = 2;
+        bool reactivePromptTooLongRecoveryUsed = false;
         while (!cancelled_ && !stepReady) {
             const auto modelStartedAt = std::chrono::steady_clock::now();
             if (replayController != nullptr && replayController->hasModelReplay()) {
@@ -564,6 +636,30 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             ).count();
             if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
                 break;
+            }
+            if (isPromptTooLongSignal(stepJson) && !reactivePromptTooLongRecoveryUsed && modelAttempt < maxModelAttempts) {
+                reactivePromptTooLongRecoveryUsed = true;
+                ContextManager contextManager(session);
+                const std::string compactedContext = contextManager.compactIfNeeded(
+                    request,
+                    contextJson,
+                    session.stepsSummaryJson(),
+                    lastObservation,
+                    &callbacks_,
+                    "reactive"
+                );
+                if (compactedContext != contextJson) {
+                    contextJson = compactedContext;
+                    execution.setContextJson(contextJson);
+                    plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+                    callbacks_.emitEvent(
+                        "runtime.context.compaction.prompt_too_long_recovered",
+                        "{\"attempt\":" + std::to_string(modelAttempt) +
+                            ",\"input_characters\":" + std::to_string(plannerInput.size()) + "}"
+                    );
+                    modelAttempt += 1;
+                    continue;
+                }
             }
             if (trim(stepJson).empty()) {
                 const std::string retryRequest = retryRequestJson(session, "model_generation", modelAttempt, maxModelAttempts, "empty-output", "provider", true, 0, modelElapsedMs);
@@ -645,7 +741,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 ContextManager contextManager(session);
                 std::string additionalContext = callbacks_.loadContext(contextManager.followUpRequestJson(request, stepJson));
                 if (!trim(additionalContext).empty() && trim(additionalContext) != "null") {
-                    contextJson = contextManager.compactIfNeeded(request, contextManager.mergeContextJson(contextJson, additionalContext), session.stepsSummaryJson(), lastObservation);
+                    contextJson = contextManager.compactIfNeeded(request, contextManager.mergeContextJson(contextJson, additionalContext), session.stepsSummaryJson(), lastObservation, &callbacks_, "auto");
                     execution.setContextJson(contextJson);
                     events.emitControl("context_updated", contextJson);
                     if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_updated", contextJson), &contextJson, request)) {

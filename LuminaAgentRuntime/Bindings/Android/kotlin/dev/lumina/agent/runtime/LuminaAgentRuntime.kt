@@ -6,11 +6,13 @@ class LuminaAgentRuntime(
 ) : AutoCloseable {
     data class Providers(
         val model: ModelProvider,
+        val modelMetadata: ModelMetadataProvider = ModelMetadataProvider { "{}" },
         val tool: ToolProvider = ToolProvider { """{"status":"failed","content":"","errorMessage":"tool provider unavailable"}""" },
         val context: ContextProvider = ContextProvider { "null" },
         val permission: PermissionProvider = PermissionProvider { """{"decision":"allowed"}""" },
         val confirmation: ConfirmationProvider = ConfirmationProvider { """{"confirmed":false,"reason":"confirmation provider unavailable"}""" },
         val guardrail: GuardrailProvider = GuardrailProvider { """{"decision":"allow"}""" },
+        val compaction: CompactionProvider = CompactionProvider { """{"status":"skipped"}""" },
         val hook: HookProvider = HookProvider { "{}" },
         val event: EventSink = EventSink {},
         val audit: AuditSink = AuditSink {},
@@ -21,6 +23,10 @@ class LuminaAgentRuntime(
 
     fun interface ModelProvider {
         fun nextStep(plannerInputJson: String): String
+    }
+
+    fun interface ModelMetadataProvider {
+        fun metadata(metadataRequestJson: String): String
     }
 
     fun interface ToolProvider {
@@ -41,6 +47,10 @@ class LuminaAgentRuntime(
 
     fun interface GuardrailProvider {
         fun evaluate(guardrailRequestJson: String): String
+    }
+
+    fun interface CompactionProvider {
+        fun compact(compactionRequestJson: String): String
     }
 
     fun interface HookProvider {
@@ -104,6 +114,9 @@ class LuminaAgentRuntime(
     private fun provideModelStep(plannerInputJson: String): String =
         providers.model.nextStep(plannerInputJson)
 
+    private fun provideModelMetadata(metadataRequestJson: String): String =
+        providers.modelMetadata.metadata(metadataRequestJson)
+
     private fun executeTool(toolCallJson: String): String =
         providers.tool.execute(toolCallJson)
 
@@ -118,6 +131,9 @@ class LuminaAgentRuntime(
 
     private fun evaluateGuardrail(guardrailRequestJson: String): String =
         providers.guardrail.evaluate(guardrailRequestJson)
+
+    private fun compactContext(compactionRequestJson: String): String =
+        providers.compaction.compact(compactionRequestJson)
 
     private fun dispatchHook(hookEventJson: String): String =
         providers.hook.dispatch(hookEventJson)

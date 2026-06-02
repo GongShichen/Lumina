@@ -13,6 +13,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var metrics: [String] = []
     private var spans: [String] = []
     private var retryRequests: [String] = []
+    private var compactionRequests: [String] = []
     private var toolCalls: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
@@ -25,6 +26,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         metrics = []
         spans = []
         retryRequests = []
+        compactionRequests = []
         toolCalls = []
         toolCallCount = 0
         modelCallCount = 0
@@ -67,6 +69,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendCompactionRequest(_ value: String) {
+        lock.lock()
+        compactionRequests.append(value)
+        lock.unlock()
+    }
+
     func incrementToolCallCount() {
         lock.lock()
         toolCallCount += 1
@@ -97,10 +105,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], retryRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], retryRequests: [String], compactionRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, spans, retryRequests, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, retryRequests, compactionRequests, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -153,6 +161,21 @@ private let luminaInvalidThenFinalModelCallback: LuminaAgentModelCallback = { pl
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-bad","type":"tool_use","thought":"missing tool name","parameters":{},"requires_followup":true}"#)
     }
     return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"normalized\",\"content\":\"## 完成\\n\\n修复后完成。\",\"completed\":true,\"requires_followup\":false}")
+}
+
+private let luminaPromptTooLongThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"error":{"code":"context_length_exceeded","message":"maximum context length exceeded"}}"#)
+    }
+    return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"compacted\",\"content\":\"## 完成\\n\\nreactive compact 后完成。\",\"completed\":true,\"requires_followup\":false}")
+}
+
+private let luminaProviderMetadataCallback: LuminaAgentModelMetadataCallback = { _, _ in
+    luminaRuntimeCString(#"{"model_id":"test-dynamic-window","max_context_tokens":640,"provider_native_context_management":true}"#)
 }
 
 private let luminaAskUserModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -300,6 +323,25 @@ private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest
     return luminaRuntimeCString(#"[{"id":"initial","title":"Initial context","summary":"首轮摘要","priority":100,"disclosure_level":0}]"#)
 }
 
+private let luminaLargeContextCallback: LuminaAgentContextCallback = { _, _ in
+    luminaRuntimeCString(#"[{"id":"large","title":"Large","summary":""# + String(repeating: "large context ", count: 240) + #""}]"#)
+}
+
+private let luminaManyLargeSectionsContextCallback: LuminaAgentContextCallback = { _, _ in
+    let oldLarge = String(repeating: "old tool result ", count: 220)
+    let recent = String(repeating: "recent context ", count: 8)
+    return luminaRuntimeCString("""
+    [
+      {"id":"old-1","title":"Old tool result","tool_name":"file.read","status":"succeeded","content":"\(oldLarge)"},
+      {"id":"old-2","title":"Old secret result","tool_name":"web.fetch","status":"succeeded","content":"Bearer sk-test-secret-token-1234567890 \(oldLarge)","api_key":"sk-test-secret-token-1234567890"},
+      {"id":"recent-1","title":"Recent","summary":"\(recent)"},
+      {"id":"recent-2","title":"Recent 2","summary":"\(recent)"},
+      {"id":"recent-3","title":"Recent 3","summary":"\(recent)"},
+      {"id":"recent-4","title":"Recent 4","summary":"\(recent)"}
+    ]
+    """)
+}
+
 private let luminaStreamingModelCallback: LuminaAgentStreamingModelCallback = { plannerInput, emit, emitContext, _ in
     if let plannerInput {
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
@@ -322,9 +364,30 @@ private let luminaRetryProviderCallback: LuminaAgentRetryProviderCallback = { re
     return luminaRuntimeCString(#"{"action":"retry","delay_ms":0,"reason":"test retry","max_attempts_override":3}"#)
 }
 
+private let luminaCompactionProviderCallback: LuminaAgentCompactionProviderCallback = { request, _ in
+    if let request {
+        LuminaRuntimeCaptureStore.shared.appendCompactionRequest(String(cString: request))
+    }
+    return luminaRuntimeCString(#"{"status":"compacted","compacted_context":{"sections":[],"compact_summary":"custom compacted context"},"tokens_saved_estimate":321,"boundary":{"type":"compact_boundary","trigger":"auto","strategy":"summarizing_compact"}}"#)
+}
+
+private let luminaSkippingCompactionProviderCallback: LuminaAgentCompactionProviderCallback = { request, _ in
+    if let request {
+        LuminaRuntimeCaptureStore.shared.appendCompactionRequest(String(cString: request))
+    }
+    return luminaRuntimeCString(#"{"status":"skipped"}"#)
+}
+
 private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
+}
+
+private let luminaLargeToolResultCallback: LuminaAgentToolCallback = { call, _ in
+    if let call {
+        LuminaRuntimeCaptureStore.shared.appendToolCall(String(cString: call))
+    }
+    return luminaRuntimeCString(#"{"status":"succeeded","content":""# + String(repeating: "large tool output ", count: 260) + #""}"#)
 }
 
 private let luminaRecordingToolCallback: LuminaAgentToolCallback = { call, _ in
@@ -852,6 +915,187 @@ final class LuminaRuntimeKernelTests: XCTestCase {
 
         XCTAssertTrue(result.contains("Runtime 配置无效"))
         XCTAssertTrue(result.contains("missing required runtime budget"))
+    }
+
+    func testCoreCompactionProviderReceivesDynamicContextBudget() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":12000,"maxContextTokens":640,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":100,"warningBufferTokens":100,"maxObservationCharacters":500,"toolResultTokenBudget":256,"compactThresholdTokens":100,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaLargeContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"compact","text":"compact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertFalse(snapshot.compactionRequests.isEmpty)
+        XCTAssertTrue(snapshot.compactionRequests.first?.contains(#""max_context_tokens":640"#) == true)
+        XCTAssertTrue(snapshot.compactionRequests.first?.contains(#""effective_context_window":600"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains("custom compacted context") == true)
+    }
+
+    func testCoreModelMetadataOverridesConfiguredContextWindowForCompaction() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":12000,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":100,"warningBufferTokens":100,"maxObservationCharacters":500,"toolResultTokenBudget":256,"compactThresholdTokens":100,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelMetadataCallback(runtime, luminaProviderMetadataCallback, nil)
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaLargeContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"metadata-compact","text":"compact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(snapshot.compactionRequests.first?.contains(#""model_id":"test-dynamic-window""#) == true)
+        XCTAssertTrue(snapshot.compactionRequests.first?.contains(#""max_context_tokens":640"#) == true)
+        XCTAssertTrue(snapshot.compactionRequests.first?.contains(#""provider_native_context_management":true"#) == true)
+    }
+
+    func testCoreCompactionDoesNotTriggerWhenProviderContextWindowHasRoom() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":100,"warningBufferTokens":100,"maxObservationCharacters":500,"toolResultTokenBudget":256,"compactThresholdTokens":100,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaLargeContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"no-compact","text":"no compact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(snapshot.compactionRequests.isEmpty)
+        XCTAssertFalse(snapshot.plannerInputs.last?.contains("custom compacted context") == true)
+    }
+
+    func testCoreCompactionFallsBackWhenProviderSkips() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":12000,"maxContextTokens":640,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":100,"warningBufferTokens":100,"maxObservationCharacters":500,"toolResultTokenBudget":256,"compactThresholdTokens":100,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaLargeContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaSkippingCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"fallback-compact","text":"fallback compact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertFalse(snapshot.compactionRequests.isEmpty)
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains("context compacted because execution budget is near the provider context window") == true)
+    }
+
+    func testCoreBuiltInMicrocompactRunsWhenProviderSkips() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":2000,"maxContextTokens":2000,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":800,"warningBufferTokens":800,"maxObservationCharacters":500,"toolResultTokenBudget":128,"compactThresholdTokens":800,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaManyLargeSectionsContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaSkippingCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"microcompact","text":"micro compact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains(#""microcompacted":true"#) == true)
+        XCTAssertFalse(snapshot.plannerInputs.last?.contains("context compacted because execution budget is near the provider context window") == true)
+        XCTAssertFalse(snapshot.plannerInputs.last?.contains("sk-test-secret-token") == true)
+    }
+
+    func testCoreCompactionPayloadRedactsSecrets() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":2000,"maxContextTokens":900,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":200,"warningBufferTokens":200,"maxObservationCharacters":500,"toolResultTokenBudget":128,"compactThresholdTokens":200,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaManyLargeSectionsContextCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaSkippingCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"redact","text":"redact"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let payload = LuminaRuntimeCaptureStore.shared.snapshot().compactionRequests.joined(separator: "\n")
+        XCTAssertFalse(payload.contains("sk-test-secret-token"))
+        XCTAssertFalse(payload.contains("Bearer sk-"))
+        XCTAssertTrue(payload.contains("[REDACTED]"))
+    }
+
+    func testPromptTooLongTriggersReactiveCompactionAndRetriesModel() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":1,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":256,"reservedOutputTokens":40,"autoCompactBufferTokens":100,"warningBufferTokens":100,"maxObservationCharacters":500,"toolResultTokenBudget":256,"compactThresholdTokens":100,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaPromptTooLongThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextCallback(runtime, luminaLargeContextCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"reactive","text":"recover"}"#)
+        let result = pointer.map { String(cString: $0) } ?? "{}"
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.modelCallCount, 2)
+        XCTAssertTrue(snapshot.events.contains(where: { $0.contains("prompt_too_long_recovered") }))
+        XCTAssertTrue(snapshot.plannerInputs.last?.contains("context compacted because execution budget is near the provider context window") == true)
+        XCTAssertTrue(result.contains("succeeded"))
+    }
+
+    func testCompactionRequestIncludesToolResultCandidates() throws {
+        let config = """
+        {"maxIterations":3,"maxToolCalls":2,"contextWindowTokens":12000,"maxContextTokens":450,"maxOutputTokens":128,"reservedOutputTokens":40,"autoCompactBufferTokens":200,"warningBufferTokens":200,"maxObservationCharacters":500,"toolResultTokenBudget":128,"compactThresholdTokens":200,"maxCompactFailures":3,"maxReasoningSteps":2,"maxReplayObservations":2,"stopOnToolFailure":false}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        let schema = #"{"name":"status.read","description":"Read status","parameters":[{"name":"scope","type":"string","required":true}],"sideEffect":"readOnly","readOnly":true,"idempotencyPolicy":"replay_identical"}"#
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(runtime, schema)
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaReadToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaLargeToolResultCallback, nil)
+        LuminaAgentRuntimeSetCompactionProviderCallback(runtime, luminaSkippingCompactionProviderCallback, nil)
+
+        let pointer = LuminaAgentRuntimeRun(runtime, #"{"id":"tool-candidates","text":"read"}"#)
+        if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
+
+        let payload = LuminaRuntimeCaptureStore.shared.snapshot().compactionRequests.joined(separator: "\n")
+        XCTAssertTrue(payload.contains(#""tool_result_candidates":["#))
+        XCTAssertTrue(payload.contains(#""tool_name":"status.read""#))
+        XCTAssertTrue(payload.contains("raw_result_characters"))
     }
 
     func testToolSchemaValidationRejectsMissingRequiredArgumentsBeforeExecution() async {

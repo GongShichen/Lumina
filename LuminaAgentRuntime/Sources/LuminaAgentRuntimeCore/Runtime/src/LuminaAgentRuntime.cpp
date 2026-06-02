@@ -69,6 +69,16 @@ extern "C" void LuminaAgentRuntimeSetStreamingModelCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetModelMetadataCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentModelMetadataCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setModelMetadataCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetToolCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentToolCallback callback,
@@ -126,6 +136,16 @@ extern "C" void LuminaAgentRuntimeSetRetryProviderCallback(
 ) {
     if (runtime != nullptr) {
         runtime->runtime.setRetryProviderCallback(callback, user_context);
+    }
+}
+
+extern "C" void LuminaAgentRuntimeSetCompactionProviderCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentCompactionProviderCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setCompactionProviderCallback(callback, user_context);
     }
 }
 

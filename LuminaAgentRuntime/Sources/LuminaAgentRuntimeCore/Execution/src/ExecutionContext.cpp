@@ -20,7 +20,19 @@ const RuntimeSessionConfig &ExecutionContext::config() const { return config_; }
 const ToolRegistry &ExecutionContext::tools() const { return tools_; }
 const RuntimeCallbacks &ExecutionContext::callbacks() const { return callbacks_; }
 RuntimeEventQueue &ExecutionContext::events() const { return events_; }
-ContextBudgetManager ExecutionContext::budgetManager() const { return ContextBudgetManager(config_); }
+ContextBudgetManager ExecutionContext::budgetManager() const {
+    RuntimeSessionConfig config = config_;
+    config.contextWindowTokens = session_.contextWindowTokens();
+    config.maxContextTokens = session_.maxContextTokens();
+    config.maxOutputTokens = session_.maxOutputTokens();
+    config.reservedOutputTokens = session_.reservedOutputTokens();
+    config.autoCompactBufferTokens = session_.autoCompactBufferTokens();
+    config.warningBufferTokens = session_.warningBufferTokens();
+    config.compactThresholdTokens = session_.compactThresholdTokens();
+    config.toolResultTokenBudget = session_.toolResultTokenBudget();
+    config.maximumObservationCharacters = session_.maximumObservationCharacters();
+    return ContextBudgetManager(config);
+}
 
 void ExecutionContext::setRequestJson(const std::string &requestJson) {
     requestJson_ = requestJson;

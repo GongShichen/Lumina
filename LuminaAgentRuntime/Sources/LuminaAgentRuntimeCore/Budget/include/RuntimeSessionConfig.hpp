@@ -21,11 +21,26 @@ struct RuntimeSessionConfig {
     // Approximate context window available to task envelope construction.
     int contextWindowTokens = 0;
 
+    // Provider/model-declared maximum context window. Falls back to
+    // contextWindowTokens when the caller cannot expose model metadata.
+    int maxContextTokens = 0;
+
+    // Provider/model identity and native context-management support. These are
+    // optional metadata supplied by the host model provider at run time.
+    std::string modelId;
+    bool providerNativeContextManagement = false;
+
     // Maximum model output tokens allowed by the caller/model adapter.
     int maxOutputTokens = 0;
 
     // Tokens reserved for protocol overhead and result headroom.
     int reservedOutputTokens = 0;
+
+    // Remaining headroom kept before proactive automatic compaction.
+    int autoCompactBufferTokens = 0;
+
+    // Remaining headroom used for warning/error observability.
+    int warningBufferTokens = 0;
 
     // Maximum characters retained from each runtime-owned observation summary.
     int maximumObservationCharacters = 0;
