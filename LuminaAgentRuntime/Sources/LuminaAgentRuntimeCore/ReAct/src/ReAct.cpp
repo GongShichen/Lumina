@@ -182,23 +182,30 @@ static std::string xmlAttributeValue(const std::string &header, const std::strin
     return header.substr(valueStart, valueEnd - valueStart);
 }
 
-static std::string toolUseTagValue(
+static bool toolUseTagValue(
     const std::string &text,
     std::string &toolName,
     bool &requiresConfirmation,
-    bool &hasRequiresConfirmation
+    bool &hasRequiresConfirmation,
+    std::string &value,
+    std::string &error
 ) {
     const std::string open = "<tool_use";
     const size_t start = text.find(open);
     if (start == std::string::npos) {
-        return "";
+        return false;
     }
     const size_t openEnd = text.find(">", start);
     if (openEnd == std::string::npos) {
-        return "";
+        error = "tool_use tag is missing closing '>'.";
+        return false;
     }
     const std::string header = text.substr(start, openEnd - start + 1);
     toolName = xmlAttributeValue(header, "name");
+    if (toolName.empty()) {
+        error = "tool_use tag requires a name attribute.";
+        return false;
+    }
     std::string confirmation = lowercased(xmlAttributeValue(header, "requires_confirmation"));
     if (confirmation.empty()) {
         confirmation = lowercased(xmlAttributeValue(header, "requires-confirmation"));
@@ -211,35 +218,86 @@ static std::string toolUseTagValue(
     const size_t valueStart = openEnd + 1;
     const size_t end = text.find(close, valueStart);
     if (end == std::string::npos) {
+        error = "tool_use tag is missing closing </tool_use>.";
+        return false;
+    }
+    value = trim(text.substr(valueStart, end - valueStart));
+    if (value.empty()) {
+        error = "tool_use tag content must be an explicit JSON object; use {} for no parameters.";
+        return false;
+    }
+    return true;
+}
+
+static bool startsWith(const std::string &text, const std::string &prefix) {
+    return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
+}
+
+static std::string stripLeadingThinkBlock(const std::string &text, std::string &error) {
+    std::string normalized = trim(text);
+    if (!startsWith(normalized, "<think")) {
+        if (normalized.find("<think") != std::string::npos || normalized.find("</think>") != std::string::npos) {
+            error = "model output may not contain <think> tags.";
+            return "";
+        }
+        return normalized;
+    }
+    const size_t openEnd = normalized.find(">");
+    if (openEnd == std::string::npos) {
+        error = "leading <think> tag is missing closing '>'.";
         return "";
     }
-    return trim(text.substr(valueStart, end - valueStart));
+    const size_t close = normalized.find("</think>", openEnd + 1);
+    if (close == std::string::npos) {
+        error = "leading <think> tag is missing closing </think>.";
+        return "";
+    }
+    normalized = trim(normalized.substr(close + std::string("</think>").size()));
+    if (normalized.find("<think") != std::string::npos || normalized.find("</think>") != std::string::npos) {
+        error = "model output may not contain nested or repeated <think> tags.";
+        return "";
+    }
+    return normalized;
 }
 
 static std::string normalizeXmlTags(const std::string &text, std::string &error) {
-    if (text.find("<observation") != std::string::npos || text.find("<tool_result") != std::string::npos) {
+    const std::string normalizedText = stripLeadingThinkBlock(text, error);
+    if (!error.empty()) {
+        return "";
+    }
+    if (normalizedText.find("<observation") != std::string::npos || normalizedText.find("<tool_result") != std::string::npos) {
         error = "model output may not contain runtime-owned observation/tool_result tags.";
         return "";
     }
-    const std::string thought = tagValue(text, "thought");
+    const std::string thought = tagValue(normalizedText, "thought");
     std::string toolName;
     bool requiresConfirmation = false;
     bool hasRequiresConfirmation = false;
-    const std::string toolParameters = toolUseTagValue(text, toolName, requiresConfirmation, hasRequiresConfirmation);
-    if (!toolName.empty()) {
-        const std::string parameters = toolParameters.empty() ? "{}" : toolParameters;
+    std::string toolParameters;
+    const bool hasToolUse = toolUseTagValue(
+        normalizedText,
+        toolName,
+        requiresConfirmation,
+        hasRequiresConfirmation,
+        toolParameters,
+        error
+    );
+    if (!error.empty()) {
+        return "";
+    }
+    if (hasToolUse) {
         std::map<std::string, JsonField> fields;
-        if (!parseFieldsOrEmpty(parameters, fields)) {
+        if (!parseFieldsOrEmpty(toolParameters, fields)) {
             error = "tool_use tag content must be a JSON object.";
             return "";
         }
         return "{\"type\":\"tool_use\",\"thought\":" + jsonString(thought) +
             ",\"tool_name\":" + jsonString(toolName) +
-            ",\"parameters\":" + parameters +
+            ",\"parameters\":" + toolParameters +
             (hasRequiresConfirmation ? ",\"requires_confirmation\":" + jsonBool(requiresConfirmation) : "") +
             "}";
     }
-    const std::string askUser = tagValue(text, "ask_user");
+    const std::string askUser = tagValue(normalizedText, "ask_user");
     if (!askUser.empty()) {
         std::map<std::string, JsonField> fields;
         if (!parseFieldsOrEmpty(askUser, fields)) {
@@ -254,13 +312,13 @@ static std::string normalizeXmlTags(const std::string &text, std::string &error)
             ",\"allow_custom_answer\":" + rawField(fields, "allow_custom_answer", "true") +
             "}";
     }
-    const std::string result = tagValue(text, "result");
+    const std::string result = tagValue(normalizedText, "result");
     if (!result.empty()) {
         return "{\"type\":\"result\",\"thought\":" + jsonString(thought) +
             ",\"content\":" + jsonString(result) +
             ",\"completed\":true}";
     }
-    const std::string cannotComplete = tagValue(text, "cannot_complete");
+    const std::string cannotComplete = tagValue(normalizedText, "cannot_complete");
     if (!cannotComplete.empty()) {
         return "{\"type\":\"cannot_complete\",\"thought\":" + jsonString(thought) +
             ",\"reason\":" + jsonString(cannotComplete) + "}";

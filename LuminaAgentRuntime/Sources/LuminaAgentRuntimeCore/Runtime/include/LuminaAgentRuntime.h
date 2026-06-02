@@ -113,6 +113,18 @@ typedef char *(*LuminaAgentConfirmationCallback)(const char *confirmation_reques
 typedef char *(*LuminaAgentGuardrailCallback)(const char *guardrail_request_json, void *user_context);
 
 /**
+ * Callback used by the runtime to ask whether a failed runtime stage should be
+ * retried, handed to a host fallback, failed, or accepted as-is.
+ *
+ * The input is a UTF-8 JSON object with correlation fields, `stage`, `attempt`,
+ * `max_attempts`, error metadata, and optional tool idempotency metadata. Return
+ * `{"action":"retry","delay_ms":1000}`, `{"action":"fallback"}`,
+ * `{"action":"fail"}`, or `{"action":"proceed"}`. Returning NULL or invalid
+ * JSON falls back to the runtime default retry policy.
+ */
+typedef char *(*LuminaAgentRetryProviderCallback)(const char *retry_request_json, void *user_context);
+
+/**
  * Callback used by the runtime to write audit records.
  *
  * The input is a UTF-8 JSON object describing lifecycle events, tool calls,
@@ -302,6 +314,19 @@ void LuminaAgentRuntimeSetConfirmationCallback(
 void LuminaAgentRuntimeSetGuardrailCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentGuardrailCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional retry provider callback.
+ *
+ * When this callback is not installed, the runtime uses its conservative
+ * default retry policy. Bindings should translate host retry providers into
+ * this callback without owning core retry semantics.
+ */
+void LuminaAgentRuntimeSetRetryProviderCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRetryProviderCallback callback,
     void *user_context
 );
 

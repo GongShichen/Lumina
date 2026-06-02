@@ -309,6 +309,18 @@ extension LuminaAgentRuntimeAdapterBox {
         }
     }
 
+    func decideRetry(retryJSON: String) async -> String {
+        guard let retryProvider else { return "" }
+        do {
+            let request = try JSONDecoder().decode(LuminaRuntimeRetryRequest.self, from: Data(retryJSON.utf8))
+            let decision = await retryProvider.decideRetry(for: request)
+            let data = try JSONEncoder().encode(decision)
+            return String(data: data, encoding: .utf8) ?? ""
+        } catch {
+            return ""
+        }
+    }
+
     func hookRouteJSON(index: Int) -> String {
         var object: [String: Any] = ["id": Self.hookRouteID(index: index)]
         if hooks.indices.contains(index),

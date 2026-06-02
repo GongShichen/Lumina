@@ -1,7 +1,9 @@
 #include "Runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 #include "Hooks.hpp"
@@ -87,6 +89,56 @@ static bool applyTerminalGuardrailDecision(
         "{\"stage\":" + jsonString(stage) + ",\"message\":" + jsonString(message) + "}"
     );
     return true;
+}
+
+static std::string retryRequestJson(
+    const RuntimeSession &session,
+    const std::string &stage,
+    int attempt,
+    int maxAttempts,
+    const std::string &errorCode,
+    const std::string &errorCategory,
+    bool recoverable,
+    double retryAfterSeconds,
+    long long elapsedMilliseconds,
+    const std::string &toolName = "",
+    const std::string &toolSideEffect = "",
+    const std::string &idempotencyPolicy = "",
+    bool hasIdempotencyKey = false,
+    bool toolReadOnly = false,
+    bool toolDestructive = false
+) {
+    std::ostringstream output;
+    output << "{"
+           << "\"session_id\":" << jsonString(session.sessionId()) << ","
+           << "\"run_id\":" << jsonString(session.runId()) << ","
+           << "\"stage\":" << jsonString(stage) << ","
+           << "\"attempt\":" << attempt << ","
+           << "\"max_attempts\":" << maxAttempts << ","
+           << "\"error_code\":" << jsonString(errorCode) << ","
+           << "\"error_category\":" << jsonString(errorCategory) << ","
+           << "\"recoverable\":" << jsonBool(recoverable) << ","
+           << "\"tool_name\":" << jsonString(toolName) << ","
+           << "\"tool_side_effect\":" << jsonString(toolSideEffect) << ","
+           << "\"idempotency_policy\":" << jsonString(idempotencyPolicy) << ","
+           << "\"has_idempotency_key\":" << jsonBool(hasIdempotencyKey) << ","
+           << "\"tool_read_only\":" << jsonBool(toolReadOnly) << ","
+           << "\"tool_destructive\":" << jsonBool(toolDestructive) << ","
+           << "\"retry_after_seconds\":" << retryAfterSeconds << ","
+           << "\"elapsed_ms\":" << elapsedMilliseconds
+           << "}";
+    return output.str();
+}
+
+static void sleepForRetryDecision(const RuntimeCallbacks &callbacks, const std::string &retryRequest, const RuntimeRetryDecision &decision) {
+    const std::string payload = "{\"request\":" + retryRequest +
+        ",\"decision\":{\"action\":" + jsonString(decision.action) +
+        ",\"delay_ms\":" + std::to_string(std::max<long long>(0, decision.delayMilliseconds)) +
+        ",\"reason\":" + jsonString(decision.reason) + "}}";
+    callbacks.emitEvent("runtime.retry.scheduled", payload);
+    if (decision.delayMilliseconds > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(decision.delayMilliseconds));
+    }
 }
 
 static std::string rewrittenResultMarkdown(const std::string &payloadJson) {
@@ -344,6 +396,10 @@ void Runtime::setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *
     callbacks_.setGuardrail(callback, context);
 }
 
+void Runtime::setRetryProviderCallback(LuminaAgentRetryProviderCallback callback, void *context) {
+    callbacks_.setRetryProvider(callback, context);
+}
+
 void Runtime::setAuditCallback(LuminaAgentAuditCallback callback, void *context) {
     callbacks_.setAudit(callback, context);
 }
@@ -485,41 +541,86 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
         }
         std::string stepJson;
-        if (replayController != nullptr && replayController->hasModelReplay()) {
-            stepJson = replayController->nextModelStep();
-            events.emitEvent("model_output_replayed", "{\"iteration\":" + std::to_string(session.stepCount()) + "}");
-        } else if (replayController != nullptr && !replayController->allowsLiveModel()) {
-            events.emitEvent("model_generation_failed", "{\"reason\":\"replay-missing-model-output\"}");
-            session.failWithResult("replay-missing-model-output", "### 无法执行\n\nReplay script did not provide a matching model output.");
-            break;
-        } else {
-            stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
-        }
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
-            break;
-        }
-        if (trim(stepJson).empty()) {
-            events.emitEvent("model_generation_failed", "{\"reason\":\"empty-or-invalid-step\"}");
-            session.failWithResult("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
-            break;
-        }
-
         std::string error;
-        callbacks_.span("start", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"iteration\":" + std::to_string(session.stepCount()) + "}");
-        if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_normalization", "{\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
+        bool stepReady = false;
+        int modelAttempt = 1;
+        int normalizationAttempt = 1;
+        int maxModelAttempts = 3;
+        int maxNormalizationAttempts = 2;
+        while (!cancelled_ && !stepReady) {
+            const auto modelStartedAt = std::chrono::steady_clock::now();
+            if (replayController != nullptr && replayController->hasModelReplay()) {
+                stepJson = replayController->nextModelStep();
+                events.emitEvent("model_output_replayed", "{\"iteration\":" + std::to_string(session.stepCount()) + "}");
+            } else if (replayController != nullptr && !replayController->allowsLiveModel()) {
+                events.emitEvent("model_generation_failed", "{\"reason\":\"replay-missing-model-output\"}");
+                session.failWithResult("replay-missing-model-output", "### 无法执行\n\nReplay script did not provide a matching model output.");
+                break;
+            } else {
+                stepJson = StreamingModelRunner(callbacks_).generate(plannerInput);
+            }
+            const auto modelElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - modelStartedAt
+            ).count();
+            if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
+                break;
+            }
+            if (trim(stepJson).empty()) {
+                const std::string retryRequest = retryRequestJson(session, "model_generation", modelAttempt, maxModelAttempts, "empty-output", "provider", true, 0, modelElapsedMs);
+                const RuntimeRetryDecision retry = callbacks_.decideRetry(retryRequest);
+                if (retry.action == "retry") {
+                    if (retry.maxAttemptsOverride > 0) {
+                        maxModelAttempts = std::max(modelAttempt, retry.maxAttemptsOverride);
+                    }
+                    sleepForRetryDecision(callbacks_, retryRequest, retry);
+                    modelAttempt += 1;
+                    continue;
+                }
+                if (retry.action == "fallback") {
+                    callbacks_.emitEvent("runtime.fallback.used", "{\"request\":" + retryRequest + ",\"reason\":" + jsonString(retry.reason) + "}");
+                    session.failWithResult("fallback-requested", "### 无法执行\n\nRetry provider requested fallback, but no fallback provider is installed in the core runtime.");
+                    break;
+                }
+                events.emitEvent("model_generation_failed", "{\"reason\":\"empty-or-invalid-step\"}");
+                callbacks_.emitEvent("runtime.retry.failed", "{\"request\":" + retryRequest + ",\"reason\":" + jsonString(retry.reason) + "}");
+                session.failWithResult("model-empty-output", "### 无法执行\n\n模型没有返回有效的 ReAct step。");
+                break;
+            }
+
+            callbacks_.span("start", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"iteration\":" + std::to_string(session.stepCount()) + ",\"retry.attempt\":" + std::to_string(normalizationAttempt) + "}");
+            if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_normalization", "{\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
+                break;
+            }
+            if (!validateReActStepObject(stepJson, true, error)) {
+                callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"failed\",\"error\":" + jsonString(error) + "}");
+                const std::string retryRequest = retryRequestJson(session, "step_normalization", normalizationAttempt, maxNormalizationAttempts, "invalid-step", "normalization", true, 0, 0);
+                const RuntimeRetryDecision retry = callbacks_.decideRetry(retryRequest);
+                if (retry.action == "retry") {
+                    if (retry.maxAttemptsOverride > 0) {
+                        maxNormalizationAttempts = std::max(normalizationAttempt, retry.maxAttemptsOverride);
+                    }
+                    sleepForRetryDecision(callbacks_, retryRequest, retry);
+                    normalizationAttempt += 1;
+                    continue;
+                }
+                events.emitEvent(
+                    "model_generation_failed",
+                    "{\"reason\":\"invalid-step\",\"error\":" + jsonString(error) +
+                        ",\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"
+                );
+                callbacks_.emitEvent("runtime.retry.failed", "{\"request\":" + retryRequest + ",\"reason\":" + jsonString(retry.reason) + "}");
+                session.failWithResult("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
+                break;
+            }
+            callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"succeeded\",\"retry.attempt\":" + std::to_string(normalizationAttempt) + "}");
+            if (modelAttempt > 1 || normalizationAttempt > 1) {
+                callbacks_.emitEvent("runtime.retry.succeeded", "{\"stage\":\"model_generation\",\"model_attempts\":" + std::to_string(modelAttempt) + ",\"normalization_attempts\":" + std::to_string(normalizationAttempt) + "}");
+            }
+            stepReady = true;
+        }
+        if (!stepReady) {
             break;
         }
-        if (!validateReActStepObject(stepJson, true, error)) {
-            callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"failed\",\"error\":" + jsonString(error) + "}");
-            events.emitEvent(
-                "model_generation_failed",
-                "{\"reason\":\"invalid-step\",\"error\":" + jsonString(error) +
-                    ",\"step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"
-            );
-            session.failWithResult("invalid-model-output", "### 无法执行\n\n模型返回的 ReAct step 不符合协议：" + error);
-            break;
-        }
-        callbacks_.span("end", "runtime.step.normalize", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"status\":\"succeeded\"}");
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_normalization", stepJson), &contextJson, request)) {
             break;
         }

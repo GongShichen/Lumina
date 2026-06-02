@@ -48,6 +48,48 @@ final class MiniCPMV46RealTaskTests: XCTestCase {
         print("[Lumina][MiniCPMV46] computeUnits=\(metrics.computeUnits) promptTokens=\(metrics.promptTokens) outputTokens=\(metrics.outputTokens) ttftMs=\(metrics.timeToFirstTokenMilliseconds ?? -1) tokPerSec=\(String(format: "%.2f", metrics.tokensPerSecond)) totalMs=\(String(format: "%.1f", metrics.totalMilliseconds))")
     }
 
+    func testOptionalMiniCPMV46XMLPlannerBundleLoadsAndStreams() async throws {
+        guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
+            throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run real MiniCPM-V 4.6 Core ML smoke test.")
+        }
+        guard let path = ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_MODEL"], !path.isEmpty else {
+            throw XCTSkip("Set LUMINA_MINICPMV46_MODEL to Resources/Models/MiniCPMV46ReActModel.")
+        }
+
+        let metricsBox = MiniCPMV46MetricsBox()
+        let model = try LuminaMiniCPMV46ReActModel(configuration: .init(
+            modelDirectory: URL(fileURLWithPath: path),
+            backendPreference: Self.backendPreference,
+            maxNewTokens: 128,
+            expectedContextLength: 16_000,
+            metricsRecorder: { metrics in
+                Task { await metricsBox.record(metrics) }
+            }
+        ))
+
+        let normalized = try await model.generateJSON(
+            prompt: """
+            FIRST BYTES MUST BE <thought>. Output exactly one valid Lumina XML ReAct step and nothing else.
+            Valid tool step shape: <thought>why</thought><tool_use name="exact.name" requires_confirmation="false">{}</tool_use>.
+            Available tool names: device.current_time
+            Focused tool schemas: tool device.current_time | read | required: none | params: {}
+            Loaded context: none
+            Previous observations: none
+            User goal: 告诉我现在的本机时间
+            Input modalities: text
+            Execution budget: iteration 1, remaining tool calls 4, observation character cap 1200
+            Current next-step instruction: If a focused tool can progress the task, output tool_use now.
+            """
+        )
+        XCTAssertTrue(normalized.contains("\"type\":\"tool_use\"") || normalized.contains("\"type\": \"tool_use\""))
+        XCTAssertTrue(normalized.contains("device.current_time"))
+
+        let latestMetrics = await metricsBox.latestMetrics()
+        let metrics = try XCTUnwrap(latestMetrics)
+        XCTAssertGreaterThan(metrics.outputTokens, 0)
+        print("[Lumina][MiniCPMV46XML] normalized=\(normalized)")
+    }
+
     private static var backendPreference: LuminaMiniCPMV46BackendPreference {
         switch ProcessInfo.processInfo.environment["LUMINA_MINICPMV46_BACKEND"]?.lowercased() {
         case "ane":

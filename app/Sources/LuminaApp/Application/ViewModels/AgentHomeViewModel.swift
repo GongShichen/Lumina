@@ -33,7 +33,6 @@ final class AgentHomeViewModel: ObservableObject {
     @Published private(set) var voiceState: VoiceInputState = .idle
     @Published private(set) var voiceTranscript = ""
     @Published private(set) var benchmarkSnapshot = LuminaBenchmarkSnapshot()
-    @Published private(set) var agenticRLSnapshot = LuminaAgenticRLSnapshot()
 
     let memoryViewModel = PersonalMemoryViewModel()
     private let voiceInput: VoiceInputController
@@ -41,9 +40,7 @@ final class AgentHomeViewModel: ObservableObject {
     private var services: AgentAppServices?
     private var runTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
-    private var agenticRLTask: Task<Void, Never>?
     private var benchmarkRunID: UUID?
-    private var agenticRLRunID: UUID?
     private var messageDraftTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
     private var didStart = false
@@ -74,10 +71,7 @@ final class AgentHomeViewModel: ObservableObject {
         runTask = nil
         benchmarkTask?.cancel()
         benchmarkTask = nil
-        agenticRLTask?.cancel()
-        agenticRLTask = nil
         benchmarkRunID = nil
-        agenticRLRunID = nil
         messageDraftTask?.cancel()
         messageDraftTask = nil
     }
@@ -105,17 +99,14 @@ final class AgentHomeViewModel: ObservableObject {
     func runBenchmark() {
         guard let services else { return }
         benchmarkTask?.cancel()
-        agenticRLTask?.cancel()
         let runID = UUID()
         benchmarkRunID = runID
-        agenticRLRunID = nil
-        agenticRLSnapshot = LuminaAgenticRLSnapshot()
         benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "准备 200 条真实任务", completed: 0, total: 200)
         benchmarkTask = Task { [weak self] in
             guard let self else { return }
             await services.waitUntilLoaded()
             guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
-            self.benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "正在一次性申请工具权限", completed: 0, total: 200)
+            self.benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "正在准备隔离 Benchmark 工具", completed: 0, total: 200)
             await LuminaBenchmarkPermissionWarmup.requestAllNeededPermissions()
             guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
             let runner = services.makeBenchmarkRunner()
@@ -135,38 +126,6 @@ final class AgentHomeViewModel: ObservableObject {
         benchmarkTask?.cancel()
         benchmarkTask = nil
         benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .cancelled, currentTask: "Benchmark 已停止", completed: benchmarkSnapshot.completed, total: benchmarkSnapshot.total)
-    }
-
-    func runAgenticRLTrajectories() {
-        guard let services else { return }
-        agenticRLTask?.cancel()
-        benchmarkTask?.cancel()
-        let runID = UUID()
-        agenticRLRunID = runID
-        benchmarkRunID = nil
-        benchmarkSnapshot = LuminaBenchmarkSnapshot()
-        agenticRLSnapshot = LuminaAgenticRLSnapshot(state: .running, currentTask: "准备 200 条复杂轨迹任务", completed: 0, total: 200)
-        agenticRLTask = Task { [weak self] in
-            guard let self else { return }
-            await services.waitUntilLoaded()
-            guard self.agenticRLRunID == runID, !Task.isCancelled else { return }
-            let runner = services.makeAgenticRLRunner()
-            _ = await runner.run(taskCount: 200) { snapshot in
-                guard self.agenticRLRunID == runID else { return }
-                self.agenticRLSnapshot = snapshot
-            }
-            guard self.agenticRLRunID == runID, !Task.isCancelled else { return }
-            self.agenticRLTask = nil
-            await self.refreshStats()
-            await self.refreshAuditRecords()
-        }
-    }
-
-    func cancelAgenticRLTrajectories() {
-        agenticRLRunID = nil
-        agenticRLTask?.cancel()
-        agenticRLTask = nil
-        agenticRLSnapshot = LuminaAgenticRLSnapshot(state: .cancelled, currentTask: "Agentic RL 轨迹生成已停止", completed: agenticRLSnapshot.completed, total: agenticRLSnapshot.total)
     }
 
     func toggleVoiceInput() {

@@ -73,11 +73,8 @@ struct AgentHomeView: View {
                         stats: viewModel.stats,
                         modelReadiness: viewModel.modelReadiness,
                         benchmarkSnapshot: viewModel.benchmarkSnapshot,
-                        agenticRLSnapshot: viewModel.agenticRLSnapshot,
                         runBenchmark: viewModel.runBenchmark,
-                        cancelBenchmark: viewModel.cancelBenchmark,
-                        runAgenticRL: viewModel.runAgenticRLTrajectories,
-                        cancelAgenticRL: viewModel.cancelAgenticRLTrajectories
+                        cancelBenchmark: viewModel.cancelBenchmark
                     )
                 }
                 .tag(LuminaTab.runtime)

@@ -119,6 +119,16 @@ extern "C" void LuminaAgentRuntimeSetGuardrailCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetRetryProviderCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRetryProviderCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setRetryProviderCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetAuditCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentAuditCallback callback,

@@ -1,8 +1,10 @@
 #include "ToolExecutor.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <sstream>
+#include <thread>
 
 #include "Hooks.hpp"
 #include "Json.hpp"
@@ -61,6 +63,57 @@ static std::string makeDedupKey(
         return toolName + "\ncaller_key:implicit";
     }
     return toolName + "\n" + canonicalParameters;
+}
+
+static std::string retryRequestJson(
+    const RuntimeSession &session,
+    const std::string &stage,
+    int attempt,
+    int maxAttempts,
+    const std::string &errorCode,
+    const std::string &errorCategory,
+    bool recoverable,
+    long long elapsedMilliseconds,
+    const std::string &toolName,
+    const std::string &toolSideEffect,
+    const std::string &idempotencyPolicy,
+    bool hasIdempotencyKey,
+    bool toolReadOnly,
+    bool toolDestructive
+) {
+    std::ostringstream output;
+    output << "{"
+           << "\"session_id\":" << jsonString(session.sessionId()) << ","
+           << "\"run_id\":" << jsonString(session.runId()) << ","
+           << "\"stage\":" << jsonString(stage) << ","
+           << "\"attempt\":" << attempt << ","
+           << "\"max_attempts\":" << maxAttempts << ","
+           << "\"error_code\":" << jsonString(errorCode) << ","
+           << "\"error_category\":" << jsonString(errorCategory) << ","
+           << "\"recoverable\":" << jsonBool(recoverable) << ","
+           << "\"tool_name\":" << jsonString(toolName) << ","
+           << "\"tool_side_effect\":" << jsonString(toolSideEffect) << ","
+           << "\"idempotency_policy\":" << jsonString(idempotencyPolicy) << ","
+           << "\"has_idempotency_key\":" << jsonBool(hasIdempotencyKey) << ","
+           << "\"tool_read_only\":" << jsonBool(toolReadOnly) << ","
+           << "\"tool_destructive\":" << jsonBool(toolDestructive) << ","
+           << "\"retry_after_seconds\":0,"
+           << "\"elapsed_ms\":" << elapsedMilliseconds
+           << "}";
+    return output.str();
+}
+
+static void sleepForRetryDecision(const RuntimeCallbacks &callbacks, const std::string &retryRequest, const RuntimeRetryDecision &decision) {
+    callbacks.emitEvent(
+        "runtime.retry.scheduled",
+        "{\"request\":" + retryRequest +
+            ",\"decision\":{\"action\":" + jsonString(decision.action) +
+            ",\"delay_ms\":" + std::to_string(std::max<long long>(0, decision.delayMilliseconds)) +
+            ",\"reason\":" + jsonString(decision.reason) + "}}"
+    );
+    if (decision.delayMilliseconds > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(decision.delayMilliseconds));
+    }
 }
 
 static bool terminalGuardrailToolDecision(
@@ -384,14 +437,66 @@ std::string ToolExecutor::runToolCall(
     }
     callbacks_.emitEvent("tool_will_execute", redactedCallJson);
     HookDispatcher(callbacks_).dispatch("tool_will_execute", redactedCallJson);
-    callbacks_.span("start", "runtime.tool.execute", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + "}");
-    const auto toolStartedAt = std::chrono::steady_clock::now();
-    std::string result = callbacks_.callTool(callJson);
-    const auto toolElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - toolStartedAt
-    ).count();
-    if (trim(result).empty()) {
-        result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool returned an empty result\"}";
+    std::string result;
+    long long toolElapsedMs = 0;
+    int toolAttempt = 1;
+    int maxToolAttempts = 3;
+    while (true) {
+        callbacks_.span("start", "runtime.tool.execute", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"retry.attempt\":" + std::to_string(toolAttempt) + "}");
+        const auto toolStartedAt = std::chrono::steady_clock::now();
+        result = callbacks_.callTool(callJson);
+        toolElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - toolStartedAt
+        ).count();
+        const bool emptyResult = trim(result).empty();
+        if (emptyResult) {
+            result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"tool returned an empty result\",\"retryable\":true,\"errorCode\":\"empty-result\",\"errorCategory\":\"transport\"}";
+        }
+        std::map<std::string, JsonField> attemptFields;
+        const bool parsedAttempt = parseFieldsOrEmpty(result, attemptFields);
+        const std::string attemptStatus = lowercased(parsedAttempt ? stringField(attemptFields, "status", "succeeded") : "succeeded");
+        const bool failedAttempt = attemptStatus == "failed" || attemptStatus == "cancelled";
+        if (!failedAttempt) {
+            if (toolAttempt > 1) {
+                callbacks_.emitEvent("runtime.retry.succeeded", "{\"stage\":\"tool_execution\",\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"attempts\":" + std::to_string(toolAttempt) + "}");
+            }
+            break;
+        }
+        const bool recoverable = emptyResult || boolField(attemptFields, "retryable", false) || boolField(attemptFields, "recoverable", false);
+        const std::string errorCode = stringField(attemptFields, "errorCode", stringField(attemptFields, "error_code", emptyResult ? "empty-result" : "tool-failed"));
+        const std::string errorCategory = stringField(attemptFields, "errorCategory", stringField(attemptFields, "error_category", emptyResult ? "transport" : "tool"));
+        const std::string retryRequest = retryRequestJson(
+            session,
+            "tool_execution",
+            toolAttempt,
+            maxToolAttempts,
+            errorCode,
+            errorCategory,
+            recoverable,
+            toolElapsedMs,
+            activeToolName,
+            tools_.sideEffect(activeToolName),
+            idempotencyPolicy,
+            !callerProvidedIdempotencyKey(activeParameters).empty(),
+            tools_.isReadOnly(activeToolName),
+            tools_.isDestructive(activeToolName)
+        );
+        const RuntimeRetryDecision retry = callbacks_.decideRetry(retryRequest);
+        if (retry.action == "retry") {
+            if (retry.maxAttemptsOverride > 0) {
+                maxToolAttempts = std::max(toolAttempt, retry.maxAttemptsOverride);
+            }
+            callbacks_.span("end", "runtime.tool.execute", "{\"tool_name\":" + jsonString(activeToolName) + ",\"call_id\":" + jsonString(callId) + ",\"status\":\"retrying\",\"wall_time_ms\":" + std::to_string(toolElapsedMs) + "}");
+            sleepForRetryDecision(callbacks_, retryRequest, retry);
+            toolAttempt += 1;
+            continue;
+        }
+        if (retry.action == "fallback") {
+            callbacks_.emitEvent("runtime.fallback.used", "{\"request\":" + retryRequest + ",\"reason\":" + jsonString(retry.reason) + "}");
+        } else if (toolAttempt > 1 || recoverable) {
+            callbacks_.emitEvent("runtime.retry.failed", "{\"request\":" + retryRequest + ",\"reason\":" + jsonString(retry.reason) + "}");
+        }
+        break;
     }
 
     std::map<std::string, JsonField> resultFields;

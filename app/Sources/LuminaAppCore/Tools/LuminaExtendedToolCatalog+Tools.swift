@@ -81,7 +81,10 @@ extension LuminaExtendedToolCatalog {
                         "dueDateISO": reminder.dueDate.map { .string(iso($0)) } ?? .null
                     ])
                 }
-                return succeeded("reminder.search", values.isEmpty ? "没有找到提醒事项。" : "找到 \(values.count) 条提醒事项。", ["reminders": .array(Array(values))])
+                let summary = reminders.isEmpty
+                    ? "没有找到提醒事项。"
+                    : reminders.map { "[id=\($0.id.uuidString)] \($0.title)" }.joined(separator: "\n")
+                return succeeded("reminder.search", summary, ["reminders": .array(Array(values))])
             },
             tool(name: "reminder.update", description: "修改提醒事项。", params: [
                 param("id", "提醒 identifier。"),

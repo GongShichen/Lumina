@@ -16,7 +16,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         auditLogger: any LuminaAuditLogger = LuminaInMemoryAuditLogger(),
         hooks: [any LuminaAgentRuntimeHook] = [],
         observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
-        guardrails: LuminaRuntimeGuardrails = .empty
+        guardrails: LuminaRuntimeGuardrails = .empty,
+        retryProvider: (any LuminaRuntimeRetryProvider)? = nil
     ) {
         self.box = LuminaAgentRuntimeAdapterBox(
             tools: tools,
@@ -29,7 +30,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             auditLogger: auditLogger,
             hooks: hooks,
             observabilitySinks: observabilitySinks,
-            guardrails: guardrails
+            guardrails: guardrails,
+            retryProvider: retryProvider
         )
         self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
         configureRuntime()
@@ -246,6 +248,17 @@ let luminaAgentSwiftAdapterContextCallback: LuminaAgentContextCallback = { reque
     let input = String(cString: requestJSON)
     let response = blockOn(cancellationValue: { "null" }) {
         await box.loadContext(requestJSON: input)
+    }
+    return retainedCString(response)
+}
+
+let luminaAgentSwiftAdapterRetryProviderCallback: LuminaAgentRetryProviderCallback = { retryJSON, context in
+    guard let box = box(from: context), let retryJSON else {
+        return retainedCString("")
+    }
+    let input = String(cString: retryJSON)
+    let response = blockOn(cancellationValue: { "" }) {
+        await box.decideRetry(retryJSON: input)
     }
     return retainedCString(response)
 }

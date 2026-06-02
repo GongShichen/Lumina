@@ -1,6 +1,7 @@
 import LuminaAgentRuntime
 import Combine
 import Foundation
+import LuminaAppCore
 import PersonalMemory
 
 @MainActor
@@ -17,6 +18,7 @@ final class AgentAppServices: ObservableObject {
     let remoteInferenceSettings: LuminaRemoteInferenceSettingsStore
     let auditLogger: any LuminaAuditLogger
     let auditLogReader: (any LuminaAuditLogReader)?
+    let evaluationCalendarStore = LuminaVolatileCalendarStore()
     private let environment: AppEnvironment
     private let loadTask: Task<Void, Never>
 
@@ -34,16 +36,21 @@ final class AgentAppServices: ObservableObject {
     }()
 
     private(set) lazy var evaluationRuntime: LuminaAgentRuntime = {
-        let memoryTools: Set<String> = [
-            "local.search", "memory.recent", "memory.stats", "memory.delete", "memory.ingest_text",
-            "webpage.save_to_memory", "media.import", "subscription.refresh"
-        ]
-        let interactiveTools: Set<String> = ["ask_user"]
-        let tools = allAppTools().filter { !memoryTools.contains($0.schema.name) && !interactiveTools.contains($0.schema.name) }
+        let tools = AppToolFactory.makeEvaluationTools(
+            memoryStore: memoryStore,
+            ledgerStore: ledgerStore,
+            subscriptionStore: subscriptionStore,
+            messageDrafts: messageDrafts,
+            calendarStore: evaluationCalendarStore
+        )
+        var configuration = environment.runtimeConfiguration
+        configuration.stopOnToolFailure = true
+        configuration.maximumConsecutiveReplayObservations = 3
         return makeRuntime(
             tools: tools,
             contextProvider: LuminaEmptyRuntimeContextProvider(),
-            confirmationCoordinator: LuminaAlwaysConfirmCoordinator()
+            confirmationCoordinator: LuminaAlwaysConfirmCoordinator(),
+            configuration: configuration
         )
     }()
 
@@ -60,13 +67,14 @@ final class AgentAppServices: ObservableObject {
     private func makeRuntime(
         tools: [AnyLuminaAgentTool],
         contextProvider: any LuminaRuntimeContextProvider,
-        confirmationCoordinator: (any LuminaConfirmationCoordinator)? = nil
+        confirmationCoordinator: (any LuminaConfirmationCoordinator)? = nil,
+        configuration: LuminaAgentRuntimeConfiguration? = nil
     ) -> LuminaAgentRuntime {
         LuminaAgentRuntime(
             tools: tools,
             stepGenerator: environment.stepGenerator,
             contextProvider: contextProvider,
-            configuration: environment.runtimeConfiguration,
+            configuration: configuration ?? environment.runtimeConfiguration,
             permissionGate: LuminaAppRuntimePermissionGate(),
             confirmationCoordinator: confirmationCoordinator ?? confirmation,
             auditLogger: auditLogger,

@@ -72,6 +72,9 @@ std::string rawField(
 // Reads an integer field from a raw numeric JSON fragment.
 int intField(const std::map<std::string, JsonField> &fields, const std::string &key, int fallback);
 
+// Reads a floating-point field from a raw numeric JSON fragment.
+double doubleField(const std::map<std::string, JsonField> &fields, const std::string &key, double fallback);
+
 // Reads a boolean field or returns the provided fallback.
 bool boolField(const std::map<std::string, JsonField> &fields, const std::string &key, bool fallback);
 

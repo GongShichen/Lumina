@@ -358,6 +358,18 @@ int intField(const std::map<std::string, JsonField> &fields, const std::string &
     }
 }
 
+double doubleField(const std::map<std::string, JsonField> &fields, const std::string &key, double fallback) {
+    auto it = fields.find(key);
+    if (it == fields.end() || it->second.raw.empty()) {
+        return fallback;
+    }
+    try {
+        return std::stod(it->second.raw);
+    } catch (...) {
+        return fallback;
+    }
+}
+
 bool boolField(const std::map<std::string, JsonField> &fields, const std::string &key, bool fallback) {
     auto it = fields.find(key);
     if (it == fields.end() || it->second.kind != JsonKind::boolean) {

@@ -28,6 +28,7 @@ public:
     void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context);
+    void setRetryProviderCallback(LuminaAgentRetryProviderCallback callback, void *context);
     void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
     void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
     void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);

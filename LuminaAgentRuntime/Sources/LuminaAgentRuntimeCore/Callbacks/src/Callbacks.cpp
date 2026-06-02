@@ -44,6 +44,10 @@ void RuntimeCallbacks::setGuardrail(LuminaAgentGuardrailCallback callback, void 
     guardrail_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setRetryProvider(LuminaAgentRetryProviderCallback callback, void *context) {
+    retryProvider_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setAudit(LuminaAgentAuditCallback callback, void *context) {
     audit_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -93,6 +97,7 @@ bool RuntimeCallbacks::hasContext() const { return context_.function != nullptr;
 bool RuntimeCallbacks::hasPermission() const { return permission_.function != nullptr; }
 bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function != nullptr; }
 bool RuntimeCallbacks::hasGuardrail() const { return guardrail_.function != nullptr; }
+bool RuntimeCallbacks::hasRetryProvider() const { return retryProvider_.function != nullptr; }
 bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
 bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
 bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
@@ -221,6 +226,177 @@ RuntimeGuardrailDecision RuntimeCallbacks::evaluateGuardrail(const std::string &
     const std::string request = "{\"stage\":" + jsonString(stage) +
         ",\"payload\":" + (trim(payloadJson).empty() ? "{}" : payloadJson) + "}";
     return parseGuardrailDecision(consumeCString(callback(request.c_str(), guardrail_.context)));
+}
+
+static bool retryableCode(const std::string &code) {
+    const std::string value = lowercased(code);
+    return value == "408" ||
+        value == "409" ||
+        value == "429" ||
+        value == "500" ||
+        value == "502" ||
+        value == "503" ||
+        value == "504" ||
+        value == "timeout" ||
+        value == "timed_out" ||
+        value == "network_interruption" ||
+        value == "network_connection_lost" ||
+        value == "transport";
+}
+
+static bool nonRetryableCode(const std::string &code) {
+    const std::string value = lowercased(code);
+    return value == "400" ||
+        value == "401" ||
+        value == "403" ||
+        value == "404" ||
+        value == "configuration" ||
+        value == "schema" ||
+        value == "validation" ||
+        value == "authorization" ||
+        value == "authentication";
+}
+
+static bool retryableCategory(const std::string &category) {
+    const std::string value = lowercased(category);
+    return value == "network" ||
+        value == "transport" ||
+        value == "timeout" ||
+        value == "rate_limit" ||
+        value == "provider" ||
+        value == "transient";
+}
+
+static bool nonRetryableCategory(const std::string &category) {
+    const std::string value = lowercased(category);
+    return value == "auth" ||
+        value == "authentication" ||
+        value == "authorization" ||
+        value == "configuration" ||
+        value == "schema" ||
+        value == "validation" ||
+        value == "permission" ||
+        value == "confirmation";
+}
+
+static long long defaultRetryDelayMilliseconds(int attempt, double retryAfterSeconds) {
+    if (retryAfterSeconds > 0) {
+        return static_cast<long long>(std::min(8000.0, retryAfterSeconds * 1000.0));
+    }
+    const int safeAttempt = std::max(1, attempt);
+    const long long base = 1000LL << static_cast<long long>(std::min(2, safeAttempt - 1));
+    return std::min(8000LL, base);
+}
+
+static bool toolRetryAllowed(const std::map<std::string, JsonField> &fields) {
+    if (boolField(fields, "tool_destructive", boolField(fields, "destructive", false))) {
+        return false;
+    }
+    if (boolField(fields, "tool_read_only", boolField(fields, "read_only", false))) {
+        return true;
+    }
+    const std::string policy = lowercased(stringField(fields, "idempotency_policy", stringField(fields, "idempotencyPolicy")));
+    if (policy == "replay_identical") {
+        return true;
+    }
+    if (policy == "caller_keyed" && boolField(fields, "has_idempotency_key", false)) {
+        return true;
+    }
+    return false;
+}
+
+static RuntimeRetryDecision parseRetryDecision(const std::string &decisionJson, bool &ok) {
+    ok = false;
+    RuntimeRetryDecision decision;
+    const std::string text = trim(decisionJson);
+    if (text.empty() || text == "null") {
+        return decision;
+    }
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(text, fields)) {
+        return decision;
+    }
+    decision.action = lowercased(stringField(fields, "action", stringField(fields, "decision", "fail")));
+    if (decision.action == "continue") {
+        decision.action = "proceed";
+    }
+    if (decision.action != "retry" && decision.action != "fallback" && decision.action != "fail" && decision.action != "proceed") {
+        decision.action = "fail";
+    }
+    decision.reason = stringField(fields, "reason", stringField(fields, "message"));
+    decision.delayMilliseconds = std::max(0, intField(fields, "delay_ms", intField(fields, "delayMilliseconds", 0)));
+    decision.maxAttemptsOverride = std::max(0, intField(fields, "max_attempts_override", intField(fields, "maxAttemptsOverride", 0)));
+    ok = true;
+    return decision;
+}
+
+static RuntimeRetryDecision defaultRetryDecision(const std::string &retryRequestJson) {
+    RuntimeRetryDecision decision;
+    std::map<std::string, JsonField> fields;
+    parseFieldsOrEmpty(trim(retryRequestJson).empty() ? "{}" : retryRequestJson, fields);
+    const std::string stage = lowercased(stringField(fields, "stage"));
+    const std::string code = stringField(fields, "error_code", stringField(fields, "errorCode"));
+    const std::string category = stringField(fields, "error_category", stringField(fields, "errorCategory"));
+    const int attempt = std::max(1, intField(fields, "attempt", 1));
+    const int configuredMax = intField(fields, "max_attempts", intField(fields, "maxAttempts", 0));
+    const int maxAttempts = configuredMax > 0 ? configuredMax : (stage == "step_normalization" ? 2 : 3);
+    const bool explicitRecoverable = boolField(fields, "recoverable", false);
+    const bool retryable = explicitRecoverable || retryableCode(code) || retryableCategory(category);
+    const bool blocked = nonRetryableCode(code) || nonRetryableCategory(category);
+
+    if (attempt >= maxAttempts) {
+        decision.reason = "retry attempts exhausted";
+        return decision;
+    }
+    if (blocked || !retryable) {
+        decision.reason = blocked ? "error is not retryable" : "error is not marked recoverable";
+        return decision;
+    }
+    if (stage == "permission" || stage == "confirmation") {
+        decision.reason = "permission and confirmation are not retried by default";
+        return decision;
+    }
+    if (stage == "tool_execution" && !toolRetryAllowed(fields)) {
+        decision.reason = "tool retry is not allowed by idempotency policy";
+        return decision;
+    }
+    decision.action = "retry";
+    decision.delayMilliseconds = defaultRetryDelayMilliseconds(attempt, doubleField(fields, "retry_after_seconds", doubleField(fields, "retryAfterSeconds", 0)));
+    decision.reason = "default retry policy";
+    return decision;
+}
+
+static std::string retryDecisionJson(const RuntimeRetryDecision &decision) {
+    return "{\"action\":" + jsonString(decision.action) +
+        ",\"delay_ms\":" + std::to_string(std::max<long long>(0, decision.delayMilliseconds)) +
+        ",\"reason\":" + jsonString(decision.reason) +
+        ",\"max_attempts_override\":" + std::to_string(std::max(0, decision.maxAttemptsOverride)) + "}";
+}
+
+RuntimeRetryDecision RuntimeCallbacks::decideRetry(const std::string &retryRequestJson) const {
+    RuntimeRetryDecision decision;
+    bool parsedProviderDecision = false;
+    auto callback = reinterpret_cast<LuminaAgentRetryProviderCallback>(retryProvider_.function);
+    if (callback != nullptr) {
+        decision = parseRetryDecision(
+            consumeCString(callback((trim(retryRequestJson).empty() ? "{}" : retryRequestJson).c_str(), retryProvider_.context)),
+            parsedProviderDecision
+        );
+    }
+    if (callback == nullptr || !parsedProviderDecision) {
+        decision = defaultRetryDecision(retryRequestJson);
+    }
+    const std::string payload = "{\"request\":" + (trim(retryRequestJson).empty() ? "{}" : retryRequestJson) +
+        ",\"decision\":" + retryDecisionJson(decision) +
+        ",\"source\":" + jsonString(callback != nullptr && parsedProviderDecision ? "provider" : "default") + "}";
+    emitEvent("runtime.retry.decision", payload);
+    if (decision.action == "retry") {
+        metric("runtime.retry.count", 1, payload);
+        metric("runtime.retry.delay_ms", static_cast<double>(decision.delayMilliseconds), payload);
+    } else if (decision.action == "fallback") {
+        metric("runtime.fallback.count", 1, payload);
+    }
+    return decision;
 }
 
 std::string RuntimeCallbacks::dispatchHook(const std::string &hookEvent) const {

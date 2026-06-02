@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 import LuminaModelRuntime
 import Contacts
 import CoreLocation
@@ -382,15 +383,13 @@ final class LuminaInAppBenchmarkRunner {
     }
 
     private func prepareBenchmarkFixtures(traceLogger: LuminaBenchmarkTraceLogger) async {
-        let eventStore = EKEventStore()
         do {
-            try await requestBenchmarkCalendarAccess(eventStore)
-            try await requestBenchmarkReminderAccess(eventStore)
-            try createCalendarFixtureIfNeeded(eventStore)
-            try createReminderFixtureIfNeeded(eventStore)
+            try await createIsolatedCalendarFixtures()
+            try createIsolatedFileFixtures()
             await traceLogger.record("benchmark_fixtures_ready", fields: [
                 "calendar": "LuminaTest 项目同步",
-                "reminder": "LuminaTest 带伞"
+                "reminder": "LuminaTest 带伞",
+                "mode": "isolated"
             ])
         } catch {
             await traceLogger.record("benchmark_fixtures_failed", fields: [
@@ -399,59 +398,44 @@ final class LuminaInAppBenchmarkRunner {
         }
     }
 
-    private func requestBenchmarkCalendarAccess(_ eventStore: EKEventStore) async throws {
-        switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess:
-            return
-        case .notDetermined:
-            _ = try await eventStore.requestFullAccessToEvents()
-        default:
-            return
-        }
-    }
-
-    private func requestBenchmarkReminderAccess(_ eventStore: EKEventStore) async throws {
-        switch EKEventStore.authorizationStatus(for: .reminder) {
-        case .fullAccess, .writeOnly:
-            return
-        case .notDetermined:
-            _ = try await eventStore.requestFullAccessToReminders()
-        default:
-            return
-        }
-    }
-
-    private func createCalendarFixtureIfNeeded(_ eventStore: EKEventStore) throws {
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return }
+    private func createIsolatedCalendarFixtures() async throws {
         let calendar = Calendar.current
         let start = calendar.date(bySettingHour: 7, minute: 0, second: 0, of: calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()) ?? Date().addingTimeInterval(86_400)
         let end = start.addingTimeInterval(1_800)
-        let predicate = eventStore.predicateForEvents(withStart: start.addingTimeInterval(-3_600), end: end.addingTimeInterval(3_600), calendars: nil)
-        let exists = eventStore.events(matching: predicate).contains {
-            ($0.title ?? "").localizedCaseInsensitiveContains("LuminaTest 项目同步")
-        }
-        guard !exists else { return }
-        let event = EKEvent(eventStore: eventStore)
-        event.title = "LuminaTest 项目同步"
-        event.notes = "Lumina benchmark fixture"
-        event.startDate = start
-        event.endDate = end
-        event.calendar = eventStore.defaultCalendarForNewEvents
-        try eventStore.save(event, span: .thisEvent, commit: true)
+        _ = await services.evaluationCalendarStore.addEvent(LuminaCalendarEvent(
+            title: "LuminaTest 项目同步",
+            startDate: start,
+            endDate: end,
+            notes: "Lumina benchmark fixture"
+        ))
+        let due = Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())
+        _ = await services.evaluationCalendarStore.addReminder(LuminaReminderItem(
+            title: "LuminaTest 带伞",
+            notes: "Lumina benchmark fixture",
+            dueDate: due
+        ))
     }
 
-    private func createReminderFixtureIfNeeded(_ eventStore: EKEventStore) throws {
-        let status = EKEventStore.authorizationStatus(for: .reminder)
-        guard status == .fullAccess || status == .writeOnly else { return }
-        let reminder = EKReminder(eventStore: eventStore)
-        reminder.title = "LuminaTest 带伞"
-        reminder.notes = "Lumina benchmark fixture"
-        reminder.calendar = eventStore.defaultCalendarForNewReminders()
-        let due = Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date())
-        if let due {
-            reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
-        }
-        try eventStore.save(reminder, commit: true)
+    private func createIsolatedFileFixtures() throws {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
+            FileManager.default.temporaryDirectory
+        let notes = documents.appendingPathComponent("Lumina Notes", isDirectory: true)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        try "# LuminaTest Daily\n\n今天完成 benchmark fixture 验证。\n".write(
+            to: notes.appendingPathComponent("LuminaTest-daily.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# LuminaTest\n\n这是一篇用于 benchmark 的本地笔记。\n".write(
+            to: notes.appendingPathComponent("LuminaTest.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "# LuminaTest Report\n\nBenchmark covers XML ReAct, tool choice, and local runtime execution.\n".write(
+            to: documents.appendingPathComponent("LuminaTest-report.md"),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 }
 
@@ -711,12 +695,8 @@ private enum LuminaBenchmarkSemanticEvaluator {
 @MainActor
 enum LuminaBenchmarkPermissionWarmup {
     static func requestAllNeededPermissions() async {
-        async let calendar: Void = requestCalendarAccess()
-        async let reminders: Void = requestReminderAccess()
-        async let contacts: Void = requestContactsAccess()
-        async let notifications: Void = requestNotificationAccess()
-        async let location: Void = requestLocationAccess()
-        _ = await (calendar, reminders, contacts, notifications, location)
+        // Evaluation runtime uses isolated benchmark tools, so warmup should not
+        // trigger real Calendar, Contacts, Notifications, or Location prompts.
     }
 
     private static func requestCalendarAccess() async {
@@ -745,6 +725,13 @@ enum LuminaBenchmarkPermissionWarmup {
     }
 
     private static func requestLocationAccess() async {
-        _ = try? await LuminaLocationRequestCoordinator().currentLocation()
+        // Do not resolve a real location during benchmark warmup. On Mac Catalyst
+        // CLLocationManager.requestLocation() can wait indefinitely when location
+        // services are unavailable, which blocks the benchmark before task 1.
+        guard CLLocationManager.locationServicesEnabled() else { return }
+        let manager = CLLocationManager()
+        if manager.authorizationStatus == .notDetermined {
+            manager.requestWhenInUseAuthorization()
+        }
     }
 }

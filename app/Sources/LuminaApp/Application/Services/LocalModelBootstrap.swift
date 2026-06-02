@@ -546,7 +546,7 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
         var timeToFirstTokenMilliseconds: Double?
     }
 
-    private let maxAttempts = 3
+    private let retryPolicy = LuminaOpenAICompatibleRetryPolicy()
 
     func streamChatCompletion(
         configuration: LuminaRemoteInferenceConfiguration,
@@ -555,12 +555,14 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
         progress: @escaping @Sendable (LuminaStructuredInferenceProgress) -> Void
     ) async throws -> StreamResult {
         var lastError: Error?
-        for attempt in 1...maxAttempts {
+        for attempt in 1...retryPolicy.maxAttempts {
             do {
                 return try await streamOnce(configuration: configuration, prompt: prompt, maxOutputTokens: maxOutputTokens, progress: progress)
             } catch let error as LuminaOpenAICompatibleStreamingError {
                 lastError = error
-                guard attempt < maxAttempts, error.isRetryable else { throw error }
+                let request = retryPolicy.request(for: error, attempt: attempt)
+                let decision = await retryPolicy.decideRetry(for: request)
+                guard decision.action == .retry else { throw error }
                 progress(LuminaStructuredInferenceProgress(
                     phase: "remote.api.retrying",
                     elapsedMilliseconds: 0,
@@ -568,10 +570,12 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
                     outputTokens: 0,
                     partialOutput: "retry attempt \(attempt + 1) after \(error.localizedDescription.truncatedForLuminaRemoteProgress(to: 120))"
                 ))
-                try await sleepBeforeRetry(attempt: attempt, retryAfter: error.retryAfter)
+                try await sleepBeforeRetry(delayMilliseconds: decision.delayMilliseconds)
             } catch {
                 lastError = error
-                guard attempt < maxAttempts, isRetryableTransportError(error) else { throw error }
+                let request = retryPolicy.request(for: error, attempt: attempt)
+                let decision = await retryPolicy.decideRetry(for: request)
+                guard decision.action == .retry else { throw error }
                 progress(LuminaStructuredInferenceProgress(
                     phase: "remote.api.retrying",
                     elapsedMilliseconds: 0,
@@ -579,7 +583,7 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
                     outputTokens: 0,
                     partialOutput: "retry attempt \(attempt + 1) after \(error.localizedDescription.truncatedForLuminaRemoteProgress(to: 120))"
                 ))
-                try await sleepBeforeRetry(attempt: attempt, retryAfter: nil)
+                try await sleepBeforeRetry(delayMilliseconds: decision.delayMilliseconds)
             }
         }
         throw lastError ?? LuminaOpenAICompatibleStreamingError.transport("Remote API failed without details.")
@@ -653,12 +657,6 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
         )
     }
 
-    private func sleepBeforeRetry(attempt: Int, retryAfter: TimeInterval?) async throws {
-        let base = retryAfter ?? min(8, pow(2, Double(attempt - 1)))
-        let seconds = min(8, max(0.2, base * Double.random(in: 0.75...1.25)))
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-    }
-
     private func retryAfter(from response: HTTPURLResponse) -> TimeInterval? {
         guard let value = response.value(forHTTPHeaderField: "Retry-After") else { return nil }
         if let seconds = TimeInterval(value) { return seconds }
@@ -668,14 +666,9 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
         return nil
     }
 
-    private func isRetryableTransportError(_ error: Error) -> Bool {
-        guard let urlError = error as? URLError else { return false }
-        switch urlError.code {
-        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff, .callIsActive, .dataNotAllowed:
-            return true
-        default:
-            return false
-        }
+    private func sleepBeforeRetry(delayMilliseconds: Int) async throws {
+        let milliseconds = max(0, delayMilliseconds)
+        try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
     }
 
     private static func milliseconds(since start: ContinuousClock.Instant) -> Double {
@@ -717,23 +710,78 @@ private struct LuminaOpenAICompatibleStreamingClient: Sendable {
     }
 }
 
+private struct LuminaOpenAICompatibleRetryPolicy: LuminaRuntimeRetryProvider {
+    let maxAttempts = 3
+
+    func request(for error: Error, attempt: Int) -> LuminaRuntimeRetryRequest {
+        let classified = classify(error)
+        return LuminaRuntimeRetryRequest(
+            sessionID: "remote-api",
+            runID: "remote-api",
+            stage: "external_provider",
+            attempt: attempt,
+            maxAttempts: maxAttempts,
+            errorCode: classified.code,
+            errorCategory: classified.category,
+            recoverable: classified.recoverable,
+            retryAfterSeconds: classified.retryAfter ?? 0
+        )
+    }
+
+    func decideRetry(for request: LuminaRuntimeRetryRequest) async -> LuminaRuntimeRetryDecision {
+        guard request.attempt < request.maxAttempts else {
+            return .init(action: .fallback, reason: "remote retry attempts exhausted")
+        }
+        guard request.recoverable else {
+            return .init(action: .fallback, reason: "remote error is not retryable")
+        }
+        return .init(
+            action: .retry,
+            delayMilliseconds: delayMilliseconds(for: request),
+            reason: "remote OpenAI-compatible retry policy"
+        )
+    }
+
+    private func classify(_ error: Error) -> (code: String, category: String, recoverable: Bool, retryAfter: TimeInterval?) {
+        if let error = error as? LuminaOpenAICompatibleStreamingError {
+            switch error {
+            case .configuration:
+                return ("configuration", "configuration", false, nil)
+            case let .httpStatus(status, retryAfter):
+                return ("http_\(status)", "http", [408, 409, 429, 500, 502, 503, 504].contains(status), retryAfter)
+            case .transport:
+                return ("transport", "network", true, nil)
+            }
+        }
+        if let urlError = error as? URLError {
+            let retryableCodes: Set<URLError.Code> = [
+                .timedOut,
+                .cannotFindHost,
+                .cannotConnectToHost,
+                .networkConnectionLost,
+                .dnsLookupFailed,
+                .notConnectedToInternet,
+                .internationalRoamingOff,
+                .callIsActive,
+                .dataNotAllowed
+            ]
+            return ("url_\(urlError.code.rawValue)", "network", retryableCodes.contains(urlError.code), nil)
+        }
+        return ("unknown", "transport", false, nil)
+    }
+
+    private func delayMilliseconds(for request: LuminaRuntimeRetryRequest) -> Int {
+        let retryAfter = request.retryAfterSeconds > 0 ? request.retryAfterSeconds : nil
+        let base = retryAfter ?? min(8, pow(2, Double(max(0, request.attempt - 1))))
+        let seconds = min(8, max(0.2, base * Double.random(in: 0.75...1.25)))
+        return Int((seconds * 1_000).rounded())
+    }
+}
+
 private enum LuminaOpenAICompatibleStreamingError: LocalizedError, Sendable {
     case configuration(String)
     case httpStatus(Int, retryAfter: TimeInterval?)
     case transport(String)
-
-    var retryAfter: TimeInterval? {
-        if case let .httpStatus(_, retryAfter) = self { return retryAfter }
-        return nil
-    }
-
-    var isRetryable: Bool {
-        if case let .httpStatus(status, _) = self {
-            return [408, 409, 429, 500, 502, 503, 504].contains(status)
-        }
-        if case .transport = self { return true }
-        return false
-    }
 
     var errorDescription: String? {
         switch self {

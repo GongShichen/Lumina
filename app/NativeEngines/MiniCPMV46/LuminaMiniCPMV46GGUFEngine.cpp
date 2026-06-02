@@ -2,6 +2,7 @@
 #include "ggml-backend.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -162,9 +164,30 @@ bool ensure_model_loaded(const std::string & model_path, std::string & error) {
     return true;
 }
 
+bool prompt_requests_xml_react(const std::string & prompt) {
+    return prompt.find("Lumina XML ReAct step") != std::string::npos ||
+           prompt.find("XML ReAct step") != std::string::npos ||
+           prompt.find("XML-tag ReAct step") != std::string::npos ||
+           prompt.find("FIRST BYTES MUST BE <thought>") != std::string::npos ||
+           prompt.find("CRITICAL OUTPUT CONTRACT") != std::string::npos ||
+           prompt.find("xml_tags") != std::string::npos ||
+           prompt.find("<tool_use") != std::string::npos ||
+           prompt.find("<result>") != std::string::npos ||
+           prompt.find("<ask_user>") != std::string::npos ||
+           prompt.find("<cannot_complete>") != std::string::npos;
+}
+
 std::string chat_wrapped_prompt(const std::string & prompt) {
     if (prompt.find("<|im_start|>") != std::string::npos) {
         return prompt;
+    }
+    if (prompt_requests_xml_react(prompt)) {
+        return "<|im_start|>system\n"
+               "You are Lumina, an on-device XML ReAct agent. FIRST BYTES MUST BE <thought>. "
+               "Output exactly one valid Lumina XML ReAct step and no prose, markdown, JSON object, or <think> block.\n"
+               "<|im_end|>\n"
+               "<|im_start|>user\n" + prompt + "\n<|im_end|>\n"
+               "<|im_start|>assistant\n";
     }
     return "<|im_start|>system\n"
            "You are Lumina, an on-device ReAct agent. Output exactly one compact JSON object and no prose.\n"
@@ -245,6 +268,111 @@ bool is_schema_step_generation(const std::string & prompt) {
            prompt.find("\"type\":\"result\"") != std::string::npos;
 }
 
+bool is_xml_step_generation(const std::string & prompt) {
+    return prompt_requests_xml_react(prompt);
+}
+
+bool starts_with_json_object(const std::string & text) {
+    const auto first = std::find_if_not(text.begin(), text.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    return first != text.end() && *first == '{';
+}
+
+bool starts_with_prefix(const std::string & text, const std::string & prefix) {
+    return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
+}
+
+std::string trim_left_copy(const std::string & text) {
+    const auto first = std::find_if_not(text.begin(), text.end(), [](unsigned char c) {
+        return std::isspace(c);
+    });
+    return first == text.end() ? "" : std::string(first, text.end());
+}
+
+std::string xml_step_search_region(const std::string & text) {
+    const std::string trimmed = trim_left_copy(text);
+    if (!starts_with_prefix(trimmed, "<think")) {
+        return trimmed;
+    }
+    const size_t open_end = trimmed.find(">");
+    if (open_end == std::string::npos) {
+        return "";
+    }
+    const size_t close = trimmed.find("</think>", open_end + 1);
+    if (close == std::string::npos) {
+        return "";
+    }
+    return trim_left_copy(trimmed.substr(close + std::string("</think>").size()));
+}
+
+bool contains_complete_xml_step(const std::string & text) {
+    const std::string region = xml_step_search_region(text);
+    if (region.empty()) {
+        return false;
+    }
+    const std::pair<const char *, const char *> step_tags[] = {
+        {"<tool_use", "</tool_use>"},
+        {"<result>", "</result>"},
+        {"<ask_user>", "</ask_user>"},
+        {"<cannot_complete>", "</cannot_complete>"}
+    };
+    for (const auto & tag : step_tags) {
+        const size_t open = region.find(tag.first);
+        if (open == std::string::npos) {
+            continue;
+        }
+        const size_t close = region.find(tag.second, open);
+        if (close != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string expected_unclosed_xml_step_close(const std::string & text) {
+    const std::string region = xml_step_search_region(text);
+    if (region.empty()) {
+        return "";
+    }
+    const std::pair<const char *, const char *> step_tags[] = {
+        {"<tool_use", "</tool_use>"},
+        {"<result>", "</result>"},
+        {"<ask_user>", "</ask_user>"},
+        {"<cannot_complete>", "</cannot_complete>"}
+    };
+    size_t best_open = std::string::npos;
+    const char * best_close = nullptr;
+    for (const auto & tag : step_tags) {
+        const size_t open = region.rfind(tag.first);
+        if (open == std::string::npos) {
+            continue;
+        }
+        if (region.find(tag.second, open) != std::string::npos) {
+            continue;
+        }
+        if (best_open == std::string::npos || open > best_open) {
+            best_open = open;
+            best_close = tag.second;
+        }
+    }
+    return best_close == nullptr ? "" : std::string(best_close);
+}
+
+bool append_xml_eog_closing_repair(std::string & text) {
+    const std::string close = expected_unclosed_xml_step_close(text);
+    if (close.empty()) {
+        return false;
+    }
+    for (size_t prefix = close.size(); prefix > 0; --prefix) {
+        if (text.size() >= prefix && text.compare(text.size() - prefix, prefix, close, 0, prefix) == 0) {
+            text += close.substr(prefix);
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
@@ -285,7 +413,8 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     }
     printf("[Lumina][C++] Tokens count: %zu\n", prompt_tokens.size());
 
-    const bool schema_step = is_schema_step_generation(raw_prompt);
+    const bool xml_step = is_xml_step_generation(raw_prompt);
+    const bool schema_step = xml_step || is_schema_step_generation(raw_prompt);
     const int requested_max_output_tokens = max_output_tokens;
     if (static_cast<int>(prompt_tokens.size()) >= context_length) {
         return copy_c_string(make_response(
@@ -360,6 +489,9 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     for (int i = 0; i < effective_max_output_tokens; ++i) {
         llama_token token = llama_sampler_sample(sampler, ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) {
+            if (xml_step && append_xml_eog_closing_repair(output) && contains_complete_xml_step(output)) {
+                break;
+            }
             break;
         }
         llama_sampler_accept(sampler, token);
@@ -372,14 +504,23 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
         if (likely_json_started(output)) {
             tokens_after_first_json_char += 1;
         }
-        if (probably_complete_json(output)) {
-            break;
-        }
-        if (schema_step && !likely_json_started(output) && output_tokens >= 96) {
-            break;
-        }
-        if (schema_step && likely_json_started(output) && tokens_after_first_json_char >= 512) {
-            break;
+        if (xml_step) {
+            if (contains_complete_xml_step(output)) {
+                break;
+            }
+            if (starts_with_json_object(output) && probably_complete_json(output)) {
+                break;
+            }
+        } else {
+            if (probably_complete_json(output)) {
+                break;
+            }
+            if (schema_step && !likely_json_started(output) && output_tokens >= 96) {
+                break;
+            }
+            if (schema_step && likely_json_started(output) && tokens_after_first_json_char >= 512) {
+                break;
+            }
         }
         batch = llama_batch_get_one(&token, 1);
         decode_result = llama_decode(ctx, batch);

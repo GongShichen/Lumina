@@ -110,6 +110,14 @@ std::string guardrailDecisionSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","allowed_decisions":["allow","reject","rewrite","tripwire_failure"],"fields":{"decision":"string","message":"string","payload":"object"}})";
 }
 
+std::string retryRequestSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","required":["session_id","run_id","stage","attempt","max_attempts","error_code","error_category","recoverable"],"allowed_stages":["model_generation","step_normalization","tool_execution","context_load","external_provider"],"fields":{"session_id":"string","run_id":"string","stage":"string","attempt":"integer","max_attempts":"integer","error_code":"string","error_category":"string","recoverable":"boolean","tool_name":"string","tool_side_effect":"string","idempotency_policy":"replay_identical|always_execute|caller_keyed","has_idempotency_key":"boolean","retry_after_seconds":"number","elapsed_ms":"number"},"rules":["permission and confirmation are not retried by default.","tool_execution retry must be constrained by idempotency metadata.","Secrets must never be included."]})";
+}
+
+std::string retryDecisionSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","required":["action"],"allowed_actions":["retry","fallback","fail","proceed"],"fields":{"action":"string","delay_ms":"integer","reason":"string","max_attempts_override":"integer"},"rules":["Returning invalid JSON from a host retry provider falls back to the runtime default policy.","fallback is host-owned; Runtime Core only surfaces the decision."]})";
+}
+
 std::string runtimeStateSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","scopes":["temp","session","user","app"],"rules":["Models cannot mutate state directly.","Mutations occur through host calls, tools, hooks, or runtime APIs.","Persistence is caller-owned through checkpoints or host storage."]})";
 }
@@ -161,6 +169,8 @@ std::string allContractsJson() {
         R"("hook_event":)" + hookEventSchemaJson() + ","
         R"("hook_directive":)" + hookDirectiveSchemaJson() + ","
         R"("guardrail_decision":)" + guardrailDecisionSchemaJson() + ","
+        R"("retry_request":)" + retryRequestSchemaJson() + ","
+        R"("retry_decision":)" + retryDecisionSchemaJson() + ","
         R"("runtime_state":)" + runtimeStateSchemaJson() + ","
         R"("runtime_checkpoint":)" + checkpointSchemaJson() + ","
         R"("runtime_replay":)" + replayScriptSchemaJson() + ","

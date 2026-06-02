@@ -21,7 +21,7 @@ enum LuminaBenchmarkSuite {
 
     private static func isUnavailableForCurrentBenchmarkPlatform(_ toolName: String) -> Bool {
         #if targetEnvironment(macCatalyst)
-        return toolName == "message.compose" || toolName == "phone.call"
+        return toolName == "message.compose" || toolName == "email.compose" || toolName == "phone.call"
         #else
         return false
         #endif

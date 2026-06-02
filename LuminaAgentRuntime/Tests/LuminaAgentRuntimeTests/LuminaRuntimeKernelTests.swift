@@ -12,6 +12,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var traces: [String] = []
     private var metrics: [String] = []
     private var spans: [String] = []
+    private var retryRequests: [String] = []
     private var toolCalls: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
@@ -23,6 +24,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         traces = []
         metrics = []
         spans = []
+        retryRequests = []
         toolCalls = []
         toolCallCount = 0
         modelCallCount = 0
@@ -59,6 +61,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendRetryRequest(_ value: String) {
+        lock.lock()
+        retryRequests.append(value)
+        lock.unlock()
+    }
+
     func incrementToolCallCount() {
         lock.lock()
         toolCallCount += 1
@@ -72,6 +80,15 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendToolCallAndReturnCount(_ value: String) -> Int {
+        lock.lock()
+        toolCalls.append(value)
+        toolCallCount += 1
+        let value = toolCallCount
+        lock.unlock()
+        return value
+    }
+
     func incrementModelCallCount() -> Int {
         lock.lock()
         modelCallCount += 1
@@ -80,10 +97,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], retryRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, spans, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, retryRequests, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -114,6 +131,28 @@ private let luminaFinalModelCallback: LuminaAgentModelCallback = { plannerInput,
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
     return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"done\",\"content\":\"## 完成\\n\\n已处理。\",\"completed\":true,\"requires_followup\":false}")
+}
+
+private let luminaEmptyThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString("")
+    }
+    return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"retried\",\"content\":\"## 完成\\n\\n重试后完成。\",\"completed\":true,\"requires_followup\":false}")
+}
+
+private let luminaInvalidThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-bad","type":"tool_use","thought":"missing tool name","parameters":{},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"normalized\",\"content\":\"## 完成\\n\\n修复后完成。\",\"completed\":true,\"requires_followup\":false}")
 }
 
 private let luminaAskUserModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -165,6 +204,17 @@ private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelC
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-open","type":"tool_use","thought":"Open the external surface once.","tool_name":"external.open","parameters":{"target":"compose","payload":"Hello"},"requires_followup":true}"#)
     }
     return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaReadToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-read","type":"tool_use","thought":"Read retryable status.","tool_name":"status.read","parameters":{"scope":"cached"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled retry result.","content":"## 完成\n\n工具重试后完成。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -265,6 +315,13 @@ private let luminaEventCallback: LuminaAgentEventCallback = { event, _ in
     }
 }
 
+private let luminaRetryProviderCallback: LuminaAgentRetryProviderCallback = { request, _ in
+    if let request {
+        LuminaRuntimeCaptureStore.shared.appendRetryRequest(String(cString: request))
+    }
+    return luminaRuntimeCString(#"{"action":"retry","delay_ms":0,"reason":"test retry","max_attempts_override":3}"#)
+}
+
 private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
@@ -275,6 +332,29 @@ private let luminaRecordingToolCallback: LuminaAgentToolCallback = { call, _ in
         LuminaRuntimeCaptureStore.shared.appendToolCall(String(cString: call))
     }
     return luminaRuntimeCString(#"{"status":"succeeded","content":"rewritten tool ran"}"#)
+}
+
+private let luminaFailOnceThenSuccessToolCallback: LuminaAgentToolCallback = { call, _ in
+    let count: Int
+    if let call {
+        count = LuminaRuntimeCaptureStore.shared.appendToolCallAndReturnCount(String(cString: call))
+    } else {
+        LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
+        count = LuminaRuntimeCaptureStore.shared.snapshot().toolCallCount
+    }
+    if count == 1 {
+        return luminaRuntimeCString(#"{"status":"failed","content":"","errorMessage":"temporary timeout","retryable":true,"errorCode":"timeout","errorCategory":"network"}"#)
+    }
+    return luminaRuntimeCString(#"{"status":"succeeded","content":"retried tool succeeded"}"#)
+}
+
+private let luminaRetryableFailingToolCallback: LuminaAgentToolCallback = { call, _ in
+    if let call {
+        LuminaRuntimeCaptureStore.shared.appendToolCall(String(cString: call))
+    } else {
+        LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
+    }
+    return luminaRuntimeCString(#"{"status":"failed","content":"","errorMessage":"temporary timeout","retryable":true,"errorCode":"timeout","errorCategory":"network"}"#)
 }
 
 private let luminaRejectRequestGuardrailCallback: LuminaAgentGuardrailCallback = { request, _ in
@@ -341,6 +421,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(toolText.contains(#""ok":true"#))
         XCTAssertTrue(toolText.contains(#"\"type\":\"tool_use\""#))
         XCTAssertTrue(toolText.contains(#"\"tool_name\":\"device.current_time\""#))
+        XCTAssertTrue(toolText.contains(#"\"parameters\":{}"#))
 
         let sideEffectToolOutput = #"<thought>create it</thought><tool_use name="calendar.create" requires_confirmation="true">{"title":"Demo","startDateISO":"2026-05-31T12:00:00+08:00"}</tool_use>"#
         let normalizedSideEffectTool = sideEffectToolOutput.withCString { text in
@@ -352,6 +433,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         let sideEffectToolText = normalizedSideEffectTool.map { String(cString: $0) } ?? ""
         XCTAssertTrue(sideEffectToolText.contains(#""ok":true"#))
         XCTAssertTrue(sideEffectToolText.contains(#"\"requires_confirmation\":true"#))
+        XCTAssertTrue(sideEffectToolText.contains(#"\"title\":\"Demo\""#))
+        XCTAssertTrue(sideEffectToolText.contains(#"\"startDateISO\":\"2026-05-31T12:00:00+08:00\""#))
 
         let askUserOutput = #"<thought>need preference</thought><ask_user>{"reason":"缺少偏好","questions":[{"id":"p","question":"选哪个？"}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}</ask_user>"#
         let normalizedAskUser = askUserOutput.withCString { text in
@@ -363,6 +446,61 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         let askUserText = normalizedAskUser.map { String(cString: $0) } ?? ""
         XCTAssertTrue(askUserText.contains(#""ok":true"#))
         XCTAssertTrue(askUserText.contains(#"\"type\":\"ask_user\""#))
+    }
+
+    func testXMLTagDialectRejectsIncompleteToolUseWithoutDroppingParameters() {
+        let incompleteToolOutput = #"<thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"LuminaTest"}</"#
+        let normalizedTool = incompleteToolOutput.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
+        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(toolText.contains(#""ok":false"#))
+        XCTAssertTrue(toolText.contains("missing closing </tool_use>"))
+        XCTAssertFalse(toolText.contains(#"\"parameters\":{}"#))
+    }
+
+    func testXMLTagDialectStripsCompleteLeadingThinkOnly() {
+        let output = #"<think>private scratch</think><thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"Project"}</tool_use>"#
+        let normalizedTool = output.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
+        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(toolText.contains(#""ok":true"#))
+        XCTAssertTrue(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
+        XCTAssertTrue(toolText.contains(#"\"query\":\"Project\""#))
+    }
+
+    func testXMLTagDialectRejectsUnclosedThinkWithInnerToolUse() {
+        let output = #"<think><thought>bad</thought><tool_use name="calendar.search">{"query":"Project"}</tool_use>"#
+        let normalizedTool = output.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
+        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(toolText.contains(#""ok":false"#))
+        XCTAssertTrue(toolText.contains("missing closing </think>"))
+        XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
+    }
+
+    func testXMLTagDialectRejectsNonLeadingThink() {
+        let output = #"<thought>bad</thought><think>private</think><tool_use name="calendar.search">{"query":"Project"}</tool_use>"#
+        let normalizedTool = output.withCString { text in
+            "xml_tags".withCString { dialect in
+                LuminaReActNormalizeStepText(text, dialect)
+            }
+        }
+        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
+        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
+        XCTAssertTrue(toolText.contains(#""ok":false"#))
+        XCTAssertTrue(toolText.contains("<think> tags"))
     }
 
     func testObservabilitySinksAreOptionalAndIndependentlyRegistered() throws {
@@ -944,6 +1082,99 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(snapshot.toolCalls.first?.contains(#""text":"hello""#) == true)
     }
 
+    func testCoreRetryProviderCanControlModelGenerationRetry() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaEmptyThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetRetryProviderCallback(runtime, luminaRetryProviderCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"retry-model","text":"retry model"}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.modelCallCount, 2)
+        XCTAssertTrue(snapshot.retryRequests.joined(separator: "\n").contains(#""stage":"model_generation""#))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("runtime.retry.scheduled"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("runtime.retry.succeeded"))
+    }
+
+    func testDefaultRetryPolicyRetriesStepNormalizationOnce() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaInvalidThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"retry-normalize","text":"retry normalization"}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.modelCallCount, 2)
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains(#""stage":"step_normalization""#))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("runtime.retry.scheduled"))
+    }
+
+    func testDefaultRetryPolicyRetriesReadOnlyToolExecution() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaReadToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaFailOnceThenSuccessToolCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"status.read","description":"Read retryable status.","category":"system","sideEffect":"readOnly","readOnly":true,"idempotencyPolicy":"always_execute","parameters":[{"name":"scope","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"retry-tool","text":"retry read tool"}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.toolCallCount, 2)
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains(#""stage":"tool_execution""#))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("runtime.retry.succeeded"))
+    }
+
+    func testDefaultRetryPolicyDoesNotRetryWriteToolWithoutIdempotencyKey() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaUnsafeToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaRetryableFailingToolCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"unsafe.write","description":"Write without caller idempotency key.","category":"test","sideEffect":"appLocalWrite","readOnly":false,"idempotencyPolicy":"caller_keyed","parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"no-write-retry","text":"do not retry write"}"#)
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains(#""action":"fail""#))
+        XCTAssertFalse(snapshot.events.joined(separator: "\n").contains("runtime.retry.scheduled"))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("runtime.retry.failed"))
+    }
+
     func testContractExportContainsReusableRuntimeSchemas() throws {
         let pointer = LuminaAgentRuntimeExportContracts()
         let json = pointer.map { String(cString: $0) } ?? ""
@@ -958,6 +1189,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(json.contains("multi_tool_use"))
         XCTAssertTrue(json.contains("cannot_complete"))
         XCTAssertTrue(json.contains("guardrail_decision"))
+        XCTAssertTrue(json.contains("retry_request"))
+        XCTAssertTrue(json.contains("retry_decision"))
         XCTAssertTrue(json.contains("runtime_checkpoint"))
         XCTAssertTrue(json.contains("runtime_replay"))
         XCTAssertTrue(json.contains("external_tool_provider"))

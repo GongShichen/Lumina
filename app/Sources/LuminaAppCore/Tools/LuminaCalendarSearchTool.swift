@@ -29,7 +29,7 @@ public struct LuminaCalendarSearchTool: LuminaAgentTool {
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
         let events = await store.searchEvents(query: arguments.string("query") ?? "", limit: Int(arguments.number("limit") ?? 5))
-        let summaries = events.map { "\($0.title) @ \($0.startDate.formatted(date: .abbreviated, time: .shortened))" }
+        let summaries = events.map { "[id=\($0.id.uuidString)] \($0.title) @ \($0.startDate.formatted(date: .abbreviated, time: .shortened))" }
         return LuminaToolResult(
             callID: UUID(),
             toolName: schema.name,

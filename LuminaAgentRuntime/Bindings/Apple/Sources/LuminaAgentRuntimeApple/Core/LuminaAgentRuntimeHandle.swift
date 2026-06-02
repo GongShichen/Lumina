@@ -31,6 +31,7 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetPermissionCallback(handle, luminaAgentSwiftAdapterPermissionCallback, context)
         LuminaAgentRuntimeSetConfirmationCallback(handle, luminaAgentSwiftAdapterConfirmationCallback, context)
         LuminaAgentRuntimeSetGuardrailCallback(handle, luminaAgentSwiftAdapterGuardrailCallback, context)
+        LuminaAgentRuntimeSetRetryProviderCallback(handle, luminaAgentSwiftAdapterRetryProviderCallback, context)
         LuminaAgentRuntimeSetAuditCallback(handle, luminaAgentSwiftAdapterAuditCallback, context)
         LuminaAgentRuntimeSetTraceCallback(handle, luminaAgentSwiftAdapterTraceCallback, context)
         LuminaAgentRuntimeSetMetricsCallback(handle, luminaAgentSwiftAdapterMetricsCallback, context)

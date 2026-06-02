@@ -2,9 +2,12 @@ import Foundation
 
 enum LuminaAgenticRLSuite {
     static func makeTasks(count: Int = 200) -> [LuminaAgenticRLTask] {
-        (0..<count).map { index in
-            let template = templates[index % templates.count]
-            let round = index / templates.count
+        let availableTemplates = templates.filter { template in
+            !template.tools.contains(where: isUnavailableForCurrentPlatform)
+        }
+        return (0..<count).map { index in
+            let template = availableTemplates[index % availableTemplates.count]
+            let round = index / availableTemplates.count
             let suffix = round == 0 ? "" : "（RL batch \(round + 1)，编号 \(index + 1)）"
             return LuminaAgenticRLTask(
                 id: "rl-\(String(format: "%03d", index + 1))",
@@ -15,6 +18,14 @@ enum LuminaAgenticRLSuite {
                 cleanupPrefixes: ["LuminaTest", "test"]
             )
         }
+    }
+
+    private static func isUnavailableForCurrentPlatform(_ toolName: String) -> Bool {
+        #if targetEnvironment(macCatalyst)
+        return toolName == "message.compose" || toolName == "email.compose" || toolName == "phone.call"
+        #else
+        return false
+        #endif
     }
 
     private struct Template {

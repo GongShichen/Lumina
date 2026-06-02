@@ -12,11 +12,7 @@ DerivedData/
 xcuserdata/
 .DS_Store
 *.mlmodelc/
-app/Resources/Models/BGETextEmbedding.mlmodelc
-app/Resources/Models/Downloaded/
-app/Resources/Models/.staging/
-app/Resources/Models/BGETextEmbedding-tokenizer.json
-app/Resources/Models/MiniCPMV46ReActModel/
+app/Resources/Models/
 *.xcresult
 app/Reports/
 app/optimize/

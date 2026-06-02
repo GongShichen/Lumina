@@ -82,4 +82,40 @@ public enum LuminaReActSchema {
         \(focusedToolSchemas.isEmpty ? "none" : focusedToolSchemas)
         """
     }
+
+    public static func xmlRepairPrompt(
+        invalidOutput: String,
+        parserError: String,
+        availableToolNames: [String],
+        originalPrompt: String,
+        task: String = "",
+        lastObservation: String = ""
+    ) -> String {
+        """
+        Repair the previous model response into exactly one valid Lumina XML ReAct step.
+        Output XML only. The first bytes must be <thought> or <cannot_complete>. No prose, markdown fence, JSON ReAct object, <think>, <parameters>, or <observation>.
+
+        User task:
+        \(task.isEmpty ? originalPrompt : task)
+
+        Latest runtime observation, if any:
+        \(lastObservation.isEmpty ? "none" : lastObservation)
+
+        Parser/validator error:
+        \(parserError)
+
+        Valid XML shapes:
+        <thought>short reason</thought><tool_use name="EXACT_TOOL_NAME" requires_confirmation="false">{}</tool_use>
+        <thought>done</thought><result>concise markdown answer</result>
+        <thought>blocked</thought><cannot_complete>short recoverable reason</cannot_complete>
+
+        Repair rules:
+        - If a tool is still needed, use <tool_use>; put the exact tool name in name; put only one JSON object inside the tag.
+        - Never output <think>, <parameters>, <observation>, <result> inside <tool_use>, schema fields, placeholder IDs, args, arguments, input, or tool_call.
+        - If the latest runtime observation failed due to permission, cancellation, schema, missing parameter, unknown tool, or repeated identical tool call, do not retry it; output <cannot_complete> or choose a different valid tool.
+        - If the latest runtime observation says replayed=true, do not repeat the identical tool_name + parameters.
+        - Use only these tool names: \(availableToolNames.sorted().joined(separator: ", ")).
+        - The invalid response was intentionally omitted so forbidden tags are not copied. Rewrite from the task and latest observation only.
+        """
+    }
 }

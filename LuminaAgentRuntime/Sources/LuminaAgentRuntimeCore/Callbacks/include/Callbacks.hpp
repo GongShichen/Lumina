@@ -33,6 +33,13 @@ struct RuntimeGuardrailDecision {
     std::string payloadJson;
 };
 
+struct RuntimeRetryDecision {
+    std::string action = "fail";
+    std::string reason;
+    long long delayMilliseconds = 0;
+    int maxAttemptsOverride = 0;
+};
+
 class RuntimeCallbacks {
 public:
     // Store caller-provided callbacks. Context ownership remains with the caller.
@@ -43,6 +50,7 @@ public:
     void setPermission(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmation(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrail(LuminaAgentGuardrailCallback callback, void *context);
+    void setRetryProvider(LuminaAgentRetryProviderCallback callback, void *context);
     void setAudit(LuminaAgentAuditCallback callback, void *context);
     void setTrace(LuminaAgentTraceCallback callback, void *context);
     void setMetrics(LuminaAgentMetricsCallback callback, void *context);
@@ -61,6 +69,7 @@ public:
     bool hasPermission() const;
     bool hasConfirmation() const;
     bool hasGuardrail() const;
+    bool hasRetryProvider() const;
     bool hasHook() const;
     bool hasTrace() const;
     bool hasMetrics() const;
@@ -77,6 +86,7 @@ public:
     std::string decidePermission(const std::string &permissionRequest) const;
     std::string confirm(const std::string &confirmationRequest) const;
     RuntimeGuardrailDecision evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const;
+    RuntimeRetryDecision decideRetry(const std::string &retryRequestJson) const;
     std::string dispatchHook(const std::string &hookEvent) const;
     std::vector<std::string> matchingHookRouteIds(const std::string &lifecycle, const std::string &payloadJson) const;
     std::string registerHookRoute(const std::string &routeJson);
@@ -97,6 +107,7 @@ private:
     CallbackSlot permission_;
     CallbackSlot confirmation_;
     CallbackSlot guardrail_;
+    CallbackSlot retryProvider_;
     CallbackSlot audit_;
     CallbackSlot trace_;
     CallbackSlot metrics_;

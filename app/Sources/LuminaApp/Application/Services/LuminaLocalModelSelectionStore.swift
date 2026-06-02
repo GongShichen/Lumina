@@ -11,7 +11,7 @@ final class LuminaLocalModelSelectionStore: ObservableObject, @unchecked Sendabl
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let stored = defaults.string(forKey: selectionKey).flatMap(LuminaLocalModelSelection.init(rawValue:))
-        self.selection = stored ?? .original
+        self.selection = stored ?? .agenticDPO
     }
 
     func currentSelection() -> LuminaLocalModelSelection {
