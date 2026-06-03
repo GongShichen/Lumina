@@ -20,6 +20,45 @@ if [[ ! -d "$LLAMA_DIR/.git" ]]; then
   git clone --depth 1 "$LLAMA_REPO" "$LLAMA_DIR"
 fi
 
+QWEN35_SRC="$LLAMA_DIR/src/models/qwen35.cpp"
+if [[ -f "$QWEN35_SRC" ]]; then
+  python3 - "$QWEN35_SRC" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "qwen35 metadata declares"
+needle = "void llama_model_qwen35::load_arch_tensors(llama_model_loader & ml) {\n"
+insert = r'''    if (hparams.nextn_predict_layers > 0) {
+        const uint32_t n_main = hparams.n_layer - hparams.nextn_predict_layers;
+        const std::string first_mtp_block = format("blk.%u.attn_norm.weight", n_main);
+        const std::string first_mtp_nextn = format("blk.%u.nextn.eh_proj.weight", n_main);
+
+        if (ml.get_weight(first_mtp_block.c_str()) == nullptr &&
+            ml.get_weight(first_mtp_nextn.c_str()) == nullptr) {
+            LLAMA_LOG_WARN(
+                "%s: qwen35 metadata declares %u NextN/MTP layer(s), but no MTP tensors were found at block %u; "
+                "loading the %u-layer main trunk only\n",
+                __func__,
+                hparams.nextn_predict_layers,
+                n_main,
+                n_main
+            );
+            hparams.n_layer = n_main;
+            hparams.nextn_predict_layers = 0;
+        }
+    }
+
+'''
+
+if marker not in text:
+    if needle not in text:
+        raise SystemExit(f"[Lumina] qwen35.cpp patch point not found: {path}")
+    path.write_text(text.replace(needle, needle + insert, 1))
+PY
+fi
+
 echo "[Lumina] Building llama.cpp library backend with Metal + Accelerate"
 cmake -S "$LLAMA_DIR" -B "$LLAMA_BUILD_DIR" \
   -DLLAMA_BUILD_TESTS=OFF \

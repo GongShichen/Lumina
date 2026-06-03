@@ -150,6 +150,11 @@ std::vector<std::string> externalEngineCandidates(const char *modelDirectory) {
         std::string root(modelDirectory);
         candidates.push_back(root + "/libLuminaMiniCPMV46GGUFEngine.dylib");
         candidates.push_back(root + "/NativeEngine/libLuminaMiniCPMV46GGUFEngine.dylib");
+        const auto slash = root.find_last_of('/');
+        if (slash != std::string::npos) {
+            const std::string parent = root.substr(0, slash);
+            candidates.push_back(parent + "/MiniCPMV46ReActModel/libLuminaMiniCPMV46GGUFEngine.dylib");
+        }
     }
     return candidates;
 }
