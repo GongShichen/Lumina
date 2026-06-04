@@ -44,6 +44,12 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let resultGeneratedCount: Int
     let hookEventCount: Int
     let toolFailureCount: Int
+    let schemaTokensSavedEstimate: Int
+    let toolDiscoveryHitRate: Double
+    let deferredUnknownToolRate: Double
+    let toolLoadingSearchCount: Int
+    let toolLoadingLoadedCount: Int
+    let toolLoadingLoadFailedCount: Int
     let memoryAccessDisabled: Bool
     let results: [LuminaBenchmarkTaskResult]
     let jsonReportURL: URL?
@@ -121,6 +127,12 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             resultGeneratedCount: runtimeMetrics.resultGeneratedCount,
             hookEventCount: runtimeMetrics.hookEventCount,
             toolFailureCount: runtimeMetrics.toolFailureCount,
+            schemaTokensSavedEstimate: runtimeMetrics.schemaTokensSavedEstimate,
+            toolDiscoveryHitRate: ratio(runtimeMetrics.toolLoadingDiscoveryHitCount, runtimeMetrics.toolLoadingSearchCount),
+            deferredUnknownToolRate: ratio(runtimeMetrics.toolLoadingUnknownToolCount, max(1, runtimeMetrics.toolLoadingSearchCount + runtimeMetrics.toolLoadingLoadedCount)),
+            toolLoadingSearchCount: runtimeMetrics.toolLoadingSearchCount,
+            toolLoadingLoadedCount: runtimeMetrics.toolLoadingLoadedCount,
+            toolLoadingLoadFailedCount: runtimeMetrics.toolLoadingLoadFailedCount,
             memoryAccessDisabled: true,
             results: results,
             jsonReportURL: jsonReportURL,

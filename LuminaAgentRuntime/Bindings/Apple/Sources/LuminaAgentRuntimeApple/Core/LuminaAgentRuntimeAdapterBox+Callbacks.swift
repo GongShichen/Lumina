@@ -583,10 +583,13 @@ extension LuminaAgentRuntimeAdapterBox {
     static func observationFromRuntimePayload(_ payload: [String: Any]) -> LuminaReActObservation? {
         guard let toolName = payload["toolName"] as? String ?? payload["tool_name"] as? String else { return nil }
         let status = LuminaToolResultStatus(rawValue: payload["status"] as? String ?? "") ?? .failed
+        let outputData = try? JSONSerialization.data(withJSONObject: payload["output"] ?? [:])
+        let output = outputData.flatMap { try? JSONDecoder().decode([String: LuminaJSONValue].self, from: $0) } ?? [:]
         return LuminaReActObservation(
             toolName: toolName,
             status: status,
             summary: payload["summary"] as? String ?? payload["content"] as? String ?? "",
+            output: output,
             errorMessage: payload["errorMessage"] as? String,
             replayed: payload["replayed"] as? Bool ?? false,
             duplicateOf: payload["duplicate_of"] as? String

@@ -80,12 +80,14 @@ struct LuminaCurrentTimeTool: LuminaAgentTool {
         var output: [String: LuminaJSONValue] {
             [
                 "iso8601": .string(iso8601),
+                "currentDateISO": .string(iso8601),
                 "localizedDate": .string(localizedDate),
                 "localizedTime": .string(localizedTime),
                 "weekday": .string(weekday),
                 "hour": .number(Double(hour)),
                 "dayPeriod": .string(dayPeriod),
                 "timeZoneIdentifier": .string(timeZoneIdentifier),
+                "timeZone": .string(timeZoneIdentifier),
                 "secondsFromGMT": .number(Double(secondsFromGMT))
             ]
         }

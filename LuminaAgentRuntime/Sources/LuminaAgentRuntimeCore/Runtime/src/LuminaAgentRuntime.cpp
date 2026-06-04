@@ -49,6 +49,13 @@ extern "C" char *LuminaAgentRuntimeRegisterExternalToolProvider(LuminaAgentRunti
     return LuminaAgent::copyCString(runtime->runtime.registerExternalToolProvider(provider_json));
 }
 
+extern "C" char *LuminaAgentRuntimeRegisterDeferredToolMetadata(LuminaAgentRuntimeRef *runtime, const char *metadata_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.registerDeferredToolMetadata(metadata_json));
+}
+
 extern "C" void LuminaAgentRuntimeSetModelCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentModelCallback callback,
@@ -146,6 +153,16 @@ extern "C" void LuminaAgentRuntimeSetCompactionProviderCallback(
 ) {
     if (runtime != nullptr) {
         runtime->runtime.setCompactionProviderCallback(callback, user_context);
+    }
+}
+
+extern "C" void LuminaAgentRuntimeSetToolLoadingPluginCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentToolLoadingPluginCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setToolLoadingPluginCallback(callback, user_context);
     }
 }
 
@@ -305,6 +322,24 @@ extern "C" char *LuminaAgentRuntimeRunSessionReplay(
         true,
         replay_json
     ));
+}
+
+extern "C" char *LuminaAgentRuntimeLoadDeferredTools(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *names_json
+) {
+    if (runtime == nullptr || session == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime or session.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.loadDeferredTools(session->session, names_json));
+}
+
+extern "C" char *LuminaAgentRuntimeExportLoadedToolSet(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.loadedToolSetJson());
 }
 
 extern "C" char *LuminaAgentRuntimeResumeSession(

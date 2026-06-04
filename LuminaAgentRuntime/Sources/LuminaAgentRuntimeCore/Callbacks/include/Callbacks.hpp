@@ -61,6 +61,7 @@ public:
     void setGuardrail(LuminaAgentGuardrailCallback callback, void *context);
     void setRetryProvider(LuminaAgentRetryProviderCallback callback, void *context);
     void setCompactionProvider(LuminaAgentCompactionProviderCallback callback, void *context);
+    void setToolLoadingPlugin(LuminaAgentToolLoadingPluginCallback callback, void *context);
     void setAudit(LuminaAgentAuditCallback callback, void *context);
     void setTrace(LuminaAgentTraceCallback callback, void *context);
     void setMetrics(LuminaAgentMetricsCallback callback, void *context);
@@ -83,6 +84,7 @@ public:
     bool hasGuardrail() const;
     bool hasRetryProvider() const;
     bool hasCompactionProvider() const;
+    bool hasToolLoadingPlugin() const;
     bool hasHook() const;
     bool hasTrace() const;
     bool hasMetrics() const;
@@ -103,6 +105,7 @@ public:
     RuntimeGuardrailDecision evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const;
     RuntimeRetryDecision decideRetry(const std::string &retryRequestJson) const;
     RuntimeCompactionDecision compactContext(const std::string &compactionRequestJson) const;
+    std::string callToolLoadingPlugin(const std::string &requestJson) const;
     std::string dispatchHook(const std::string &hookEvent) const;
     std::vector<std::string> matchingHookRouteIds(const std::string &lifecycle, const std::string &payloadJson) const;
     std::string registerHookRoute(const std::string &routeJson);
@@ -133,6 +136,7 @@ private:
     CallbackSlot guardrail_;
     CallbackSlot retryProvider_;
     CallbackSlot compactionProvider_;
+    CallbackSlot toolLoadingPlugin_;
     CallbackSlot audit_;
     CallbackSlot trace_;
     CallbackSlot metrics_;

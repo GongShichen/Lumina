@@ -14,6 +14,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     let observabilitySinks: LuminaRuntimeObservabilitySinks
     let guardrails: LuminaRuntimeGuardrails
     let retryProvider: (any LuminaRuntimeRetryProvider)?
+    let toolLoadingPlugin: (any LuminaToolLoadingPlugin)?
     let sessionHistoryStore: (any LuminaSessionHistoryStore)?
     var currentEventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     var currentRequest: LuminaAgentRequest?
@@ -38,6 +39,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         observabilitySinks: LuminaRuntimeObservabilitySinks,
         guardrails: LuminaRuntimeGuardrails,
         retryProvider: (any LuminaRuntimeRetryProvider)?,
+        toolLoadingPlugin: (any LuminaToolLoadingPlugin)?,
         sessionHistoryStore: (any LuminaSessionHistoryStore)?
     ) {
         self.tools = tools
@@ -53,6 +55,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         self.observabilitySinks = observabilitySinks
         self.guardrails = guardrails
         self.retryProvider = retryProvider
+        self.toolLoadingPlugin = toolLoadingPlugin
         self.sessionHistoryStore = sessionHistoryStore
     }
 

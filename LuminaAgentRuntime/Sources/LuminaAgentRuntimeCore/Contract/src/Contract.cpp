@@ -3,7 +3,7 @@
 namespace LuminaAgent {
 
 std::string reactStepSchemaJson() {
-    return R"({"schema_version":"1.0","allowed_step_types":["reasoning","tool_discovery","tool_use","multi_tool_use","ask_user","result","cannot_complete"],"rules":["Return exactly one JSON object.","Never emit observations; observations are runtime-owned.","result.content must be Markdown.","tool_use.parameters must be a JSON object.","multi_tool_use may only contain read-only tools.","tool_discovery only returns schema metadata."]})";
+    return R"({"schema_version":"1.0","dialect":"xml_tags","allowed_step_tags":["thought","tool_use","result","cannot_complete","ask_user"],"rules":["Output exactly one Lumina XML ReAct step and nothing else.","The first bytes must be <thought>.","Tool step shape: <thought>why</thought><tool_use name=\"tool.name\" requires_confirmation=\"false\">{}</tool_use>.","The content inside <tool_use> must be exactly one JSON object.","Answer shape: <thought>done</thought><result>Markdown answer</result>.","Blocker shape: <thought>blocked</thought><cannot_complete>reason</cannot_complete>.","Never emit observations; observations are runtime-owned.","Never output <tools_use>, <think>, <tool_call>, <observation>, prose before XML, markdown fences, or JSON ReAct objects."]})";
 }
 
 std::string taskEnvelopeSchemaJson() {
@@ -15,7 +15,7 @@ std::string responderSchemaJson() {
 }
 
 std::string runtimeConfigurationSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer fallback provider max context","maxContextTokens":"integer provider/model max context","modelId":"string optional provider/model id","providerNativeContextManagement":"boolean optional native context management support","maxOutputTokens":"integer","reservedOutputTokens":"integer","autoCompactBufferTokens":"integer","warningBufferTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer legacy auto compact buffer fallback","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean","toolSchemaProfile":"full|compact|name-only","checkpointPolicy":"none|onPause|onStep|onExit"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["maxIterations","maxToolCalls","contextWindowTokens","maxOutputTokens","reservedOutputTokens","maxObservationCharacters","toolResultTokenBudget","compactThresholdTokens","maxCompactFailures","maxReasoningSteps","maxReplayObservations"],"fields":{"maxIterations":"integer","maxToolCalls":"integer","contextWindowTokens":"integer fallback provider max context","maxContextTokens":"integer provider/model max context","modelId":"string optional provider/model id","providerNativeContextManagement":"boolean optional native context management support","maxOutputTokens":"integer","reservedOutputTokens":"integer","autoCompactBufferTokens":"integer","warningBufferTokens":"integer","maxObservationCharacters":"integer","toolResultTokenBudget":"integer","compactThresholdTokens":"integer legacy auto compact buffer fallback","maxCompactFailures":"integer","maxReasoningSteps":"integer","maxReplayObservations":"integer","stopOnToolFailure":"boolean","toolSchemaProfile":"full|compact|name-only","toolLoadingMode":"enabled|auto|disabled","toolLoadingThresholdRatio":"number 0.0-1.0","checkpointPolicy":"none|onPause|onStep|onExit"}})";
 }
 
 std::string agentRequestSchemaJson() {
@@ -123,7 +123,7 @@ std::string runtimeStateSchemaJson() {
 }
 
 std::string checkpointSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","loaded_tool_set":"string[]","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
 }
 
 std::string replayScriptSchemaJson() {
@@ -132,6 +132,10 @@ std::string replayScriptSchemaJson() {
 
 std::string externalToolProviderSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","fields":{"namespace":"string","allowed_tools":"string[]","schemas":"ToolSchema[]","health":"object","token_redaction":"required"},"rules":["Transport is implemented by the provider or binding, not by Runtime Core.","Provider tools are registered as normal runtime tools.","Secrets and tokens must never enter trace, audit, events, or benchmark reports."]})";
+}
+
+std::string toolLoadingPluginSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","actions":["catalog","search","load","invalidate"],"request_fields":{"action":"string","session_id":"string","run_id":"string","query":"string","category":"string","max_results":"integer","include_schemas":"boolean","names":"string[]","loaded_tool_set":"string[]"},"response_fields":{"matches":"ToolSchema metadata[]","schemas":"ToolSchema[]","loaded":"string[]","failed":"string[]"},"rules":["tool_discovery is the model-facing entrypoint.","Loading schemas only changes the next planner turn.","Discovery and schema loading do not grant permission to execute tools.","Secrets must never be included."]})";
 }
 
 std::string contractJson() {
@@ -174,7 +178,8 @@ std::string allContractsJson() {
         R"("runtime_state":)" + runtimeStateSchemaJson() + ","
         R"("runtime_checkpoint":)" + checkpointSchemaJson() + ","
         R"("runtime_replay":)" + replayScriptSchemaJson() + ","
-        R"("external_tool_provider":)" + externalToolProviderSchemaJson() +
+        R"("external_tool_provider":)" + externalToolProviderSchemaJson() + ","
+        R"("tool_loading_plugin":)" + toolLoadingPluginSchemaJson() +
         "}}";
 }
 

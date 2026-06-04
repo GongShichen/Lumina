@@ -11,6 +11,7 @@ Runtime Core 是跨端的 C/C++ 执行核心。宿主负责提供模型、工具
 - 组装 planner input：用户请求、上下文、工具 schema、trace、预算和历史 observation。
 - 消费 blocking 或 streaming model callback，解析并校验 canonical ReAct step。
 - 调度工具调用，执行参数校验、权限检查、用户确认和幂等控制。
+- 支持 deferred tool loading：模型先看到轻量工具目录，需要时通过 `tool_discovery` 加载完整 schema。
 - 将 tool result 转成 runtime-owned observation，模型不得伪造 observation。
 - 管理 session、checkpoint、snapshot、cancel、resume 和 replay。
 - 根据 provider/model 的上下文窗口动态管理预算，并在接近上限或 prompt-too-long 时压缩上下文。
@@ -34,6 +35,7 @@ Canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi
 核心能力：
 
 - **Tool Registry & Executor**：工具 schema、参数校验、副作用、幂等策略、external provider。
+- **Deferred Tool Loading**：Core 维护 always-loaded tools、deferred catalog 和 session loaded tool set；未加载工具不可直接执行。
 - **Session / Checkpoint / Replay**：Core 导出 checkpoint JSON，宿主负责持久化；replay 可固定 model output 或 tool observation。
 - **RuntimeState**：`temp`、`session`、`user`、`app` 四类 scope；模型不能直接写 state。
 - **Context Budget & Compaction**：从 provider/model 读取 `max_context_tokens`，动态计算可用窗口和压缩阈值；默认先清理大型工具结果，再按预算摘要压缩。
@@ -64,6 +66,17 @@ auto_compact_threshold = effective_context_window - auto_compact_buffer_tokens
 
 宿主可以注册 `LuminaAgentCompactionProviderCallback`，替换完整 pipeline 或只处理某个 strategy；返回 `{"status":"skipped"}` 时 Core 会继续执行默认策略。压缩请求会携带 redacted `context_frame`、`trace_summary`、`tool_result_candidates` 和预算快照；API key、token、secret 会在进入 compaction payload 前脱敏。压缩事件、边界、tokens saved estimate 和失败原因会通过可选 observability sinks 暴露，未注册 sink 时不做持久化输出。
 
+## 工具延迟加载
+
+Deferred tool loading 用于工具很多、完整 schema 会挤占上下文窗口的场景。Runtime 不改变 ReAct schema，而是复用 `tool_discovery` 作为模型侧发现入口：
+
+1. Planner input 默认只包含 always-loaded schemas、已加载 deferred schemas，以及轻量 `deferred_catalog`。
+2. 模型需要更多工具时输出 `tool_discovery`，例如按关键词搜索，或用 `select:tool.a,tool.b` 精确选择。
+3. Runtime 返回匹配 metadata；当 `include_schemas=true` 或 `select:` 查询时，把完整 schema 加入当前 session 的 `loaded_tool_set`。
+4. 下一轮 planner input 才会暴露这些完整 schema；执行前仍走 schema validation、permission、confirmation、guardrail 和 audit。
+
+Core 内置默认插件，支持 `enabled`、`auto`、`disabled`。`auto` 会根据当前 provider/model 的 `max_context_tokens` 和 `toolLoadingThresholdRatio` 动态决定是否启用，而不是写死阈值。宿主也可以注册 `LuminaAgentToolLoadingPluginCallback` 完全接管 `catalog`、`search`、`load`、`invalidate`，用于接 MCP、企业工具目录或自定义排序。Checkpoint、snapshot 和 replay artifact 会保存 `loaded_tool_set`，恢复后保持同一工具工作集。
+
 ## 开箱即用接入
 
 接入 Runtime 的核心是同一套 JSON contract 和 C ABI。iOS 可以直接使用 Swift Package；Android / HarmonyOS 通过 native binding 或 C ABI 接入 Core。
@@ -84,7 +97,8 @@ let runtime = LuminaAgentRuntime(
     hooks: hooks,
     observabilitySinks: sinks,
     guardrails: guardrails,
-    retryProvider: retryProvider
+    retryProvider: retryProvider,
+    toolLoadingPlugin: toolLoadingPlugin
 )
 
 for await event in runtime.runStream(request: request) {
@@ -113,11 +127,12 @@ cmake -S LuminaAgentRuntime -B build/android-arm64 \
 cmake --build build/android-arm64
 ```
 
-宿主侧实现 model、tool、context、permission、confirmation、guardrail、compaction、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 并运行：
+宿主侧实现 model、tool、context、permission、confirmation、guardrail、compaction、tool loading、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 或 deferred tool metadata 并运行：
 
 ```kotlin
 val runtime = LuminaAgentRuntime(configurationJson, providers)
 runtime.registerToolSchema(calendarSchemaJson)
+runtime.registerDeferredToolMetadata(mcpToolMetadataJson)
 val resultJson = runtime.run(requestJson)
 val checkpoint = runtime.exportSessionCheckpoint(session)
 runtime.cancel(requestId)
@@ -127,11 +142,12 @@ runtime.cancel(requestId)
 
 HarmonyOS 侧通过 ETS wrapper 调用 native runtime。编译时把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
 
-ETS 侧提供 providers，把模型、工具、上下文、权限、确认、压缩、事件和审计回调交给 Runtime：
+ETS 侧提供 providers，把模型、工具、上下文、权限、确认、压缩、tool loading、事件和审计回调交给 Runtime：
 
 ```ts
 const runtime = new LuminaAgentRuntime(configurationJson, providers)
 runtime.registerToolSchema(calendarSchemaJson)
+runtime.registerDeferredToolMetadata(mcpToolMetadataJson)
 const resultJson = runtime.run(requestJson)
 const snapshot = runtime.snapshotSession(session)
 runtime.cancel(requestId)
@@ -149,6 +165,7 @@ Runtime 不内置 benchmark scoring。Benchmark 是外部 harness，通过 publi
 - semantic pass、pass@1、tool execution@1。
 - TTFT、step p95、tool p95、wall-clock p95。
 - retry count、fallback count、normalization failure rate、replay diff。
+- deferred tool schema token saved estimate、tool discovery hit rate、unknown tool rate。
 
 观测 payload 默认遵守 redaction：API key、secret、token 不进入 event、trace、audit、metrics 或 benchmark report。
 
@@ -160,7 +177,7 @@ Lumina App 展示端侧 Agent 的完整使用体验：
 - 真实工具执行：日历、提醒、联系人、通知、位置、文件、网页、剪贴板、消息草稿等工具能力。
 - 权限与确认：在执行敏感或有副作用工具前触发系统权限和用户确认。
 - 推理设置：Settings 中配置本地推理或 OpenAI-compatible 远程流式 API。
-- Benchmark：运行真实任务集，报告 F1、recall、pass@1、tool execution@1、P95、retry / fallback 等指标。
+- Benchmark：运行真实任务集，报告 F1、recall、pass@1、tool execution@1、P95、retry / fallback、deferred tool loading 等指标。
 - Trust / Debug：受代码开关控制，用于查看 runtime trace、checkpoint、observability 和诊断信息。
 
 ## Setup & Run App

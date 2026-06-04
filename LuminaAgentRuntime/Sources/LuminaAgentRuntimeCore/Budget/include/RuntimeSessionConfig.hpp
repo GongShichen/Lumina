@@ -67,6 +67,11 @@ struct RuntimeSessionConfig {
     // full, compact, or name-only.
     std::string toolSchemaProfile = "compact";
 
+    // Deferred tool loading mode: enabled, auto, or disabled. Auto compares the
+    // estimated deferred schema token cost against maxContextTokens.
+    std::string toolLoadingMode = "auto";
+    double toolLoadingThresholdRatio = 0.10;
+
     // Core checkpoint emission policy. The core never persists checkpoints;
     // callers receive checkpoint_created events and decide where to store them.
     // Supported values: none, on_pause, on_step, on_exit.

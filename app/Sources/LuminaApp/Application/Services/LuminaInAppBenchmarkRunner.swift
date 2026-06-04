@@ -146,7 +146,7 @@ final class LuminaInAppBenchmarkRunner {
         var latestOutputTokens = 0
         let taskStartedAt = ContinuousClock.now
         observer.start()
-        for await event in services.runEvaluationStream(content: [.text(task.text)]) {
+        for await event in services.runEvaluationStream(task: task) {
             if Task.isCancelled { break }
             observer.observe(event)
             await logEvent(event, task: task, traceLogger: traceLogger)
@@ -348,6 +348,10 @@ final class LuminaInAppBenchmarkRunner {
         - Retry / fallback count: \(report.retryCount) / \(report.fallbackCount)
         - Runtime observations / results / hook events: \(report.runtimeObservationCount) / \(report.resultGeneratedCount) / \(report.hookEventCount)
         - Tool failures: \(report.toolFailureCount)
+        - Deferred tool schema tokens saved estimate: \(report.schemaTokensSavedEstimate)
+        - Tool discovery hit rate: \(format(report.toolDiscoveryHitRate))
+        - Deferred unknown tool rate: \(format(report.deferredUnknownToolRate))
+        - Tool loading search / loaded / failed: \(report.toolLoadingSearchCount) / \(report.toolLoadingLoadedCount) / \(report.toolLoadingLoadFailedCount)
 
         ## Model Inference
         - Model invocations: \(report.modelInvocationCount)

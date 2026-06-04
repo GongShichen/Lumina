@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,8 @@ public:
         const std::string &content,
         const std::string &errorMessage,
         bool confirmationRequired,
-        bool confirmed
+        bool confirmed,
+        const std::string &outputJson = ""
     );
 
     // Records a Markdown result and marks the session as complete.
@@ -78,6 +80,13 @@ public:
     // Tracks the latest observation so the next ReAct turn can focus on it.
     void setLastObservationJson(const std::string &observationJson);
     const std::string &lastObservationJson() const;
+
+    // Deferred tool working set. Only loaded deferred tools are exposed as full schemas.
+    void loadDeferredTool(const std::string &toolName);
+    void loadDeferredTools(const std::vector<std::string> &toolNames);
+    bool isDeferredToolLoaded(const std::string &toolName) const;
+    const std::set<std::string> &loadedToolNames() const;
+    std::string loadedToolSetJson() const;
 
     // Runtime-managed scoped state. Persistence is caller-owned through checkpoints.
     std::string setStateJson(const std::string &scope, const std::string &key, const std::string &valueJson);
@@ -162,6 +171,7 @@ private:
     std::string lastReplayDedupKey_;
     int consecutiveReplayObservationCount_ = 0;
     std::vector<std::string> observations_;
+    std::set<std::string> loadedToolNames_;
     std::map<std::string, ToolCallLedgerEntry> toolCallLedger_;
     std::map<std::string, std::map<std::string, std::string>> state_;
     TraceRecorder trace_;

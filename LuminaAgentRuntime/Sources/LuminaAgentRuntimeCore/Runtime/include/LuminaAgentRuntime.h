@@ -147,6 +147,16 @@ typedef char *(*LuminaAgentRetryProviderCallback)(const char *retry_request_json
 typedef char *(*LuminaAgentCompactionProviderCallback)(const char *compaction_request_json, void *user_context);
 
 /**
+ * Callback used by the runtime to let the host customize deferred tool loading.
+ *
+ * The input is a UTF-8 JSON object with `action`: `catalog`, `search`, `load`,
+ * or `invalidate`. Return a heap-allocated JSON object. Returning NULL or
+ * invalid JSON falls back to the core default search/catalog behavior and
+ * produces a stable load failure for load.
+ */
+typedef char *(*LuminaAgentToolLoadingPluginCallback)(const char *tool_loading_request_json, void *user_context);
+
+/**
  * Callback used by the runtime to write audit records.
  *
  * The input is a UTF-8 JSON object describing lifecycle events, tool calls,
@@ -266,6 +276,16 @@ char *LuminaAgentRuntimeRegisterExternalToolProvider(
 );
 
 /**
+ * Registers lightweight metadata for a deferred tool. Metadata is searchable
+ * by tool_discovery but is not callable until loaded into the session working
+ * set with a full schema.
+ */
+char *LuminaAgentRuntimeRegisterDeferredToolMetadata(
+    LuminaAgentRuntimeRef *runtime,
+    const char *metadata_json
+);
+
+/**
  * Installs the model callback used to produce structured ReAct steps.
  *
  * The callback and `user_context` are stored without ownership transfer. Set a
@@ -380,6 +400,15 @@ void LuminaAgentRuntimeSetRetryProviderCallback(
 void LuminaAgentRuntimeSetCompactionProviderCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentCompactionProviderCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional deferred tool loading plugin callback.
+ */
+void LuminaAgentRuntimeSetToolLoadingPluginCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentToolLoadingPluginCallback callback,
     void *user_context
 );
 
@@ -553,6 +582,21 @@ char *LuminaAgentRuntimeRunSessionReplay(
     LuminaAgentRuntimeSessionRef *session,
     const char *replay_json
 );
+
+/**
+ * Loads deferred tools into a session working set. `names_json` may be a JSON
+ * string array or an object with `names`.
+ */
+char *LuminaAgentRuntimeLoadDeferredTools(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentRuntimeSessionRef *session,
+    const char *names_json
+);
+
+/**
+ * Exports the session's loaded deferred tool names as a JSON array.
+ */
+char *LuminaAgentRuntimeExportLoadedToolSet(LuminaAgentRuntimeSessionRef *session);
 
 /**
  * Resumes a paused explicit session with a runtime-owned observation payload.

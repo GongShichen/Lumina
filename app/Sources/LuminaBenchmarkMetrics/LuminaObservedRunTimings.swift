@@ -18,6 +18,13 @@ struct LuminaBenchmarkRuntimeMetrics: Codable, Hashable {
     var remoteModelInvocationCount: Int = 0
     var localModelInvocationCount: Int = 0
     var cancellationCount: Int = 0
+    var toolLoadingCatalogEmittedCount: Int = 0
+    var toolLoadingSearchCount: Int = 0
+    var toolLoadingDiscoveryHitCount: Int = 0
+    var toolLoadingLoadedCount: Int = 0
+    var toolLoadingLoadFailedCount: Int = 0
+    var toolLoadingUnknownToolCount: Int = 0
+    var schemaTokensSavedEstimate: Int = 0
 
     var contractFailureCount: Int {
         normalizationFailureCount +
@@ -43,6 +50,13 @@ struct LuminaBenchmarkRuntimeMetrics: Codable, Hashable {
         remoteModelInvocationCount += other.remoteModelInvocationCount
         localModelInvocationCount += other.localModelInvocationCount
         cancellationCount += other.cancellationCount
+        toolLoadingCatalogEmittedCount += other.toolLoadingCatalogEmittedCount
+        toolLoadingSearchCount += other.toolLoadingSearchCount
+        toolLoadingDiscoveryHitCount += other.toolLoadingDiscoveryHitCount
+        toolLoadingLoadedCount += other.toolLoadingLoadedCount
+        toolLoadingLoadFailedCount += other.toolLoadingLoadFailedCount
+        toolLoadingUnknownToolCount += other.toolLoadingUnknownToolCount
+        schemaTokensSavedEstimate += other.schemaTokensSavedEstimate
     }
 }
 

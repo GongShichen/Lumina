@@ -15,6 +15,8 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
     public var destructive: Bool
     public var concurrencySafe: Bool
     public var maxResultSize: Int?
+    public var alwaysLoad: Bool
+    public var deferByDefault: Bool
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -31,6 +33,8 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         case destructive
         case concurrencySafe
         case maxResultSize
+        case alwaysLoad
+        case deferByDefault
     }
 
     public init(
@@ -49,6 +53,44 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         concurrencySafe: Bool = false,
         maxResultSize: Int? = nil
     ) {
+        self.init(
+            name: name,
+            description: description,
+            version: version,
+            parameters: parameters,
+            sideEffect: sideEffect,
+            sensitivity: sensitivity,
+            acceptedInputModalities: acceptedInputModalities,
+            outputModalities: outputModalities,
+            requiresUserInteraction: requiresUserInteraction,
+            interruptBehavior: interruptBehavior,
+            idempotencyPolicy: idempotencyPolicy,
+            destructive: destructive,
+            concurrencySafe: concurrencySafe,
+            maxResultSize: maxResultSize,
+            alwaysLoad: false,
+            deferByDefault: false
+        )
+    }
+
+    public init(
+        name: String,
+        description: String,
+        version: Int = 1,
+        parameters: [LuminaToolParameterSchema],
+        sideEffect: LuminaToolSideEffect,
+        sensitivity: LuminaToolSensitivity = .normal,
+        acceptedInputModalities: Set<LuminaAgentModality> = [.text, .structuredData],
+        outputModalities: Set<LuminaAgentModality> = [.text, .structuredData],
+        requiresUserInteraction: Bool = false,
+        interruptBehavior: String? = nil,
+        idempotencyPolicy: String? = nil,
+        destructive: Bool = false,
+        concurrencySafe: Bool = false,
+        maxResultSize: Int? = nil,
+        alwaysLoad: Bool,
+        deferByDefault: Bool
+    ) {
         self.name = name
         self.description = description
         self.version = version
@@ -63,6 +105,8 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         self.destructive = destructive
         self.concurrencySafe = concurrencySafe
         self.maxResultSize = maxResultSize
+        self.alwaysLoad = alwaysLoad
+        self.deferByDefault = deferByDefault
     }
 
     public init(from decoder: Decoder) throws {
@@ -81,5 +125,7 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         self.destructive = try container.decodeIfPresent(Bool.self, forKey: .destructive) ?? false
         self.concurrencySafe = try container.decodeIfPresent(Bool.self, forKey: .concurrencySafe) ?? false
         self.maxResultSize = try container.decodeIfPresent(Int.self, forKey: .maxResultSize)
+        self.alwaysLoad = try container.decodeIfPresent(Bool.self, forKey: .alwaysLoad) ?? false
+        self.deferByDefault = try container.decodeIfPresent(Bool.self, forKey: .deferByDefault) ?? false
     }
 }

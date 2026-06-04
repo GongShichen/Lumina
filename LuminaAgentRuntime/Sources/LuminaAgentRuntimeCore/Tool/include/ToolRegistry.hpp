@@ -13,9 +13,12 @@ class ToolRegistry {
 public:
     // Registers one caller-owned capability schema and stores a normalized view.
     std::string registerSchema(const char *toolSchemaJson);
+    std::string registerDeferredMetadata(const char *metadataJson);
 
     // Looks up registered capabilities by their stable tool name.
     bool contains(const std::string &toolName) const;
+    bool isDeferred(const std::string &toolName) const;
+    bool isCallable(const std::string &toolName, const std::set<std::string> &loadedToolNames) const;
     bool isReadOnly(const std::string &toolName) const;
     bool isConcurrencySafe(const std::string &toolName) const;
     bool requiresUserInteraction(const std::string &toolName) const;
@@ -29,10 +32,13 @@ public:
 
     // Returns raw schemas for debugging/export and compact schemas for model prompts.
     std::string schemasJson() const;
-    std::string modelFacingSchemasJson() const;
-    std::string capabilityListJson() const;
-    std::string nameOnlyListJson() const;
+    std::string modelFacingSchemasJson(const std::set<std::string> &loadedToolNames = {}) const;
+    std::string capabilityListJson(const std::set<std::string> &loadedToolNames = {}) const;
+    std::string nameOnlyListJson(const std::set<std::string> &loadedToolNames = {}) const;
+    std::string deferredCatalogJson(const std::set<std::string> &loadedToolNames = {}) const;
     std::string discoverToolsJson(const std::string &query, const std::string &category, int maxResults, bool includeSchemas) const;
+    std::vector<std::string> deferredToolNames() const;
+    int estimatedDeferredSchemaTokens() const;
 
     // Validates model-provided parameters against required fields and basic types.
     std::string validateCallJson(const std::string &toolName, const std::string &parametersJson) const;
@@ -71,12 +77,17 @@ private:
         bool concurrencySafe = false;
         bool requiresUserInteraction = false;
         bool strict = false;
+        bool alwaysLoad = false;
+        bool deferByDefault = false;
+        bool metadataOnly = false;
         int maxResultSize = 0;
         std::vector<std::string> aliases;
         std::vector<Parameter> parameters;
     };
 
+    std::string registerRecord(const std::string &schema, bool metadataOnly);
     ToolSchemaRecord parseRecord(const std::string &schema) const;
+    bool shouldExposeRecord(const ToolSchemaRecord &record, const std::set<std::string> &loadedToolNames) const;
     bool parameterTypeMatches(const Parameter &parameter, const JsonField &value) const;
     bool parameterEnumMatches(const Parameter &parameter, const JsonField &value) const;
     std::string compactRecordJson(const ToolSchemaRecord &record, bool includeSchema) const;

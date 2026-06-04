@@ -233,40 +233,26 @@ static bool startsWith(const std::string &text, const std::string &prefix) {
     return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 }
 
-static std::string stripLeadingThinkBlock(const std::string &text, std::string &error) {
+static std::string rejectThinkBlocks(const std::string &text, std::string &error) {
     std::string normalized = trim(text);
-    if (!startsWith(normalized, "<think")) {
-        if (normalized.find("<think") != std::string::npos || normalized.find("</think>") != std::string::npos) {
-            error = "model output may not contain <think> tags.";
-            return "";
-        }
-        return normalized;
-    }
-    const size_t openEnd = normalized.find(">");
-    if (openEnd == std::string::npos) {
-        error = "leading <think> tag is missing closing '>'.";
-        return "";
-    }
-    const size_t close = normalized.find("</think>", openEnd + 1);
-    if (close == std::string::npos) {
-        error = "leading <think> tag is missing closing </think>.";
-        return "";
-    }
-    normalized = trim(normalized.substr(close + std::string("</think>").size()));
     if (normalized.find("<think") != std::string::npos || normalized.find("</think>") != std::string::npos) {
-        error = "model output may not contain nested or repeated <think> tags.";
+        error = "model output may not contain <think> tags.";
         return "";
     }
     return normalized;
 }
 
 static std::string normalizeXmlTags(const std::string &text, std::string &error) {
-    const std::string normalizedText = stripLeadingThinkBlock(text, error);
+    const std::string normalizedText = rejectThinkBlocks(text, error);
     if (!error.empty()) {
         return "";
     }
-    if (normalizedText.find("<observation") != std::string::npos || normalizedText.find("<tool_result") != std::string::npos) {
-        error = "model output may not contain runtime-owned observation/tool_result tags.";
+    if (normalizedText.find("<observation") != std::string::npos ||
+        normalizedText.find("</observation>") != std::string::npos ||
+        normalizedText.find("<tool_result") != std::string::npos ||
+        normalizedText.find("<tool_call") != std::string::npos ||
+        normalizedText.find("</tool_call>") != std::string::npos) {
+        error = "model output may not contain runtime-owned observation/tool_result tags or provider tool_call tags.";
         return "";
     }
     const std::string thought = tagValue(normalizedText, "thought");

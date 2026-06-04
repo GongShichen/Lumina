@@ -76,15 +76,7 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
 
     private static func extractJSONObject(from generated: String) throws -> String {
         let trimmed = generated.trimmingCharacters(in: .whitespacesAndNewlines)
-        if startsWithThinkTag(trimmed) {
-            guard let stripped = stripLeadingThinkBlock(from: trimmed),
-                  let normalized = LuminaReActTransport.normalizeXMLTags(from: stripped) else {
-                throw LuminaMiniCPMV46ReActModelError.missingJSONObject(generated)
-            }
-            print("[Lumina][ReActModel] Stripped leading <think> block before XML normalization.")
-            return normalized
-        }
-        if containsThinkTag(trimmed) {
+        if containsForbiddenXMLTag(trimmed) {
             throw LuminaMiniCPMV46ReActModelError.missingJSONObject(generated)
         }
         if let standard = LuminaReActTransport.extractFirstStandardJSONObject(from: trimmed) {
@@ -104,23 +96,13 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
         throw LuminaMiniCPMV46ReActModelError.missingJSONObject(generated)
     }
 
-    private static func startsWithThinkTag(_ text: String) -> Bool {
-        text.hasPrefix("<think") || text.hasPrefix("< think")
-    }
-
-    private static func containsThinkTag(_ text: String) -> Bool {
-        text.contains("<think") || text.contains("</think>")
-    }
-
-    private static func stripLeadingThinkBlock(from text: String) -> String? {
-        guard startsWithThinkTag(text),
-              let openEnd = text.firstIndex(of: ">"),
-              let closeRange = text.range(of: "</think>", range: openEnd..<text.endIndex) else {
-            return nil
-        }
-        let remainder = text[closeRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !containsThinkTag(remainder) else { return nil }
-        return remainder
+    private static func containsForbiddenXMLTag(_ text: String) -> Bool {
+        text.contains("<think") ||
+            text.contains("</think>") ||
+            text.contains("<tool_call") ||
+            text.contains("</tool_call>") ||
+            text.contains("<observation") ||
+            text.contains("</observation>")
     }
 
     private static func extractFencedJSON(from text: String) -> String? {
@@ -183,7 +165,7 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
             }
 
             configuration.metricsRecorder?(LuminaModelInferenceMetrics(
-                modelName: "MiniCPM-V 4.6",
+                modelName: bundleInfo.modelName,
                 computeUnits: response.backend.uppercased(),
                 contextLength: response.contextLength == 0 ? bundleInfo.contextLength : response.contextLength,
                 promptTokens: response.promptTokens == 0 ? promptTokens : response.promptTokens,

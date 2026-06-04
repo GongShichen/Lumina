@@ -19,6 +19,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
     public var emitVerboseEvents: Bool
     public var preservedStepsAfterCompaction: Int
     public var toolSchemaDisclosureProfile: LuminaToolSchemaDisclosureProfile
+    public var toolLoadingMode: String
+    public var toolLoadingThresholdRatio: Double
     public var checkpointPolicy: LuminaRuntimeCheckpointPolicy
 
     public init(
@@ -40,6 +42,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         emitVerboseEvents: Bool,
         preservedStepsAfterCompaction: Int,
         toolSchemaDisclosureProfile: LuminaToolSchemaDisclosureProfile = .compact,
+        toolLoadingMode: String = "auto",
+        toolLoadingThresholdRatio: Double = 0.10,
         checkpointPolicy: LuminaRuntimeCheckpointPolicy = .none
     ) {
         self.maximumToolCalls = maximumToolCalls
@@ -60,6 +64,8 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         self.emitVerboseEvents = emitVerboseEvents
         self.preservedStepsAfterCompaction = preservedStepsAfterCompaction
         self.toolSchemaDisclosureProfile = toolSchemaDisclosureProfile
+        self.toolLoadingMode = toolLoadingMode
+        self.toolLoadingThresholdRatio = toolLoadingThresholdRatio
         self.checkpointPolicy = checkpointPolicy
     }
 }

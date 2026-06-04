@@ -152,7 +152,7 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
         XCTAssertEqual(step.resultMarkdown, "现在是 2026-06-02 20:10:00 Asia/Shanghai。")
     }
 
-    func testEvaluationRepairsMissingFileSaveNoteBodyFromGoal() async throws {
+    func testEvaluationDoesNotRepairMissingFileSaveNoteBodyFromGoal() async throws {
         let model = MockStructuredInferenceModel(json: """
         {
           "type": "tool_use",
@@ -176,26 +176,25 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
             sideEffect: .appLocalWrite
         )
 
-        let step = try await stepGenerator.nextStep(context: LuminaReActStepContext(
-            request: LuminaAgentRequest(
-                text: "把 LuminaTest benchmark 运行说明保存成 Markdown 笔记",
-                metadata: [
-                    "lumina.evaluation.memory_access_disabled": .bool(true),
-                    "lumina.evaluation.ask_user_disabled": .bool(true)
-                ]
-            ),
-            availableTools: [schema],
-            trace: LuminaReActTrace(),
-            iteration: 0,
-            remainingToolCalls: 6,
-            maximumObservationCharacters: 2_000
-        ))
-
-        XCTAssertEqual(step.kind, .action)
-        XCTAssertEqual(step.action?.toolName, "file.save_note")
-        XCTAssertEqual(step.action?.arguments["filename"], .string("lumina-test-benchmark.md"))
-        XCTAssertEqual(step.action?.arguments["title"], .string("LuminaTest benchmark"))
-        XCTAssertTrue(step.action?.arguments["body"]?.stringValue?.contains("LuminaTest benchmark 运行说明") == true)
+        do {
+            _ = try await stepGenerator.nextStep(context: LuminaReActStepContext(
+                request: LuminaAgentRequest(
+                    text: "把 LuminaTest benchmark 运行说明保存成 Markdown 笔记",
+                    metadata: [
+                        "lumina.evaluation.memory_access_disabled": .bool(true),
+                        "lumina.evaluation.ask_user_disabled": .bool(true)
+                    ]
+                ),
+                availableTools: [schema],
+                trace: LuminaReActTrace(),
+                iteration: 0,
+                remainingToolCalls: 6,
+                maximumObservationCharacters: 2_000
+            ))
+            XCTFail("evaluation must not synthesize missing required file.save_note body")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("required") || error.localizedDescription.contains("valid standard ReAct JSON"))
+        }
     }
 
     func testEvaluationConvergenceAllowsDifferentToolForMultiStepReadTask() async throws {

@@ -18,6 +18,7 @@ public:
 
     // Parses, validates, and caches a caller-provided tool schema.
     std::string registerToolSchema(const char *toolSchemaJson);
+    std::string registerDeferredToolMetadata(const char *metadataJson);
     std::string registerExternalToolProvider(const char *providerJson);
 
     // Callback setters store function pointers and caller-owned contexts.
@@ -31,6 +32,7 @@ public:
     void setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context);
     void setRetryProviderCallback(LuminaAgentRetryProviderCallback callback, void *context);
     void setCompactionProviderCallback(LuminaAgentCompactionProviderCallback callback, void *context);
+    void setToolLoadingPluginCallback(LuminaAgentToolLoadingPluginCallback callback, void *context);
     void setAuditCallback(LuminaAgentAuditCallback callback, void *context);
     void setTraceCallback(LuminaAgentTraceCallback callback, void *context);
     void setMetricsCallback(LuminaAgentMetricsCallback callback, void *context);
@@ -53,6 +55,7 @@ public:
 
     // Advances an explicit session until completion, failure, cancellation, or pause.
     std::string runSession(RuntimeSession &session, const char *requestJson, bool allowPause, const char *replayJson = nullptr);
+    std::string loadDeferredTools(RuntimeSession &session, const char *namesJson);
 
     // Adds an external observation to a paused session and continues execution.
     std::string resumeSession(RuntimeSession &session, const char *resumeJson);
@@ -72,6 +75,8 @@ private:
     ToolRegistry tools_;
     RuntimeCallbacks callbacks_;
 
+    std::string discoverAndMaybeLoadTools(RuntimeSession &session, const std::string &stepJson);
+    std::string loadDeferredToolsByName(RuntimeSession &session, const std::vector<std::string> &names);
 };
 
 } // namespace LuminaAgent

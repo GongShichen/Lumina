@@ -13,6 +13,7 @@ class LuminaAgentRuntime(
         val confirmation: ConfirmationProvider = ConfirmationProvider { """{"confirmed":false,"reason":"confirmation provider unavailable"}""" },
         val guardrail: GuardrailProvider = GuardrailProvider { """{"decision":"allow"}""" },
         val compaction: CompactionProvider = CompactionProvider { """{"status":"skipped"}""" },
+        val toolLoadingPlugin: ToolLoadingPlugin = ToolLoadingPlugin { "{}" },
         val hook: HookProvider = HookProvider { "{}" },
         val event: EventSink = EventSink {},
         val audit: AuditSink = AuditSink {},
@@ -54,6 +55,10 @@ class LuminaAgentRuntime(
         fun compact(compactionRequestJson: String): String
     }
 
+    fun interface ToolLoadingPlugin {
+        fun handle(toolLoadingRequestJson: String): String
+    }
+
     fun interface HookProvider {
         fun dispatch(hookEventJson: String): String
     }
@@ -89,6 +94,9 @@ class LuminaAgentRuntime(
 
     fun registerExternalToolProvider(providerJson: String): String =
         Native.registerExternalToolProvider(nativeHandle, providerJson)
+
+    fun registerDeferredToolMetadata(metadataJson: String): String =
+        Native.registerDeferredToolMetadata(nativeHandle, metadataJson)
 
     fun registerHookRoute(routeJson: String): String =
         Native.registerHookRoute(nativeHandle, routeJson)
@@ -146,6 +154,9 @@ class LuminaAgentRuntime(
     private fun compactContext(compactionRequestJson: String): String =
         providers.compaction.compact(compactionRequestJson)
 
+    private fun handleToolLoading(toolLoadingRequestJson: String): String =
+        providers.toolLoadingPlugin.handle(toolLoadingRequestJson)
+
     private fun dispatchHook(hookEventJson: String): String =
         providers.hook.dispatch(hookEventJson)
 
@@ -179,6 +190,8 @@ class LuminaAgentRuntime(
     ) : AutoCloseable {
         fun run(): String = Native.runSession(runtime.nativeHandle, sessionHandle)
         fun runReplay(replayJson: String): String = Native.runSessionReplay(runtime.nativeHandle, sessionHandle, replayJson)
+        fun loadDeferredTools(namesJson: String): String = Native.loadDeferredTools(runtime.nativeHandle, sessionHandle, namesJson)
+        fun exportLoadedToolSet(): String = Native.exportLoadedToolSet(sessionHandle)
         fun resume(observationJson: String): String = Native.resumeSession(runtime.nativeHandle, sessionHandle, observationJson)
         fun snapshot(): String = Native.snapshotSession(sessionHandle)
         fun exportCheckpoint(): String = Native.exportSessionCheckpoint(runtime.nativeHandle, sessionHandle)
@@ -208,6 +221,7 @@ class LuminaAgentRuntime(
         external fun destroy(handle: Long)
         external fun registerToolSchema(handle: Long, toolSchemaJson: String): String
         external fun registerExternalToolProvider(handle: Long, providerJson: String): String
+        external fun registerDeferredToolMetadata(handle: Long, metadataJson: String): String
         external fun registerHookRoute(handle: Long, routeJson: String): String
         external fun run(handle: Long, requestJson: String): String
         external fun runReplay(handle: Long, requestJson: String, replayJson: String): String
@@ -217,6 +231,8 @@ class LuminaAgentRuntime(
         external fun createSessionFromReplayArtifact(handle: Long, artifactJson: String, forkOptionsJson: String): Long
         external fun runSession(handle: Long, sessionHandle: Long): String
         external fun runSessionReplay(handle: Long, sessionHandle: Long, replayJson: String): String
+        external fun loadDeferredTools(handle: Long, sessionHandle: Long, namesJson: String): String
+        external fun exportLoadedToolSet(sessionHandle: Long): String
         external fun resumeSession(handle: Long, sessionHandle: Long, observationJson: String): String
         external fun snapshotSession(sessionHandle: Long): String
         external fun exportSessionCheckpoint(handle: Long, sessionHandle: Long): String

@@ -7,6 +7,7 @@ export type LuminaRuntimeProviders = {
   confirmation?: (confirmationRequestJson: string) => string
   guardrail?: (guardrailRequestJson: string) => string
   compaction?: (compactionRequestJson: string) => string
+  toolLoadingPlugin?: (toolLoadingRequestJson: string) => string
   hook?: (hookEventJson: string) => string
   event?: (eventJson: string) => void
   audit?: (auditJson: string) => void
@@ -21,6 +22,7 @@ type NativeRuntimeModule = {
   destroy(handle: Object): void
   registerToolSchema(handle: Object, toolSchemaJson: string): string
   registerExternalToolProvider(handle: Object, providerJson: string): string
+  registerDeferredToolMetadata(handle: Object, metadataJson: string): string
   registerHookRoute(handle: Object, routeJson: string): string
   run(handle: Object, requestJson: string): string
   runReplay(handle: Object, requestJson: string, replayJson: string): string
@@ -30,6 +32,8 @@ type NativeRuntimeModule = {
   createSessionFromReplayArtifact(handle: Object, artifactJson: string, forkOptionsJson: string): Object
   runSession(handle: Object, session: Object): string
   runSessionReplay(handle: Object, session: Object, replayJson: string): string
+  loadDeferredTools(handle: Object, session: Object, namesJson: string): string
+  exportLoadedToolSet(session: Object): string
   resumeSession(handle: Object, session: Object, observationJson: string): string
   snapshotSession(session: Object): string
   exportSessionCheckpoint(handle: Object, session: Object): string
@@ -61,6 +65,10 @@ export class LuminaAgentRuntime {
 
   registerExternalToolProvider(providerJson: string): string {
     return luminaRuntimeNative.registerExternalToolProvider(this.requireHandle(), providerJson)
+  }
+
+  registerDeferredToolMetadata(metadataJson: string): string {
+    return luminaRuntimeNative.registerDeferredToolMetadata(this.requireHandle(), metadataJson)
   }
 
   registerHookRoute(routeJson: string): string {
@@ -135,6 +143,10 @@ export class LuminaAgentRuntime {
     return this.providers.compaction?.(compactionRequestJson) ?? '{"status":"skipped"}'
   }
 
+  handleToolLoading(toolLoadingRequestJson: string): string {
+    return this.providers.toolLoadingPlugin?.(toolLoadingRequestJson) ?? '{}'
+  }
+
   dispatchHook(hookEventJson: string): string {
     return this.providers.hook?.(hookEventJson) ?? '{}'
   }
@@ -191,6 +203,14 @@ export class LuminaAgentRuntimeSession {
 
   runReplay(replayJson: string): string {
     return luminaRuntimeNative.runSessionReplay(this.runtimeHandle, this.requireHandle(), replayJson)
+  }
+
+  loadDeferredTools(namesJson: string): string {
+    return luminaRuntimeNative.loadDeferredTools(this.runtimeHandle, this.requireHandle(), namesJson)
+  }
+
+  exportLoadedToolSet(): string {
+    return luminaRuntimeNative.exportLoadedToolSet(this.requireHandle())
   }
 
   resume(observationJson: string): string {

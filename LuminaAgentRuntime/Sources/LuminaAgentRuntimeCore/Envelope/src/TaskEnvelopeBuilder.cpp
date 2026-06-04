@@ -24,8 +24,8 @@ std::string TaskEnvelopeBuilder::build(
     const std::string schemaProfile = session_.toolSchemaProfile();
     const bool includeFocusedSchemas = schemaProfile == "full";
     const std::string capabilities = schemaProfile == "name-only"
-        ? tools_.nameOnlyListJson()
-        : tools_.capabilityListJson();
+        ? tools_.nameOnlyListJson(session_.loadedToolNames())
+        : tools_.capabilityListJson(session_.loadedToolNames());
     output << "{"
            << "\"schema_version\":\"1.0\","
            << "\"instructions\":{"
@@ -37,8 +37,10 @@ std::string TaskEnvelopeBuilder::build(
            << "\"mode\":\"progressive_disclosure\","
            << "\"profile\":" << jsonString(schemaProfile) << ","
            << "\"capabilities\":" << capabilities << ","
-           << "\"focused_schemas\":" << (includeFocusedSchemas ? tools_.modelFacingSchemasJson() : "[]") << ","
-           << "\"discovery_hint\":\"Use capability names first. Emit a tool_discovery step when a focused schema is needed before tool_use.\""
+           << "\"focused_schemas\":" << (includeFocusedSchemas ? tools_.modelFacingSchemasJson(session_.loadedToolNames()) : "[]") << ","
+           << "\"deferred_catalog\":" << tools_.deferredCatalogJson(session_.loadedToolNames()) << ","
+           << "\"loaded_tool_set\":" << session_.loadedToolSetJson() << ","
+           << "\"discovery_hint\":\"Use available capabilities first. Emit tool_discovery to search deferred_catalog or load a full schema before tool_use. Deferred schemas become callable on the next turn.\""
            << "},"
            << "\"context\":{"
            << "\"loaded_sections\":" << contextSectionsJson(contextJson)

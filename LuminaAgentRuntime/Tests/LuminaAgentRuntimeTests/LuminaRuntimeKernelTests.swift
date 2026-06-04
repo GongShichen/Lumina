@@ -15,6 +15,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var historyEvents: [String] = []
     private var retryRequests: [String] = []
     private var compactionRequests: [String] = []
+    private var toolLoadingRequests: [String] = []
     private var toolCalls: [String] = []
     private var toolCallCount = 0
     private var modelCallCount = 0
@@ -29,6 +30,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         historyEvents = []
         retryRequests = []
         compactionRequests = []
+        toolLoadingRequests = []
         toolCalls = []
         toolCallCount = 0
         modelCallCount = 0
@@ -83,6 +85,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendToolLoadingRequest(_ value: String) {
+        lock.lock()
+        toolLoadingRequests.append(value)
+        lock.unlock()
+    }
+
     func incrementToolCallCount() {
         lock.lock()
         toolCallCount += 1
@@ -113,10 +121,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], historyEvents: [String], retryRequests: [String], compactionRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], historyEvents: [String], retryRequests: [String], compactionRequests: [String], toolLoadingRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, spans, historyEvents, retryRequests, compactionRequests, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, historyEvents, retryRequests, compactionRequests, toolLoadingRequests, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -230,6 +238,42 @@ private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback 
         return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Need focused calendar schema.","query":"calendar","category":"pim","max_results":2,"include_schemas":true,"requires_followup":true}"#)
     }
     return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaDeferredToolDirectThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-direct","type":"tool_use","thought":"Try the deferred tool immediately.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled contract failure.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaDeferredDiscoveryUseThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Load the focused deferred schema.","query":"select:deferred.search","category":"search","max_results":1,"include_schemas":true,"requires_followup":true}"#)
+    }
+    if call == 2 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-use","type":"tool_use","thought":"Use the now-loaded tool.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Tool ran.","content":"## 完成","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaPluginDeferredDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-plugin-discover","type":"tool_discovery","thought":"Ask host plugin to load schema.","query":"select:plugin.lazy","category":"plugin","max_results":1,"include_schemas":true,"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Loaded by plugin.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -392,6 +436,20 @@ private let luminaSkippingCompactionProviderCallback: LuminaAgentCompactionProvi
     return luminaRuntimeCString(#"{"status":"skipped"}"#)
 }
 
+private let luminaToolLoadingPluginCallback: LuminaAgentToolLoadingPluginCallback = { request, _ in
+    let text = request.map { String(cString: $0) } ?? ""
+    if !text.isEmpty {
+        LuminaRuntimeCaptureStore.shared.appendToolLoadingRequest(text)
+    }
+    if text.contains(#""action":"search""#) {
+        return luminaRuntimeCString(#"{"matches":[{"name":"plugin.lazy","description":"Plugin loaded tool.","category":"plugin","aliases":["lazy plugin"],"searchHint":"plugin lazy search","sideEffect":"readOnly","sensitivity":"normal","parameterNames":["query"]}]}"#)
+    }
+    if text.contains(#""action":"load""#) {
+        return luminaRuntimeCString(#"{"schemas":[{"name":"plugin.lazy","description":"Plugin loaded tool.","category":"plugin","aliases":["lazy plugin"],"searchHint":"plugin lazy search","sideEffect":"readOnly","readOnly":true,"concurrencySafe":true,"parameters":[{"name":"query","type":"string","required":true}]}],"loaded":["plugin.lazy"],"failed":[]}"#)
+    }
+    return luminaRuntimeCString("{}")
+}
+
 private let luminaToolCallback: LuminaAgentToolCallback = { _, _ in
     LuminaRuntimeCaptureStore.shared.incrementToolCallCount()
     return luminaRuntimeCString(#"{"status":"succeeded","content":"should not run"}"#)
@@ -547,7 +605,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertFalse(toolText.contains(#"\"parameters\":{}"#))
     }
 
-    func testXMLTagDialectStripsCompleteLeadingThinkOnly() {
+    func testXMLTagDialectRejectsCompleteLeadingThink() {
         let output = #"<think>private scratch</think><thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"Project"}</tool_use>"#
         let normalizedTool = output.withCString { text in
             "xml_tags".withCString { dialect in
@@ -556,9 +614,9 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         }
         defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
         let toolText = normalizedTool.map { String(cString: $0) } ?? ""
-        XCTAssertTrue(toolText.contains(#""ok":true"#))
-        XCTAssertTrue(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
-        XCTAssertTrue(toolText.contains(#"\"query\":\"Project\""#))
+        XCTAssertTrue(toolText.contains(#""ok":false"#))
+        XCTAssertTrue(toolText.contains("<think> tags"))
+        XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
     }
 
     func testXMLTagDialectRejectsUnclosedThinkWithInnerToolUse() {
@@ -571,7 +629,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
         let toolText = normalizedTool.map { String(cString: $0) } ?? ""
         XCTAssertTrue(toolText.contains(#""ok":false"#))
-        XCTAssertTrue(toolText.contains("missing closing </think>"))
+        XCTAssertTrue(toolText.contains("<think> tags"))
         XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
     }
 
@@ -861,10 +919,108 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         }
 
         let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
-        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertTrue(result.contains(#""status":"succeeded""#), result)
         XCTAssertEqual(snapshot.toolCallCount, 0)
         XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[]"#) == true)
         XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""calendar.search""#))
+    }
+
+    func testDeferredToolIsListedButNotCallableUntilLoaded() throws {
+        let config = """
+        {"maxIterations":2,"maxToolCalls":8,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false,"toolLoadingMode":"enabled"}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaDeferredToolDirectThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"deferred.search","description":"Search deferred data.","category":"search","aliases":["lazy search"],"searchHint":"deferred lazy search","sideEffect":"readOnly","readOnly":true,"concurrencySafe":true,"deferByDefault":true,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"deferred-direct","text":"直接调用 deferred tool","content":[{"modality":"text","text":"直接调用 deferred tool"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains("tool is deferred") || snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains("tool is deferred"))
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""deferred_catalog""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""deferred.search""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[]"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains("tool is deferred"))
+    }
+
+    func testToolDiscoveryLoadsDeferredSchemaForNextPlannerTurn() throws {
+        let config = """
+        {"maxIterations":4,"maxToolCalls":8,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false,"toolLoadingMode":"enabled"}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaDeferredDiscoveryUseThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"deferred.search","description":"Search deferred data.","category":"search","aliases":["lazy search"],"searchHint":"deferred lazy search","sideEffect":"readOnly","readOnly":true,"concurrencySafe":true,"deferByDefault":true,"parameters":[{"name":"query","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"deferred-load","text":"发现后调用 deferred tool","content":[{"modality":"text","text":"发现后调用 deferred tool"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertEqual(snapshot.toolCallCount, 1)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[]"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""loaded_tool_set":["deferred.search"]"#))
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""deferred.search""#))
+    }
+
+    func testCustomToolLoadingPluginCanProvideDeferredSchema() throws {
+        let config = """
+        {"maxIterations":3,"maxToolCalls":8,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false,"toolLoadingMode":"enabled"}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaPluginDeferredDiscoveryThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolLoadingPluginCallback(runtime, luminaToolLoadingPluginCallback, nil)
+        let metadataPointer = LuminaAgentRuntimeRegisterDeferredToolMetadata(
+            runtime,
+            #"{"name":"plugin.lazy","description":"Plugin deferred tool.","category":"plugin","aliases":["lazy plugin"],"searchHint":"plugin lazy search","sideEffect":"readOnly","sensitivity":"normal","parameterNames":["query"],"deferByDefault":true}"#
+        )
+        if let metadataPointer { LuminaAgentRuntimeReleaseString(metadataPointer) }
+
+        guard let session = LuminaAgentRuntimeCreateSession(runtime, #"{"id":"plugin-load","text":"加载 plugin tool","content":[{"modality":"text","text":"加载 plugin tool"}]}"#) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+
+        let runPointer = LuminaAgentRuntimeRunSession(runtime, session)
+        let result = runPointer.map { String(cString: $0) } ?? "{}"
+        if let runPointer { LuminaAgentRuntimeReleaseString(runPointer) }
+
+        let loadedPointer = LuminaAgentRuntimeExportLoadedToolSet(session)
+        let loaded = loadedPointer.map { String(cString: $0) } ?? "[]"
+        if let loadedPointer { LuminaAgentRuntimeReleaseString(loadedPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#))
+        XCTAssertTrue(snapshot.toolLoadingRequests.contains { $0.contains(#""action":"search""#) })
+        XCTAssertTrue(snapshot.toolLoadingRequests.contains { $0.contains(#""action":"load""#) })
+        XCTAssertTrue(loaded.contains("plugin.lazy"))
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""loaded_tool_set":["plugin.lazy"]"#))
     }
 
     func testIdenticalToolCallReplaysPreviousObservationWithoutExecutingAgain() throws {
@@ -1706,7 +1862,6 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(json.contains("task_envelope_schema"))
         XCTAssertTrue(json.contains("responder_schema"))
         XCTAssertTrue(json.contains("tool_use"))
-        XCTAssertTrue(json.contains("multi_tool_use"))
         XCTAssertTrue(json.contains("cannot_complete"))
         XCTAssertTrue(json.contains("guardrail_decision"))
         XCTAssertTrue(json.contains("retry_request"))
@@ -1714,6 +1869,7 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(json.contains("runtime_checkpoint"))
         XCTAssertTrue(json.contains("runtime_replay"))
         XCTAssertTrue(json.contains("external_tool_provider"))
+        XCTAssertTrue(json.contains("tool_loading_plugin"))
     }
 }
 

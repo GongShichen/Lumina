@@ -212,6 +212,29 @@ static void applyModelMetadataIfAvailable(RuntimeSession &session, RuntimeCallba
     );
 }
 
+static void initializeDeferredToolWorkingSet(RuntimeSession &session, const ToolRegistry &tools, const RuntimeSessionConfig &config, RuntimeCallbacks &callbacks) {
+    const std::vector<std::string> deferredNames = tools.deferredToolNames();
+    if (deferredNames.empty()) {
+        return;
+    }
+    bool lazyEnabled = config.toolLoadingMode == "enabled";
+    const int estimatedTokens = tools.estimatedDeferredSchemaTokens();
+    const int threshold = static_cast<int>(std::max(1, session.maxContextTokens()) * config.toolLoadingThresholdRatio);
+    if (config.toolLoadingMode == "auto") {
+        lazyEnabled = estimatedTokens >= threshold;
+    }
+    const std::string payload = "{\"mode\":" + jsonString(config.toolLoadingMode) +
+        ",\"lazy_enabled\":" + jsonBool(lazyEnabled) +
+        ",\"deferred_tool_count\":" + std::to_string(deferredNames.size()) +
+        ",\"estimated_deferred_schema_tokens\":" + std::to_string(estimatedTokens) +
+        ",\"threshold_tokens\":" + std::to_string(threshold) + "}";
+    callbacks.emitEvent("tool_loading.catalog_emitted", payload);
+    callbacks.metric("tool_loading.schema_tokens_saved_estimate", lazyEnabled ? static_cast<double>(estimatedTokens) : 0.0, payload);
+    if (!lazyEnabled) {
+        session.loadDeferredTools(deferredNames);
+    }
+}
+
 static std::vector<std::string> stringArrayFromRaw(const std::string &arrayJson) {
     std::vector<std::string> values;
     const std::string text = trim(arrayJson);
@@ -285,7 +308,9 @@ static std::string schemaWithProviderNamespace(
            << "\"destructive\":" << rawField(fields, "destructive", "false") << ","
            << "\"concurrencySafe\":" << rawField(fields, "concurrencySafe", rawField(fields, "concurrency_safe", "false")) << ","
            << "\"requiresUserInteraction\":" << rawField(fields, "requiresUserInteraction", rawField(fields, "requires_user_interaction", "false")) << ","
-           << "\"parameters\":" << rawField(fields, "parameters", "[]");
+           << "\"parameters\":" << rawField(fields, "parameters", "[]") << ","
+           << "\"deferByDefault\":true,"
+           << "\"alwaysLoad\":" << rawField(fields, "alwaysLoad", rawField(fields, "always_load", "false"));
     const std::string inputSchema = rawField(fields, "inputSchema", rawField(fields, "input_schema", ""));
     const std::string outputSchema = rawField(fields, "outputSchema", rawField(fields, "output_schema", ""));
     if (!inputSchema.empty()) {
@@ -360,6 +385,16 @@ Runtime::Runtime(const char *configurationJson) {
     const std::string profile = lowercased(stringField(fields, "toolSchemaProfile", sessionConfig_.toolSchemaProfile));
     sessionConfig_.toolSchemaProfile =
         (profile == "full" || profile == "compact" || profile == "name-only") ? profile : "compact";
+    const std::string toolLoadingMode = lowercased(stringField(fields, "toolLoadingMode", stringField(fields, "tool_loading_mode", sessionConfig_.toolLoadingMode)));
+    sessionConfig_.toolLoadingMode =
+        (toolLoadingMode == "enabled" || toolLoadingMode == "disabled" || toolLoadingMode == "auto") ? toolLoadingMode : "auto";
+    sessionConfig_.toolLoadingThresholdRatio = doubleField(fields, "toolLoadingThresholdRatio", doubleField(fields, "tool_loading_threshold_ratio", sessionConfig_.toolLoadingThresholdRatio));
+    if (sessionConfig_.toolLoadingThresholdRatio < 0.0) {
+        sessionConfig_.toolLoadingThresholdRatio = 0.0;
+    }
+    if (sessionConfig_.toolLoadingThresholdRatio > 1.0) {
+        sessionConfig_.toolLoadingThresholdRatio = 1.0;
+    }
     sessionConfig_.checkpointPolicy = normalizedCheckpointPolicy(
         stringField(fields, "checkpointPolicy", stringField(fields, "checkpoint_policy", sessionConfig_.checkpointPolicy))
     );
@@ -369,6 +404,12 @@ Runtime::Runtime(const char *configurationJson) {
 
 std::string Runtime::registerToolSchema(const char *toolSchemaJson) {
     return tools_.registerSchema(toolSchemaJson);
+}
+
+std::string Runtime::registerDeferredToolMetadata(const char *metadataJson) {
+    const std::string result = tools_.registerDeferredMetadata(metadataJson);
+    callbacks_.emitEvent("tool_loading.catalog_registered", "{\"result\":" + result + "}");
+    return result;
 }
 
 std::string Runtime::registerExternalToolProvider(const char *providerJson) {
@@ -450,6 +491,10 @@ void Runtime::setRetryProviderCallback(LuminaAgentRetryProviderCallback callback
 
 void Runtime::setCompactionProviderCallback(LuminaAgentCompactionProviderCallback callback, void *context) {
     callbacks_.setCompactionProvider(callback, context);
+}
+
+void Runtime::setToolLoadingPluginCallback(LuminaAgentToolLoadingPluginCallback callback, void *context) {
+    callbacks_.setToolLoadingPlugin(callback, context);
 }
 
 void Runtime::setAuditCallback(LuminaAgentAuditCallback callback, void *context) {
@@ -580,6 +625,170 @@ std::string Runtime::diffReplayArtifacts(const char *expectedJson, const char *a
     );
 }
 
+static std::vector<std::string> namesFromMatchesJson(const std::string &matchesJson) {
+    std::vector<std::string> names;
+    const std::string text = trim(matchesJson);
+    if (text.empty() || text == "null") {
+        return names;
+    }
+    for (const std::string &item : extractObjectArrayItems(text)) {
+        std::map<std::string, JsonField> fields;
+        if (parseFieldsOrEmpty(item, fields)) {
+            const std::string name = stringField(fields, "name", stringField(fields, "tool_name"));
+            if (!name.empty() && std::find(names.begin(), names.end(), name) == names.end()) {
+                names.push_back(name);
+            }
+        }
+    }
+    if (!names.empty()) {
+        return names;
+    }
+    return stringArrayFromRaw(text);
+}
+
+std::string Runtime::loadDeferredToolsByName(RuntimeSession &session, const std::vector<std::string> &names) {
+    if (names.empty()) {
+        return "{\"ok\":true,\"loaded\":[],\"loaded_tool_set\":" + session.loadedToolSetJson() + "}";
+    }
+    std::vector<std::string> loaded;
+    std::vector<std::string> failed;
+    if (callbacks_.hasToolLoadingPlugin()) {
+        std::ostringstream namesJson;
+        namesJson << "[";
+        for (size_t index = 0; index < names.size(); index++) {
+            if (index > 0) {
+                namesJson << ",";
+            }
+            namesJson << jsonString(names[index]);
+        }
+        namesJson << "]";
+        const std::string request = "{\"action\":\"load\",\"session_id\":" + jsonString(session.sessionId()) +
+            ",\"run_id\":" + jsonString(session.runId()) +
+            ",\"names\":" + namesJson.str() +
+            ",\"loaded_tool_set\":" + session.loadedToolSetJson() + "}";
+        const std::string response = callbacks_.callToolLoadingPlugin(request);
+        std::map<std::string, JsonField> fields;
+        if (parseFieldsOrEmpty(response, fields)) {
+            for (const std::string &schema : extractObjectArrayItems(rawField(fields, "schemas", "[]"))) {
+                const std::string registered = tools_.registerSchema(schema.c_str());
+                if (registered.find("\"ok\":true") == std::string::npos) {
+                    callbacks_.emitEvent("tool_loading.load_failed", "{\"schema\":" + schema + ",\"result\":" + registered + "}");
+                }
+            }
+            loaded = namesFromMatchesJson(rawField(fields, "loaded", rawField(fields, "names", "[]")));
+            failed = namesFromMatchesJson(rawField(fields, "failed", "[]"));
+        } else {
+            callbacks_.emitEvent("tool_loading.load_failed", "{\"reason\":\"plugin returned invalid JSON\"}");
+        }
+    }
+    if (loaded.empty() && failed.empty()) {
+        for (const std::string &name : names) {
+            if (tools_.contains(name)) {
+                loaded.push_back(name);
+            } else {
+                failed.push_back(name);
+            }
+        }
+    }
+    session.loadDeferredTools(loaded);
+    std::ostringstream loadedJson;
+    loadedJson << "[";
+    for (size_t index = 0; index < loaded.size(); index++) {
+        if (index > 0) {
+            loadedJson << ",";
+        }
+        loadedJson << jsonString(loaded[index]);
+    }
+    loadedJson << "]";
+    std::ostringstream failedJson;
+    failedJson << "[";
+    for (size_t index = 0; index < failed.size(); index++) {
+        if (index > 0) {
+            failedJson << ",";
+        }
+        failedJson << jsonString(failed[index]);
+    }
+    failedJson << "]";
+    const std::string payload = "{\"loaded\":" + loadedJson.str() +
+        ",\"failed\":" + failedJson.str() +
+        ",\"loaded_tool_set\":" + session.loadedToolSetJson() + "}";
+    callbacks_.emitEvent("tool_loading.loaded", payload);
+    callbacks_.metric("tool_loading.loaded_count", static_cast<double>(loaded.size()), payload);
+    return "{\"ok\":true," + payload.substr(1);
+}
+
+std::string Runtime::loadDeferredTools(RuntimeSession &session, const char *namesJson) {
+    if (namesJson == nullptr || trim(namesJson).empty()) {
+        return "{\"ok\":false,\"error\":\"missing deferred tool names\"}";
+    }
+    std::map<std::string, JsonField> fields;
+    const std::string text = trim(namesJson);
+    std::vector<std::string> names;
+    if (parseFieldsOrEmpty(text, fields)) {
+        names = namesFromMatchesJson(rawField(fields, "names", rawField(fields, "tools", "[]")));
+    } else {
+        names = namesFromMatchesJson(text);
+    }
+    return loadDeferredToolsByName(session, names);
+}
+
+std::string Runtime::discoverAndMaybeLoadTools(RuntimeSession &session, const std::string &stepJson) {
+    std::map<std::string, JsonField> fields;
+    parseFieldsOrEmpty(stepJson, fields);
+    const std::string query = stringField(fields, "query");
+    const std::string category = stringField(fields, "category");
+    const int maxResults = intField(fields, "max_results", 0);
+    const bool includeSchemas = boolField(fields, "include_schemas", true);
+    const bool explicitSelect = lowercased(query).rfind("select:", 0) == 0;
+    const auto started = std::chrono::steady_clock::now();
+
+    std::string discovery;
+    if (callbacks_.hasToolLoadingPlugin()) {
+        const std::string request = "{\"action\":\"search\",\"session_id\":" + jsonString(session.sessionId()) +
+            ",\"run_id\":" + jsonString(session.runId()) +
+            ",\"query\":" + jsonString(query) +
+            ",\"category\":" + jsonString(category) +
+            ",\"max_results\":" + std::to_string(maxResults) +
+            ",\"include_schemas\":" + jsonBool(includeSchemas) +
+            ",\"loaded_tool_set\":" + session.loadedToolSetJson() + "}";
+        discovery = callbacks_.callToolLoadingPlugin(request);
+        std::map<std::string, JsonField> pluginFields;
+        if (!parseFieldsOrEmpty(discovery, pluginFields)) {
+            callbacks_.emitEvent("tool_loading.search_failed", "{\"reason\":\"plugin returned invalid JSON\"}");
+            discovery.clear();
+        } else {
+            for (const std::string &schema : extractObjectArrayItems(rawField(pluginFields, "schemas", "[]"))) {
+                const std::string registered = tools_.registerSchema(schema.c_str());
+                if (registered.find("\"ok\":true") == std::string::npos) {
+                    callbacks_.emitEvent("tool_loading.load_failed", "{\"schema\":" + schema + ",\"result\":" + registered + "}");
+                }
+            }
+        }
+    }
+    if (trim(discovery).empty()) {
+        discovery = tools_.discoverToolsJson(query, category, maxResults, includeSchemas);
+    }
+
+    std::map<std::string, JsonField> discoveryFields;
+    std::vector<std::string> names;
+    if (parseFieldsOrEmpty(discovery, discoveryFields)) {
+        names = namesFromMatchesJson(rawField(discoveryFields, "matches", "[]"));
+    }
+    if (includeSchemas || explicitSelect) {
+        const std::string loadResult = loadDeferredToolsByName(session, names);
+        callbacks_.trace("tool_loading.loaded", loadResult);
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+    const std::string payload = "{\"query\":" + jsonString(query) +
+        ",\"category\":" + jsonString(category) +
+        ",\"match_count\":" + std::to_string(names.size()) +
+        ",\"elapsed_ms\":" + std::to_string(elapsed) +
+        ",\"loaded_tool_set\":" + session.loadedToolSetJson() + "}";
+    callbacks_.emitEvent("tool_loading.search", payload);
+    callbacks_.metric("tool_loading.search_latency_ms", static_cast<double>(elapsed), payload);
+    return discovery;
+}
+
 std::string Runtime::runSession(RuntimeSession &session, const char *requestJson, bool allowPause, const char *replayJson) {
     if (!sessionConfig_.isConfigured) {
         return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### 无法执行\\n\\nRuntime 配置无效：" + escapeJson(sessionConfig_.configurationError) + "\"}";
@@ -616,6 +825,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     }
     session.setRequestJson(request);
     applyModelMetadataIfAvailable(session, callbacks_, request);
+    initializeDeferredToolWorkingSet(session, tools_, sessionConfig_, callbacks_);
     execution.setRequestJson(request);
     callbacks_.span("start", "runtime.run", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + "}");
     events.emitEvent("run_started", request.empty() ? "{}" : request);
@@ -841,12 +1051,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             continue;
         }
         if (type == "tool_discovery") {
-            const std::string discovery = tools_.discoverToolsJson(
-                stringField(fields, "query"),
-                stringField(fields, "category"),
-                intField(fields, "max_results", 0),
-                boolField(fields, "include_schemas", true)
-            );
+            const std::string discovery = discoverAndMaybeLoadTools(session, stepJson);
             lastObservation = session.recordObservation("runtime.tool_discovery", "succeeded", discovery, "", false, true);
             execution.setLastObservationJson(lastObservation);
             events.emitControl("tool_discovery_completed", lastObservation);

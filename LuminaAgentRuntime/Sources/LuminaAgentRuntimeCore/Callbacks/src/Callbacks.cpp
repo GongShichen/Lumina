@@ -165,6 +165,10 @@ void RuntimeCallbacks::setCompactionProvider(LuminaAgentCompactionProviderCallba
     compactionProvider_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setToolLoadingPlugin(LuminaAgentToolLoadingPluginCallback callback, void *context) {
+    toolLoadingPlugin_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setAudit(LuminaAgentAuditCallback callback, void *context) {
     audit_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -222,6 +226,7 @@ bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function !
 bool RuntimeCallbacks::hasGuardrail() const { return guardrail_.function != nullptr; }
 bool RuntimeCallbacks::hasRetryProvider() const { return retryProvider_.function != nullptr; }
 bool RuntimeCallbacks::hasCompactionProvider() const { return compactionProvider_.function != nullptr; }
+bool RuntimeCallbacks::hasToolLoadingPlugin() const { return toolLoadingPlugin_.function != nullptr; }
 bool RuntimeCallbacks::hasHook() const { return hook_.function != nullptr; }
 bool RuntimeCallbacks::hasTrace() const { return trace_.function != nullptr; }
 bool RuntimeCallbacks::hasMetrics() const { return metrics_.function != nullptr; }
@@ -586,6 +591,11 @@ RuntimeCompactionDecision RuntimeCallbacks::compactContext(const std::string &co
             ",\"source\":" + jsonString(source) + "}"
     );
     return decision;
+}
+
+std::string RuntimeCallbacks::callToolLoadingPlugin(const std::string &requestJson) const {
+    auto callback = reinterpret_cast<LuminaAgentToolLoadingPluginCallback>(toolLoadingPlugin_.function);
+    return callback == nullptr ? "" : consumeCString(callback((trim(requestJson).empty() ? "{}" : requestJson).c_str(), toolLoadingPlugin_.context));
 }
 
 std::string RuntimeCallbacks::dispatchHook(const std::string &hookEvent) const {

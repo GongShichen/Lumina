@@ -1,5 +1,6 @@
 #include "ToolRegistry.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <sstream>
 
@@ -53,11 +54,40 @@ static std::vector<std::string> extractStringArrayItems(const std::string &array
     return values;
 }
 
+static std::vector<std::string> splitCommaSeparated(const std::string &value) {
+    std::vector<std::string> parts;
+    std::string current;
+    for (char character : value) {
+        if (character == ',') {
+            const std::string item = trim(current);
+            if (!item.empty()) {
+                parts.push_back(item);
+            }
+            current.clear();
+        } else {
+            current.push_back(character);
+        }
+    }
+    const std::string item = trim(current);
+    if (!item.empty()) {
+        parts.push_back(item);
+    }
+    return parts;
+}
+
 std::string ToolRegistry::registerSchema(const char *toolSchemaJson) {
-    if (toolSchemaJson == nullptr || trim(toolSchemaJson).empty()) {
+    return registerRecord(toolSchemaJson == nullptr ? "" : toolSchemaJson, false);
+}
+
+std::string ToolRegistry::registerDeferredMetadata(const char *metadataJson) {
+    return registerRecord(metadataJson == nullptr ? "" : metadataJson, true);
+}
+
+std::string ToolRegistry::registerRecord(const std::string &schemaJson, bool metadataOnly) {
+    if (trim(schemaJson).empty()) {
         return "{\"ok\":false,\"error\":\"missing tool schema JSON.\"}";
     }
-    const std::string schema = trim(toolSchemaJson);
+    const std::string schema = trim(schemaJson);
     std::map<std::string, JsonField> fields;
     if (!parseFieldsOrEmpty(schema, fields)) {
         return "{\"ok\":false,\"error\":\"tool schema must be a JSON object.\"}";
@@ -77,14 +107,47 @@ std::string ToolRegistry::registerSchema(const char *toolSchemaJson) {
 
     names_.insert(name);
     ToolSchemaRecord record = parseRecord(schema);
+    record.metadataOnly = metadataOnly;
+    if (metadataOnly) {
+        record.deferByDefault = true;
+    }
     readOnly_[name] = isReadOnlySideEffect(record.sideEffect) || boolField(fields, "readOnly", false);
     records_[name] = record;
-    schemas_.push_back(schema);
+    if (!metadataOnly) {
+        bool replaced = false;
+        for (std::string &existing : schemas_) {
+            std::map<std::string, JsonField> existingFields;
+            if (parseFieldsOrEmpty(existing, existingFields) && stringField(existingFields, "name") == name) {
+                existing = schema;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            schemas_.push_back(schema);
+        }
+    }
     return "{\"ok\":true,\"name\":" + jsonString(name) + "}";
 }
 
 bool ToolRegistry::contains(const std::string &toolName) const {
     return names_.count(toolName) > 0;
+}
+
+bool ToolRegistry::isDeferred(const std::string &toolName) const {
+    auto it = records_.find(toolName);
+    return it != records_.end() && !it->second.alwaysLoad && it->second.deferByDefault;
+}
+
+bool ToolRegistry::isCallable(const std::string &toolName, const std::set<std::string> &loadedToolNames) const {
+    auto it = records_.find(toolName);
+    if (it == records_.end() || it->second.metadataOnly) {
+        return false;
+    }
+    if (!isDeferred(toolName)) {
+        return true;
+    }
+    return loadedToolNames.count(toolName) > 0;
 }
 
 bool ToolRegistry::isReadOnly(const std::string &toolName) const {
@@ -151,12 +214,22 @@ std::string ToolRegistry::schemasJson() const {
     return output.str();
 }
 
-std::string ToolRegistry::modelFacingSchemasJson() const {
+bool ToolRegistry::shouldExposeRecord(const ToolSchemaRecord &record, const std::set<std::string> &loadedToolNames) const {
+    if (!record.alwaysLoad && record.deferByDefault && loadedToolNames.count(record.name) == 0) {
+        return false;
+    }
+    return !record.metadataOnly;
+}
+
+std::string ToolRegistry::modelFacingSchemasJson(const std::set<std::string> &loadedToolNames) const {
     std::ostringstream output;
     output << "[";
     size_t index = 0;
     for (const auto &entry : records_) {
         const ToolSchemaRecord &record = entry.second;
+        if (!shouldExposeRecord(record, loadedToolNames)) {
+            continue;
+        }
         if (index++ > 0) {
             output << ",";
         }
@@ -213,12 +286,15 @@ std::string ToolRegistry::compactRecordJson(const ToolSchemaRecord &record, bool
     return output.str();
 }
 
-std::string ToolRegistry::capabilityListJson() const {
+std::string ToolRegistry::capabilityListJson(const std::set<std::string> &loadedToolNames) const {
     std::ostringstream output;
     output << "[";
     size_t index = 0;
     for (const auto &entry : records_) {
         const ToolSchemaRecord &record = entry.second;
+        if (!shouldExposeRecord(record, loadedToolNames)) {
+            continue;
+        }
         if (index++ > 0) {
             output << ",";
         }
@@ -253,12 +329,15 @@ std::string ToolRegistry::capabilityListJson() const {
     return output.str();
 }
 
-std::string ToolRegistry::nameOnlyListJson() const {
+std::string ToolRegistry::nameOnlyListJson(const std::set<std::string> &loadedToolNames) const {
     std::ostringstream output;
     output << "[";
     size_t index = 0;
     for (const auto &entry : records_) {
         const ToolSchemaRecord &record = entry.second;
+        if (!shouldExposeRecord(record, loadedToolNames)) {
+            continue;
+        }
         if (index++ > 0) {
             output << ",";
         }
@@ -268,6 +347,46 @@ std::string ToolRegistry::nameOnlyListJson() const {
                << "\"side_effect\":" << jsonString(record.sideEffect) << ","
                << "\"sensitivity\":" << jsonString(record.sensitivity)
                << "}";
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string ToolRegistry::deferredCatalogJson(const std::set<std::string> &loadedToolNames) const {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const auto &entry : records_) {
+        const ToolSchemaRecord &record = entry.second;
+        if (!isDeferred(record.name) || loadedToolNames.count(record.name) > 0) {
+            continue;
+        }
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << "{"
+               << "\"name\":" << jsonString(record.name) << ","
+               << "\"description\":" << jsonString(truncateToCharacters(record.description, 160)) << ","
+               << "\"category\":" << jsonString(record.category) << ","
+               << "\"search_hint\":" << jsonString(truncateToCharacters(record.searchHint, 120)) << ","
+               << "\"side_effect\":" << jsonString(record.sideEffect) << ","
+               << "\"sensitivity\":" << jsonString(record.sensitivity) << ","
+               << "\"read_only\":" << jsonBool(isReadOnly(record.name)) << ","
+               << "\"aliases\":[";
+        for (size_t aliasIndex = 0; aliasIndex < record.aliases.size(); aliasIndex++) {
+            if (aliasIndex > 0) {
+                output << ",";
+            }
+            output << jsonString(record.aliases[aliasIndex]);
+        }
+        output << "],\"parameter_names\":[";
+        for (size_t parameterIndex = 0; parameterIndex < record.parameters.size(); parameterIndex++) {
+            if (parameterIndex > 0) {
+                output << ",";
+            }
+            output << jsonString(record.parameters[parameterIndex].name);
+        }
+        output << "]}";
     }
     output << "]";
     return output.str();
@@ -296,6 +415,28 @@ std::string ToolRegistry::discoverToolsJson(const std::string &query, const std:
            << ",\"total_tools\":" << records_.size()
            << "}";
     return output.str();
+}
+
+std::vector<std::string> ToolRegistry::deferredToolNames() const {
+    std::vector<std::string> names;
+    for (const auto &entry : records_) {
+        if (isDeferred(entry.first)) {
+            names.push_back(entry.first);
+        }
+    }
+    return names;
+}
+
+int ToolRegistry::estimatedDeferredSchemaTokens() const {
+    int characters = 0;
+    for (const auto &entry : records_) {
+        if (isDeferred(entry.first)) {
+            characters += static_cast<int>(entry.second.raw.size());
+            characters += static_cast<int>(entry.second.description.size());
+            characters += static_cast<int>(entry.second.searchHint.size());
+        }
+    }
+    return std::max(0, characters / 4);
 }
 
 std::string ToolRegistry::validateCallJson(const std::string &toolName, const std::string &parametersJson) const {
@@ -400,6 +541,8 @@ ToolRegistry::ToolSchemaRecord ToolRegistry::parseRecord(const std::string &sche
     record.concurrencySafe = boolField(fields, "concurrencySafe", boolField(fields, "concurrency_safe", false));
     record.requiresUserInteraction = boolField(fields, "requiresUserInteraction", boolField(fields, "requires_user_interaction", false));
     record.strict = boolField(fields, "strict", false);
+    record.alwaysLoad = boolField(fields, "alwaysLoad", boolField(fields, "always_load", false));
+    record.deferByDefault = boolField(fields, "deferByDefault", boolField(fields, "defer_by_default", false));
     record.maxResultSize = intField(fields, "maxResultSize", intField(fields, "max_result_size", 0));
     record.aliases = extractStringArrayItems(rawField(fields, "aliases", "[]"));
     for (const std::string &parameterJson : extractObjectArrayItems(rawField(fields, "parameters", "[]"))) {
@@ -470,9 +613,33 @@ bool ToolRegistry::recordMatches(const ToolSchemaRecord &record, const std::stri
     if (normalizedQuery.empty()) {
         return true;
     }
+    if (normalizedQuery.rfind("select:", 0) == 0) {
+        const std::vector<std::string> selected = splitCommaSeparated(query.substr(7));
+        return std::find(selected.begin(), selected.end(), record.name) != selected.end();
+    }
+    if (lowercased(record.name) == normalizedQuery) {
+        return true;
+    }
+    const bool namespacePrefix = normalizedQuery.rfind("mcp__", 0) == 0 ||
+        normalizedQuery.find('.') != std::string::npos;
+    if (namespacePrefix && lowercased(record.name).rfind(normalizedQuery, 0) == 0) {
+        return true;
+    }
     std::string haystack = lowercased(record.name + " " + record.description + " " + record.searchHint + " " + record.category);
     for (const std::string &alias : record.aliases) {
         haystack += " " + lowercased(alias);
+    }
+    for (const std::string &term : splitCommaSeparated(query)) {
+        const std::string trimmed = trim(term);
+        if (trimmed.empty()) {
+            continue;
+        }
+        if (trimmed.front() == '+') {
+            const std::string required = lowercased(trimmed.substr(1));
+            if (!required.empty() && haystack.find(required) == std::string::npos) {
+                return false;
+            }
+        }
     }
     return haystack.find(normalizedQuery) != std::string::npos;
 }

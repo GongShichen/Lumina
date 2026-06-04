@@ -145,7 +145,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
             }
             if failure.contains("在过去") || failure.localizedCaseInsensitiveContains("past") {
                 return """
-                The latest write failed because the date was in the past. Use the observed device.current_time result in Previous observations to recompute a future ISO-8601 date. Never use 2024 or unrelated months when current device date is 2026-05-28. If you cannot compute it, output cannot_complete.
+                The latest write failed because the date was in the past. Use the observed device.current_time output fields currentDateISO/iso8601 and timeZone/timeZoneIdentifier in Previous observations to recompute a future ISO-8601 date. If you cannot compute it, output cannot_complete.
                 \(recentIDHint)
                 """
             }
@@ -610,6 +610,9 @@ struct LuminaAppReActPromptBuilder: Sendable {
                     "replayed": observation.replayed,
                     "summary": observation.summary.truncated(to: 240)
                 ]
+                if !observation.output.isEmpty {
+                    object["output"] = observation.output.compactModelTraceValue.truncated(to: isEvaluation ? 360 : 520)
+                }
                 if let error = observation.errorMessage, !error.isEmpty {
                     object["error"] = error.truncated(to: 120)
                 }

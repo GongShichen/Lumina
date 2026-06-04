@@ -11,6 +11,7 @@ public struct LuminaMiniCPMV46ModelBundleInfo: Equatable, Sendable {
 
     public var directory: URL
     public var architecture: String
+    public var modelName: String
     public var contextLength: Int
     public var quantization: String
     public var modelURL: URL
@@ -66,6 +67,7 @@ public struct LuminaMiniCPMV46ModelBundleInfo: Equatable, Sendable {
         return LuminaMiniCPMV46ModelBundleInfo(
             directory: directory,
             architecture: architecture,
+            modelName: config.string("model_name") ?? "MiniCPM-V 4.6",
             contextLength: contextLength,
             quantization: config.string("quantization") ?? inferQuantization(from: modelURL),
             modelURL: modelURL,

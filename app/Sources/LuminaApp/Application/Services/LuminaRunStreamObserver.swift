@@ -31,6 +31,7 @@ struct LuminaRunStreamObserver {
         case let .hookAnnotated(key, value):
             runtimeMetrics.hookEventCount += 1
             runtimeMetrics.runtimeEventCount += key.hasPrefix("runtime") ? 1 : 0
+            classifyToolLoadingEvent(key: key, value: value)
             classifyRuntimeDiagnostic(key: key, value: value)
         case .confirmationRequired:
             confirmationStartedAt = ContinuousClock.now
@@ -80,6 +81,47 @@ struct LuminaRunStreamObserver {
     private mutating func classifyRuntimeDiagnostic(key: String, value: LuminaJSONValue) {
         classifyDiagnosticText(key)
         classifyDiagnosticText(Self.string(for: value))
+    }
+
+    private mutating func classifyToolLoadingEvent(key: String, value: LuminaJSONValue) {
+        guard key.hasPrefix("runtime_event.tool_loading") else { return }
+        switch key {
+        case "runtime_event.tool_loading.catalog_emitted":
+            runtimeMetrics.toolLoadingCatalogEmittedCount += 1
+        case "runtime_event.tool_loading.search":
+            runtimeMetrics.toolLoadingSearchCount += 1
+        case "runtime_event.tool_loading.loaded":
+            break
+        case "runtime_event.tool_loading.load_failed":
+            runtimeMetrics.toolLoadingLoadFailedCount += 1
+        case "runtime_event.tool_loading.unknown_tool":
+            runtimeMetrics.toolLoadingUnknownToolCount += 1
+        default:
+            break
+        }
+
+        guard case let .string(eventJSON) = value,
+              let data = eventJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        let outerPayload = object["payload"] as? [String: Any]
+        let payload = (outerPayload?["payload"] as? [String: Any]) ?? outerPayload ?? [:]
+        if key == "runtime_event.tool_loading.search",
+           let matchCount = payload["match_count"] as? Int,
+           matchCount > 0 {
+            runtimeMetrics.toolLoadingDiscoveryHitCount += 1
+        }
+        if key == "runtime_event.tool_loading.loaded",
+           let loaded = payload["loaded"] as? [Any] {
+            runtimeMetrics.toolLoadingLoadedCount += loaded.count
+        }
+        if key == "runtime_event.tool_loading.catalog_emitted" {
+            if let saved = payload["schema_tokens_saved_estimate"] as? Int {
+                runtimeMetrics.schemaTokensSavedEstimate += saved
+            } else if let saved = payload["schema_tokens_saved_estimate"] as? Double {
+                runtimeMetrics.schemaTokensSavedEstimate += Int(saved)
+            }
+        }
     }
 
     private mutating func classifyDiagnosticText(_ text: String) {

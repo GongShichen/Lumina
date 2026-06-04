@@ -137,6 +137,10 @@ char *compactionCallback(const char *compactionRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "compactContext", compactionRequestJson));
 }
 
+char *toolLoadingPluginCallback(const char *toolLoadingRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "handleToolLoading", toolLoadingRequestJson));
+}
+
 char *hookCallback(const char *hookEventJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "dispatchHook", hookEventJson));
 }
@@ -211,6 +215,7 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_create(
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
     LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);
     LuminaAgentRuntimeSetCompactionProviderCallback(native->runtime, compactionCallback, native);
+    LuminaAgentRuntimeSetToolLoadingPluginCallback(native->runtime, toolLoadingPluginCallback, native);
     LuminaAgentRuntimeSetAuditCallback(native->runtime, auditCallback, native);
     LuminaAgentRuntimeSetEventCallback(native->runtime, eventCallback, native);
     LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
@@ -262,6 +267,22 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_registerExternalToo
     char *result = LuminaAgentRuntimeRegisterExternalToolProvider(native->runtime, provider == nullptr ? "{}" : provider);
     if (provider != nullptr) {
         env->ReleaseStringUTFChars(providerJson, provider);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_registerDeferredToolMetadata(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jstring metadataJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    const char *metadata = env->GetStringUTFChars(metadataJson, nullptr);
+    char *result = LuminaAgentRuntimeRegisterDeferredToolMetadata(native->runtime, metadata == nullptr ? "{}" : metadata);
+    if (metadata != nullptr) {
+        env->ReleaseStringUTFChars(metadataJson, metadata);
     }
     return toJString(env, result);
 }
@@ -431,6 +452,34 @@ Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_runSessionReplay(
         env->ReleaseStringUTFChars(replayJson, replay);
     }
     return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_loadDeferredTools(
+    JNIEnv *env,
+    jobject,
+    jlong handle,
+    jlong sessionHandle,
+    jstring namesJson
+) {
+    NativeRuntime *native = nativeFromHandle(handle);
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    const char *names = env->GetStringUTFChars(namesJson, nullptr);
+    char *result = LuminaAgentRuntimeLoadDeferredTools(native->runtime, session->session, names == nullptr ? "[]" : names);
+    if (names != nullptr) {
+        env->ReleaseStringUTFChars(namesJson, names);
+    }
+    return toJString(env, result);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_dev_lumina_agent_runtime_LuminaAgentRuntime_00024Native_exportLoadedToolSet(
+    JNIEnv *env,
+    jobject,
+    jlong sessionHandle
+) {
+    NativeSession *session = sessionFromHandle(sessionHandle);
+    return toJString(env, LuminaAgentRuntimeExportLoadedToolSet(session->session));
 }
 
 extern "C" JNIEXPORT jstring JNICALL

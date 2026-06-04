@@ -205,6 +205,16 @@ std::string ToolExecutor::runToolCall(
         callbacks_.emitEvent("observation_created", observation);
         return result;
     }
+    if (!tools_.isCallable(activeToolName, session.loadedToolNames())) {
+        const std::string error = tools_.isDeferred(activeToolName)
+            ? "tool is deferred; emit tool_discovery to load its full schema before tool_use"
+            : "tool is not callable";
+        const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":" + jsonString(error) + "}";
+        const std::string observation = session.recordObservation(activeToolName, "failed", "", error, false, false);
+        callbacks_.emitEvent("tool_loading.unknown_tool", "{\"tool_name\":" + jsonString(activeToolName) + ",\"reason\":" + jsonString(error) + "}");
+        callbacks_.emitEvent("observation_created", observation);
+        return result;
+    }
 
     std::string canonicalParameters = canonicalizeJsonObject(activeParameters);
     std::string idempotencyPolicy = tools_.idempotencyPolicy(activeToolName);
@@ -571,13 +581,15 @@ std::string ToolExecutor::runToolCall(
     const std::string status = parsed ? stringField(resultFields, "status", "succeeded") : "succeeded";
     const std::string content = tools_.truncateResultContent(activeToolName, parsed ? stringField(resultFields, "content", result) : result);
     const std::string error = parsed ? stringField(resultFields, "errorMessage", "") : "";
+    const std::string outputJson = parsed ? rawField(resultFields, "output", "{}") : "{}";
     const std::string observation = session.recordObservation(
         activeToolName,
         status,
         content,
         error,
         confirmationRequired,
-        confirmed
+        confirmed,
+        outputJson
     );
     std::map<std::string, JsonField> observationFields;
     parseFieldsOrEmpty(observation, observationFields);
@@ -621,7 +633,7 @@ std::string ToolExecutor::runMultiToolCall(RuntimeSession &session, const std::s
         }
         const std::string toolName = stringField(fields, "tool_name");
         const std::string parameters = rawField(fields, "parameters", "{}");
-        if (toolName.empty() || !tools_.contains(toolName)) {
+        if (toolName.empty() || !tools_.contains(toolName) || !tools_.isCallable(toolName, session.loadedToolNames())) {
             const std::string result = "{\"status\":\"failed\",\"content\":\"\",\"errorMessage\":\"multi_tool_use contains an unregistered tool\"}";
             const std::string observation = session.recordObservation("multi_tool_use", "failed", "", "multi_tool_use contains an unregistered tool", false, false);
             callbacks_.recordHistory("observation_created", observation);

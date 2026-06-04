@@ -22,6 +22,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
         guardrails: LuminaRuntimeGuardrails = .empty,
         retryProvider: (any LuminaRuntimeRetryProvider)? = nil,
+        toolLoadingPlugin: (any LuminaToolLoadingPlugin)? = nil,
         sessionHistoryStore: (any LuminaSessionHistoryStore)? = nil
     ) {
         self.box = LuminaAgentRuntimeAdapterBox(
@@ -37,6 +38,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             observabilitySinks: observabilitySinks,
             guardrails: guardrails,
             retryProvider: retryProvider,
+            toolLoadingPlugin: toolLoadingPlugin,
             sessionHistoryStore: sessionHistoryStore
         )
         self.runtimeHandle = LuminaAgentRuntimeHandle(configurationJSON: configuration.runtimeJSON)
@@ -57,6 +59,21 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         let requestJSON = (try? String(data: JSONEncoder().encode(request), encoding: .utf8)) ?? "{}"
         guard let handle = runtimeHandle.createSession(requestJSON: requestJSON) else { return nil }
         return LuminaAgentRuntimeSession(handle: handle)
+    }
+
+    @discardableResult
+    public func registerDeferredToolMetadata(metadataJSON: String) -> String {
+        runtimeHandle?.registerDeferredToolMetadata(metadataJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+    }
+
+    @discardableResult
+    public func registerDeferredToolMetadata(_ metadata: LuminaDeferredToolMetadata) -> String {
+        guard let data = try? JSONEncoder().encode(metadata),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return #"{"ok":false,"error":"failed to encode deferred tool metadata"}"#
+        }
+        return registerDeferredToolMetadata(metadataJSON: json)
     }
 
     public func createSession(checkpointJSON: String) -> LuminaAgentRuntimeSession? {
@@ -304,6 +321,20 @@ let luminaAgentSwiftAdapterCompactionProviderCallback: LuminaAgentCompactionProv
     let input = String(cString: compactionJSON)
     let response = blockOn(cancellationValue: { #"{"status":"skipped","reason":"cancelled"}"# }) {
         await box.compactContext(compactionJSON: input)
+    }
+    return retainedCString(response)
+}
+
+let luminaAgentSwiftAdapterToolLoadingPluginCallback: LuminaAgentToolLoadingPluginCallback = { requestJSON, context in
+    guard let box = box(from: context), let requestJSON else {
+        return retainedCString("{}")
+    }
+    guard let plugin = box.toolLoadingPlugin else {
+        return retainedCString("{}")
+    }
+    let input = String(cString: requestJSON)
+    let response = blockOn(cancellationValue: { "{}" }) {
+        await plugin.handleToolLoading(requestJSON: input)
     }
     return retainedCString(response)
 }

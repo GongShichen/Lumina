@@ -122,6 +122,10 @@ char *compactionCallback(const char *compactionRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "compactContext", compactionRequestJson));
 }
 
+char *toolLoadingPluginCallback(const char *toolLoadingRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "handleToolLoading", toolLoadingRequestJson));
+}
+
 char *hookCallback(const char *hookEventJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "dispatchHook", hookEventJson));
 }
@@ -171,6 +175,7 @@ napi_value create(napi_env env, napi_callback_info info) {
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
     LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);
     LuminaAgentRuntimeSetCompactionProviderCallback(native->runtime, compactionCallback, native);
+    LuminaAgentRuntimeSetToolLoadingPluginCallback(native->runtime, toolLoadingPluginCallback, native);
     LuminaAgentRuntimeSetAuditCallback(native->runtime, auditCallback, native);
     LuminaAgentRuntimeSetEventCallback(native->runtime, eventCallback, native);
     LuminaAgentRuntimeSetTraceCallback(native->runtime, traceCallback, native);
@@ -215,6 +220,15 @@ napi_value registerExternalToolProvider(napi_env env, napi_callback_info info) {
     NativeRuntime *native = nativeFromExternal(env, args[0]);
     std::string provider = stringFromValue(env, args[1]);
     return stringValueAndRelease(env, LuminaAgentRuntimeRegisterExternalToolProvider(native->runtime, provider.c_str()));
+}
+
+napi_value registerDeferredToolMetadata(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    std::string metadata = stringFromValue(env, args[1]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeRegisterDeferredToolMetadata(native->runtime, metadata.c_str()));
 }
 
 napi_value registerHookRoute(napi_env env, napi_callback_info info) {
@@ -312,6 +326,24 @@ napi_value runSessionReplay(napi_env env, napi_callback_info info) {
     NativeSession *session = sessionFromExternal(env, args[1]);
     std::string replay = stringFromValue(env, args[2]);
     return stringValueAndRelease(env, LuminaAgentRuntimeRunSessionReplay(native->runtime, session->session, replay.c_str()));
+}
+
+napi_value loadDeferredTools(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeRuntime *native = nativeFromExternal(env, args[0]);
+    NativeSession *session = sessionFromExternal(env, args[1]);
+    std::string names = stringFromValue(env, args[2]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeLoadDeferredTools(native->runtime, session->session, names.c_str()));
+}
+
+napi_value exportLoadedToolSet(napi_env env, napi_callback_info info) {
+    size_t argc = 1;
+    napi_value args[1] = {};
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    NativeSession *session = sessionFromExternal(env, args[0]);
+    return stringValueAndRelease(env, LuminaAgentRuntimeExportLoadedToolSet(session->session));
 }
 
 napi_value resumeSession(napi_env env, napi_callback_info info) {
@@ -424,6 +456,7 @@ napi_value init(napi_env env, napi_value exports) {
         {"destroy", nullptr, destroy, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerToolSchema", nullptr, registerToolSchema, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerExternalToolProvider", nullptr, registerExternalToolProvider, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"registerDeferredToolMetadata", nullptr, registerDeferredToolMetadata, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"registerHookRoute", nullptr, registerHookRoute, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"run", nullptr, run, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runReplay", nullptr, runReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -433,6 +466,8 @@ napi_value init(napi_env env, napi_value exports) {
         {"createSessionFromReplayArtifact", nullptr, createSessionFromReplayArtifact, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runSession", nullptr, runSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"runSessionReplay", nullptr, runSessionReplay, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"loadDeferredTools", nullptr, loadDeferredTools, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"exportLoadedToolSet", nullptr, exportLoadedToolSet, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"resumeSession", nullptr, resumeSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"snapshotSession", nullptr, snapshotSession, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"exportSessionCheckpoint", nullptr, exportSessionCheckpoint, nullptr, nullptr, nullptr, napi_default, nullptr},

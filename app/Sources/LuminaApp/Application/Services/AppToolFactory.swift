@@ -34,7 +34,8 @@ enum AppToolFactory {
         ledgerStore: LuminaLedgerStore,
         subscriptionStore: LuminaSubscriptionStore,
         messageDrafts: LuminaMessageDraftCenter,
-        calendarStore: LuminaVolatileCalendarStore
+        calendarStore: LuminaVolatileCalendarStore,
+        enabledToolNames: Set<String>? = nil
     ) -> [AnyLuminaAgentTool] {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
             FileManager.default.temporaryDirectory
@@ -74,10 +75,14 @@ enum AppToolFactory {
             Self.evaluationImageDescribeMetadataTool()
         ]
         let blockedExternalTools: Set<String> = ["email.compose", "message.compose", "phone.call"]
-        return replacingTools(
+        let tools = replacingTools(
             localTools + platformFilteredTools(extendedTools).filter { !blockedExternalTools.contains($0.schema.name) },
             with: syntheticTools
         )
+        guard let enabledToolNames else {
+            return tools
+        }
+        return tools.filter { enabledToolNames.contains($0.schema.name) }
     }
 
     static func makeTools(

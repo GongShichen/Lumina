@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -292,18 +293,12 @@ std::string trim_left_copy(const std::string & text) {
 
 std::string xml_step_search_region(const std::string & text) {
     const std::string trimmed = trim_left_copy(text);
-    if (!starts_with_prefix(trimmed, "<think")) {
-        return trimmed;
-    }
-    const size_t open_end = trimmed.find(">");
-    if (open_end == std::string::npos) {
+    if (starts_with_prefix(trimmed, "<think") ||
+        trimmed.find("<tool_call") != std::string::npos ||
+        trimmed.find("<observation") != std::string::npos) {
         return "";
     }
-    const size_t close = trimmed.find("</think>", open_end + 1);
-    if (close == std::string::npos) {
-        return "";
-    }
-    return trim_left_copy(trimmed.substr(close + std::string("</think>").size()));
+    return trimmed;
 }
 
 bool contains_complete_xml_step(const std::string & text) {
@@ -371,6 +366,70 @@ bool append_xml_eog_closing_repair(std::string & text) {
         }
     }
     return false;
+}
+
+std::string lowercase_ascii(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return text;
+}
+
+bool ends_with_forbidden_xml_prefix(const std::string & lowered) {
+    static const std::vector<std::string> forbidden = {
+        "<think", "</think", "<tool_call", "</tool_call", "<observation", "</observation"
+    };
+    for (const std::string & tag : forbidden) {
+        for (size_t length = 4; length < tag.size(); ++length) {
+            if (lowered.size() >= length &&
+                lowered.compare(lowered.size() - length, length, tag, 0, length) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool violates_forbidden_xml_contract(const std::string & candidate) {
+    const std::string lowered = lowercase_ascii(candidate);
+    static const std::vector<std::string> forbidden = {
+        "<think", "</think>", "<tool_call", "</tool_call>", "<observation", "</observation>"
+    };
+    for (const std::string & tag : forbidden) {
+        if (lowered.find(tag) != std::string::npos) {
+            return true;
+        }
+    }
+    return ends_with_forbidden_xml_prefix(lowered);
+}
+
+llama_token sample_xml_contract_token(
+    llama_sampler * sampler,
+    llama_context * ctx,
+    const llama_vocab * vocab,
+    const std::string & output
+) {
+    float * logits = llama_get_logits_ith(ctx, -1);
+    if (logits == nullptr) {
+        return llama_sampler_sample(sampler, ctx, -1);
+    }
+    const int n_vocab = llama_vocab_n_tokens(vocab);
+    for (int attempt = 0; attempt < 128; ++attempt) {
+        llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            return token;
+        }
+        const std::string piece = token_piece(vocab, token);
+        if (!violates_forbidden_xml_contract(output + piece)) {
+            return token;
+        }
+        if (token >= 0 && token < n_vocab) {
+            logits[token] = -std::numeric_limits<float>::infinity();
+        } else {
+            break;
+        }
+    }
+    return llama_sampler_sample(sampler, ctx, -1);
 }
 
 } // namespace
@@ -487,7 +546,9 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
 
     int tokens_after_first_json_char = 0;
     for (int i = 0; i < effective_max_output_tokens; ++i) {
-        llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        llama_token token = xml_step
+            ? sample_xml_contract_token(sampler, ctx, vocab, output)
+            : llama_sampler_sample(sampler, ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) {
             if (xml_step && append_xml_eog_closing_repair(output) && contains_complete_xml_step(output)) {
                 break;

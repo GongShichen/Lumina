@@ -34,6 +34,7 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         LuminaAgentRuntimeSetGuardrailCallback(handle, luminaAgentSwiftAdapterGuardrailCallback, context)
         LuminaAgentRuntimeSetRetryProviderCallback(handle, luminaAgentSwiftAdapterRetryProviderCallback, context)
         LuminaAgentRuntimeSetCompactionProviderCallback(handle, luminaAgentSwiftAdapterCompactionProviderCallback, context)
+        LuminaAgentRuntimeSetToolLoadingPluginCallback(handle, luminaAgentSwiftAdapterToolLoadingPluginCallback, context)
         LuminaAgentRuntimeSetAuditCallback(handle, luminaAgentSwiftAdapterAuditCallback, context)
         LuminaAgentRuntimeSetTraceCallback(handle, luminaAgentSwiftAdapterTraceCallback, context)
         LuminaAgentRuntimeSetMetricsCallback(handle, luminaAgentSwiftAdapterMetricsCallback, context)
@@ -68,6 +69,15 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         }
         return providerJSON.withCString { providerPointer in
             consumeRuntimeString(LuminaAgentRuntimeRegisterExternalToolProvider(handle, providerPointer))
+        }
+    }
+
+    func registerDeferredToolMetadata(_ metadataJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return metadataJSON.withCString { metadataPointer in
+            consumeRuntimeString(LuminaAgentRuntimeRegisterDeferredToolMetadata(handle, metadataPointer))
         }
     }
 
@@ -142,6 +152,19 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         return replayJSON.withCString { replayPointer in
             consumeRuntimeString(LuminaAgentRuntimeRunSessionReplay(handle, session, replayPointer))
         }
+    }
+
+    func loadDeferredTools(session: OpaquePointer, namesJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return namesJSON.withCString { namesPointer in
+            consumeRuntimeString(LuminaAgentRuntimeLoadDeferredTools(handle, session, namesPointer))
+        }
+    }
+
+    func exportLoadedToolSet(session: OpaquePointer) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeExportLoadedToolSet(session))
     }
 
     func resume(session: OpaquePointer, resumeJSON: String) -> String {
@@ -260,6 +283,14 @@ public final class LuminaAgentRuntimeSession: @unchecked Sendable {
         handle.run(replayJSON: replayJSON)
     }
 
+    public func loadDeferredTools(namesJSON: String) -> String {
+        handle.loadDeferredTools(namesJSON: namesJSON)
+    }
+
+    public func exportLoadedToolSet() -> String {
+        handle.exportLoadedToolSet()
+    }
+
     public func resume(observationJSON: String) async -> String {
         handle.resume(observationJSON: observationJSON)
     }
@@ -329,6 +360,16 @@ final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
     func run(replayJSON: String) -> String {
         guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
         return runtime.run(session: session, replayJSON: replayJSON)
+    }
+
+    func loadDeferredTools(namesJSON: String) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.loadDeferredTools(session: session, namesJSON: namesJSON)
+    }
+
+    func exportLoadedToolSet() -> String {
+        guard let session = currentSession() else { return "[]" }
+        return runtime.exportLoadedToolSet(session: session)
     }
 
     func resume(observationJSON: String) -> String {

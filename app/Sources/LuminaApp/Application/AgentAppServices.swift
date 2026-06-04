@@ -140,6 +140,36 @@ final class AgentAppServices: ObservableObject {
         ))
     }
 
+    func runEvaluationStream(task: LuminaBenchmarkTask) -> AsyncStream<LuminaAgentRunEvent> {
+        let tools = AppToolFactory.makeEvaluationTools(
+            memoryStore: memoryStore,
+            ledgerStore: ledgerStore,
+            subscriptionStore: subscriptionStore,
+            messageDrafts: messageDrafts,
+            calendarStore: evaluationCalendarStore,
+            enabledToolNames: Self.evaluationToolNames(for: task.text, category: task.category)
+        )
+        var configuration = environment.runtimeConfiguration
+        configuration.stopOnToolFailure = true
+        configuration.maximumConsecutiveReplayObservations = 3
+        let runtime = makeRuntime(
+            tools: tools,
+            contextProvider: LuminaEmptyRuntimeContextProvider(),
+            confirmationCoordinator: LuminaAlwaysConfirmCoordinator(),
+            configuration: configuration
+        )
+        return runtime.runStream(request: LuminaAgentRequest(
+            systemInstructions: LuminaAppSystemInstructions.evaluation,
+            content: [.text(task.text)],
+            metadata: [
+                LuminaAppContextProvider.disableMemoryContextMetadataKey: .bool(true),
+                "lumina.evaluation.memory_access_disabled": .bool(true),
+                "lumina.evaluation.ask_user_disabled": .bool(true),
+                "lumina.evaluation.tool_scope": .string(task.category)
+            ]
+        ))
+    }
+
     func makeBenchmarkRunner() -> LuminaInAppBenchmarkRunner {
         let reports = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("BenchmarkReports", isDirectory: true)
@@ -164,5 +194,130 @@ final class AgentAppServices: ObservableObject {
         for chunk in chunks where chunk.source.kind == .appNote && chunk.source.identifier == "welcome" {
             _ = await memoryStore.removeChunk(id: chunk.id)
         }
+    }
+
+    private static func evaluationToolNames(for text: String, category: String) -> Set<String> {
+        var names = Set<String>()
+        let goal = text.lowercased()
+        func has(_ terms: String...) -> Bool {
+            terms.contains { goal.contains($0.lowercased()) || text.contains($0) }
+        }
+        func add(_ values: String...) {
+            values.forEach { names.insert($0) }
+        }
+
+        switch category {
+        case "calendar":
+            if has("创建", "新增", "明天", "上午", "下午", "晚上", "今天") {
+                add("device.current_time")
+            }
+            if has("创建", "新增") {
+                add("calendar.create")
+            } else if has("改", "修改") {
+                add("calendar.search", "calendar.update")
+            } else if has("删除", "取消") {
+                add("calendar.search", "calendar.delete")
+            } else if has("有空", "忙", "空闲") {
+                add("device.current_time", "calendar.availability")
+            } else {
+                add("calendar.search")
+            }
+        case "reminder":
+            if has("提醒我", "明天", "明早", "早上", "分钟后", "小时后") {
+                add("device.current_time")
+            }
+            if has("改", "修改") {
+                add("reminder.search", "reminder.update")
+            } else if has("完成", "标记完成") {
+                add("reminder.search", "reminder.complete")
+            } else if has("删除", "取消") {
+                add("reminder.search", "reminder.delete")
+            } else if has("查", "哪些") {
+                add("reminder.search")
+            } else {
+                add("reminder.create")
+            }
+        case "contacts":
+            if has("创建", "新建") {
+                add("contacts.create")
+            } else if has("加一个", "修改", "邮箱", "电话") {
+                add("contacts.search", "contacts.update")
+            } else if has("打开") {
+                add("contacts.open")
+            } else {
+                add("contacts.search")
+            }
+        case "maps":
+            has("导航", "路线") ? add("maps.route") : add("maps.search")
+        case "location":
+            add("location.current")
+        case "notification":
+            add("device.current_time", "notification.schedule")
+        case "content":
+            has("写入", "复制到剪贴板") ? add("clipboard.write") : add("clipboard.read")
+            if has("整理", "摘要", "总结", "改写") { add("text.transform") }
+        case "file":
+            if has("保存成", "保存") {
+                add("file.save_note")
+            } else if has("列出") {
+                add("file.list_notes")
+            } else if has("读取") {
+                add("file.read_note")
+            } else if has("追加", "修改", "更新") {
+                add("file.list_notes", "file.update_note")
+            } else if has("删除") {
+                add("file.list_notes", "file.delete_note")
+            }
+            if has("整理", "摘要", "总结", "改写") { add("text.transform") }
+        case "share":
+            add("share.prepare")
+        case "ledger":
+            if has("记录") {
+                add("ledger.record")
+            } else if has("汇总", "花了多少钱") {
+                add("ledger.summary")
+            } else if has("改", "修改") {
+                add("ledger.search", "ledger.update")
+            } else if has("删除") {
+                add("ledger.search", "ledger.delete")
+            } else {
+                add("ledger.search")
+            }
+        case "subscription":
+            if has("订阅 ") || has("feed", "rss") && !has("删除", "列出") {
+                add("subscription.add")
+            } else if has("删除", "取消") {
+                add("subscription.list", "subscription.remove")
+            } else {
+                add("subscription.list")
+            }
+            if has("整理", "摘要", "总结") { add("text.transform") }
+        case "web":
+            add("webpage.fetch_text")
+            if has("整理", "摘要", "总结") { add("text.transform") }
+        case "document":
+            add("document.read_text")
+            if has("整理", "摘要", "总结", "提取") { add("text.transform") }
+        case "image":
+            add("image.extract_text")
+        case "media":
+            add("image.describe_metadata")
+        case "local":
+            has("计算", "算") ? add("calculator.evaluate") : add("text.transform")
+        case "system":
+            if has("几点", "时间", "现在") { add("device.current_time") }
+            if has("电量", "低电量", "热状态") { add("device.power_status") }
+            if has("网络", "低数据") { add("network.status") }
+            if has("存储", "空间") { add("storage.status") }
+            if has("设置") { add("app.open_settings") }
+            if has("整理", "判断", "摘要") { add("text.transform") }
+        default:
+            break
+        }
+
+        if names.isEmpty {
+            add("device.current_time")
+        }
+        return names
     }
 }

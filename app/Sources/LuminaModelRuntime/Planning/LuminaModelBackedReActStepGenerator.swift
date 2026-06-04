@@ -200,7 +200,7 @@ public struct LuminaModelBackedReActStepGenerator: LuminaReActStepGenerator {
         guard isEvaluation(context) else {
             return step
         }
-        let adjustedStep = evaluationArgumentAdjusted(step, context: context)
+        let adjustedStep = step
         guard let latestObservation = context.trace.steps.last?.observation else {
             return adjustedStep
         }
@@ -224,94 +224,6 @@ public struct LuminaModelBackedReActStepGenerator: LuminaReActStepGenerator {
         default:
             return adjustedStep
         }
-    }
-
-    private static func evaluationArgumentAdjusted(
-        _ step: LuminaReActStep,
-        context: LuminaReActStepContext
-    ) -> LuminaReActStep {
-        guard step.kind == .action, let action = step.action else { return step }
-        var arguments = action.arguments
-        switch action.toolName {
-        case "file.save_note":
-            let note = noteFields(from: context.request.text, arguments: arguments)
-            arguments["title"] = .string(note.title)
-            arguments["filename"] = .string(note.filename)
-            arguments["body"] = .string(note.body)
-            arguments.removeValue(forKey: "path")
-        case "maps.route":
-            if arguments["destination"]?.stringValue == nil,
-               let query = arguments["query"]?.stringValue,
-               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                arguments["destination"] = .string(query)
-                arguments.removeValue(forKey: "query")
-            }
-        case "file.read_note", "file.update_note", "file.delete_note":
-            if let filename = arguments["filename"]?.stringValue,
-               !filename.localizedCaseInsensitiveContains(".md") {
-                arguments["filename"] = .string("\(filename).md")
-            }
-        default:
-            break
-        }
-        guard arguments != action.arguments else { return step }
-        return .action(
-            thought: step.thought ?? "Repair evaluation tool parameters.",
-            call: LuminaToolCall(
-                toolName: action.toolName,
-                arguments: arguments,
-                requiresConfirmation: action.requiresConfirmation
-            ),
-            elapsedMilliseconds: step.elapsedMilliseconds
-        )
-    }
-
-    private static func noteFields(
-        from goal: String,
-        arguments: [String: LuminaJSONValue]
-    ) -> (title: String, filename: String, body: String) {
-        let title = arguments["title"]?.stringValue?.nonEmptyTrimmed ??
-            inferredNoteTitle(from: goal)
-        let filename = normalizedMarkdownFilename(
-            arguments["filename"]?.stringValue?.nonEmptyTrimmed ??
-                inferredNoteFilename(from: goal, title: title)
-        )
-        let body = arguments["body"]?.stringValue?.nonEmptyTrimmed ??
-            inferredNoteBody(from: goal, title: title)
-        return (title, filename, body)
-    }
-
-    private static func inferredNoteTitle(from goal: String) -> String {
-        if goal.contains("覆盖真实工具") { return "LuminaTest benchmark 覆盖真实工具" }
-        if goal.contains("运行说明") { return "LuminaTest benchmark 运行说明" }
-        if goal.contains("会议纪要") { return "LuminaTest 会议纪要" }
-        if goal.contains("本地运行记录") { return "LuminaTest 本地运行记录" }
-        return "LuminaTest Markdown 笔记"
-    }
-
-    private static func inferredNoteFilename(from goal: String, title: String) -> String {
-        if let explicit = goal.firstMatch(of: #/[A-Za-z0-9][A-Za-z0-9._-]*\.md/#)?.output {
-            return String(explicit)
-        }
-        if goal.contains("覆盖真实工具") { return "lumina-test-tools.md" }
-        if goal.contains("运行说明") { return "lumina-test-benchmark.md" }
-        if goal.contains("会议纪要") { return "LuminaTest.md" }
-        return title
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .replacingOccurrences(of: "/", with: "-") + ".md"
-    }
-
-    private static func normalizedMarkdownFilename(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.localizedCaseInsensitiveContains(".md") ? trimmed : "\(trimmed).md"
-    }
-
-    private static func inferredNoteBody(from goal: String, title: String) -> String {
-        if let content = goal.extractedBetween(prefix: "把", suffix: "保存成")?.nonEmptyTrimmed {
-            return "# \(title)\n\n\(content)"
-        }
-        return "# \(title)\n\n\(goal)"
     }
 
     private static func shouldFinishInsteadOfExecuting(
@@ -467,21 +379,5 @@ private enum DebugLogOnce {
         #if DEBUG
         print(message)
         #endif
-    }
-}
-
-private extension String {
-    var nonEmptyTrimmed: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    func extractedBetween(prefix: String, suffix: String) -> String? {
-        guard let start = range(of: prefix),
-              let end = range(of: suffix, range: start.upperBound..<endIndex),
-              start.upperBound < end.lowerBound else {
-            return nil
-        }
-        return String(self[start.upperBound..<end.lowerBound])
     }
 }

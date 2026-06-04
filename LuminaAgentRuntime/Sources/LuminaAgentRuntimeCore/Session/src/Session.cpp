@@ -72,6 +72,7 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"actionCount\":" << actionCount_ << ","
            << "\"reasoningCount\":" << reasoningCount_ << ","
            << "\"observationCount\":" << observationCount_ << ","
+           << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
            << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate() << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
@@ -126,6 +127,7 @@ std::string RuntimeSession::checkpointJson() const {
                 << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate()
            << "},"
            << "\"last_observation\":" << (trim(lastObservationJson_).empty() ? "null" : lastObservationJson_) << ","
+           << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
            << "\"runtime_state\":" << stateSnapshotJson() << ","
            << "\"tool_replay_ledger\":" << ledgerJson(toolCallLedger_) << ","
            << "\"trace_summary\":" << trace_.summaryJson(12) << ","
@@ -184,6 +186,36 @@ bool RuntimeSession::restoreFromCheckpointJson(const std::string &checkpointJson
         pendingPayloadJson_ = rawField(pendingFields, "payload", pendingPayloadJson_.empty() ? "{}" : pendingPayloadJson_);
     }
     restoreStateObject(rawField(fields, "runtime_state", "{}"), state_);
+    loadedToolNames_.clear();
+    const std::string loadedToolsJson = trim(rawField(fields, "loaded_tool_set", "[]"));
+    size_t loadedIndex = 0;
+    while (loadedIndex < loadedToolsJson.size()) {
+        while (loadedIndex < loadedToolsJson.size() && loadedToolsJson[loadedIndex] != '"') {
+            loadedIndex += 1;
+        }
+        if (loadedIndex >= loadedToolsJson.size()) {
+            break;
+        }
+        loadedIndex += 1;
+        std::string value;
+        bool escaped = false;
+        while (loadedIndex < loadedToolsJson.size()) {
+            const char c = loadedToolsJson[loadedIndex++];
+            if (escaped) {
+                value += c;
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                if (!value.empty()) {
+                    loadedToolNames_.insert(value);
+                }
+                break;
+            } else {
+                value += c;
+            }
+        }
+    }
     for (const std::string &item : extractObjectArrayItems(rawField(fields, "tool_replay_ledger", "[]"))) {
         std::map<std::string, JsonField> itemFields;
         if (!parseFieldsOrEmpty(item, itemFields)) {
@@ -288,7 +320,8 @@ std::string RuntimeSession::recordObservation(
     const std::string &content,
     const std::string &errorMessage,
     bool confirmationRequired,
-    bool confirmed
+    bool confirmed,
+    const std::string &outputJson
 ) {
     const std::string resultStatus = lowercased(status.empty() ? "failed" : status);
     if (resultStatus == "succeeded") {
@@ -322,6 +355,7 @@ std::string RuntimeSession::recordObservation(
            << "\"toolName\":" << jsonString(toolName) << ","
            << "\"status\":" << jsonString(resultStatus) << ","
            << "\"summary\":" << jsonString(summary) << ","
+           << "\"output\":" << (trim(outputJson).empty() ? "{}" : outputJson) << ","
            << "\"errorMessage\":" << jsonString(errorMessage) << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
            << "\"resultMarkdown\":" << jsonString(resultMarkdown_)
@@ -398,6 +432,42 @@ void RuntimeSession::setLastObservationJson(const std::string &observationJson) 
 
 const std::string &RuntimeSession::lastObservationJson() const {
     return lastObservationJson_;
+}
+
+void RuntimeSession::loadDeferredTool(const std::string &toolName) {
+    if (trim(toolName).empty()) {
+        return;
+    }
+    loadedToolNames_.insert(toolName);
+    appendTrace("deferred_tool_loaded", "{\"tool_name\":" + jsonString(toolName) + "}");
+}
+
+void RuntimeSession::loadDeferredTools(const std::vector<std::string> &toolNames) {
+    for (const std::string &toolName : toolNames) {
+        loadDeferredTool(toolName);
+    }
+}
+
+bool RuntimeSession::isDeferredToolLoaded(const std::string &toolName) const {
+    return loadedToolNames_.count(toolName) > 0;
+}
+
+const std::set<std::string> &RuntimeSession::loadedToolNames() const {
+    return loadedToolNames_;
+}
+
+std::string RuntimeSession::loadedToolSetJson() const {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const std::string &toolName : loadedToolNames_) {
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << jsonString(toolName);
+    }
+    output << "]";
+    return output.str();
 }
 
 static bool isAllowedStateScope(const std::string &scope) {
