@@ -43,7 +43,10 @@ std::string TaskEnvelopeBuilder::build(
            << "\"discovery_hint\":\"Use available capabilities first. Emit tool_discovery to search deferred_catalog or load a full schema before tool_use. Deferred schemas become callable on the next turn.\""
            << "},"
            << "\"context\":{"
-           << "\"loaded_sections\":" << contextSectionsJson(contextJson)
+           << "\"available_sources\":" << (trim(session_.contextCatalogSummaryJson()).empty() ? "null" : session_.contextCatalogSummaryJson()) << ","
+           << "\"loaded_sections\":" << contextSectionsJson(contextJson) << ","
+           << "\"loaded_context_set\":" << session_.loadedContextSetJson() << ","
+           << "\"loading_hint\":\"Context is host-owned. Use reasoning with needs_more_context=true when more memory, file, knowledge-base, or history context is needed; the runtime will search/load scoped sections for the next turn.\""
            << "},"
            << "\"progress\":" << progressJson(lastObservationJson) << ","
            << "\"execution_budget\":" << executionBudgetJson() << ","

@@ -84,3 +84,56 @@ struct LuminaAppContextProvider: LuminaRuntimeContextProvider {
         }
     }
 }
+
+struct LuminaAppContextLoadingPlugin: LuminaContextLoadingPlugin {
+    let contextProvider: any LuminaRuntimeContextProvider
+    let tools: [AnyLuminaAgentTool]
+    let configuration: LuminaAgentRuntimeConfiguration
+
+    func handleContextLoading(requestJSON: String) async -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any] else {
+            return #"{"status":"failed","failure_reason":"invalid context loading request"}"#
+        }
+        let action = (object["action"] as? String ?? "").lowercased()
+        switch action {
+        case "catalog":
+            return """
+            {"status":"ok","items":[{"id":"memory","source":"memory","title":"Personal Memory","summary":"Host-owned personal memory snippets available through scoped search/load.","token_estimate":32}]}
+            """
+        case "search", "load", "range":
+            return await loadSections(from: object)
+        default:
+            return #"{"status":"skipped"}"#
+        }
+    }
+
+    private func loadSections(from object: [String: Any]) async -> String {
+        do {
+            let request = try decodeRequest(from: object["request"]) ?? LuminaAgentRequest(text: object["query"] as? String ?? "")
+            let contextRequest = LuminaRuntimeContextRequest(
+                request: request,
+                availableTools: tools.map(\.schema),
+                trace: LuminaReActTrace(),
+                iteration: 0,
+                remainingToolCalls: configuration.maximumToolCalls,
+                maximumCharacters: configuration.maximumObservationCharacters
+            )
+            let context = try await contextProvider.loadContext(contextRequest)
+            guard !context.sections.isEmpty else {
+                return #"{"status":"ok","items":[],"sections":[]}"#
+            }
+            let data = try JSONEncoder().encode(context.sections)
+            let sections = String(data: data, encoding: .utf8) ?? "[]"
+            return #"{"status":"ok","sections":\#(sections)}"#
+        } catch {
+            return #"{"status":"failed","failure_reason":"\#(error.localizedDescription.replacingOccurrences(of: "\"", with: "\\\""))"}"#
+        }
+    }
+
+    private func decodeRequest(from value: Any?) throws -> LuminaAgentRequest? {
+        guard let value else { return nil }
+        guard JSONSerialization.isValidJSONObject(value) else { return nil }
+        let data = try JSONSerialization.data(withJSONObject: value)
+        return try JSONDecoder().decode(LuminaAgentRequest.self, from: data)
+    }
+}

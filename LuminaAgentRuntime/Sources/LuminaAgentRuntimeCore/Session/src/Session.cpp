@@ -73,6 +73,8 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"reasoningCount\":" << reasoningCount_ << ","
            << "\"observationCount\":" << observationCount_ << ","
            << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
+           << "\"loaded_context_set\":" << loadedContextSetJson() << ","
+           << "\"context_catalog_summary\":" << (trim(contextCatalogSummaryJson_).empty() ? "null" : contextCatalogSummaryJson_) << ","
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
            << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate() << ","
            << "\"terminationReason\":" << jsonString(terminationReason_) << ","
@@ -128,6 +130,8 @@ std::string RuntimeSession::checkpointJson() const {
            << "},"
            << "\"last_observation\":" << (trim(lastObservationJson_).empty() ? "null" : lastObservationJson_) << ","
            << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
+           << "\"loaded_context_set\":" << loadedContextSetJson() << ","
+           << "\"context_catalog_summary\":" << (trim(contextCatalogSummaryJson_).empty() ? "null" : contextCatalogSummaryJson_) << ","
            << "\"runtime_state\":" << stateSnapshotJson() << ","
            << "\"tool_replay_ledger\":" << ledgerJson(toolCallLedger_) << ","
            << "\"trace_summary\":" << trace_.summaryJson(12) << ","
@@ -215,6 +219,12 @@ bool RuntimeSession::restoreFromCheckpointJson(const std::string &checkpointJson
                 value += c;
             }
         }
+    }
+    contextCatalogSummaryJson_ = rawField(fields, "context_catalog_summary", contextCatalogSummaryJson_);
+    loadedContextRecords_.clear();
+    loadedContextKeys_.clear();
+    for (const std::string &item : extractObjectArrayItems(rawField(fields, "loaded_context_set", "[]"))) {
+        recordLoadedContextSection(item);
     }
     for (const std::string &item : extractObjectArrayItems(rawField(fields, "tool_replay_ledger", "[]"))) {
         std::map<std::string, JsonField> itemFields;
@@ -424,6 +434,59 @@ void RuntimeSession::setContextJson(const std::string &contextJson) {
 
 const std::string &RuntimeSession::contextJson() const {
     return contextJson_;
+}
+
+void RuntimeSession::setContextCatalogSummaryJson(const std::string &catalogSummaryJson) {
+    contextCatalogSummaryJson_ = trim(catalogSummaryJson).empty() ? "null" : catalogSummaryJson;
+    appendTrace("context_catalog_updated", "{\"catalog_summary\":" + contextCatalogSummaryJson_ + "}");
+}
+
+const std::string &RuntimeSession::contextCatalogSummaryJson() const {
+    return contextCatalogSummaryJson_;
+}
+
+static std::string contextSectionKey(const std::string &sectionJson) {
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(sectionJson, fields)) {
+        return trim(sectionJson);
+    }
+    const std::string id = stringField(fields, "id", stringField(fields, "context_id", stringField(fields, "contextId")));
+    const std::string source = stringField(fields, "source", stringField(fields, "source_id", stringField(fields, "sourceId")));
+    const std::string hash = stringField(fields, "hash", stringField(fields, "content_hash", stringField(fields, "contentHash")));
+    const std::string range = rawField(fields, "range", "");
+    const std::string offset = rawField(fields, "offset", "");
+    const std::string limit = rawField(fields, "limit", "");
+    return id + "|" + source + "|" + hash + "|" + range + "|" + offset + "|" + limit;
+}
+
+void RuntimeSession::recordLoadedContextSection(const std::string &sectionJson) {
+    const std::string normalized = trim(sectionJson);
+    if (normalized.empty() || normalized == "null") {
+        return;
+    }
+    const std::string key = contextSectionKey(normalized);
+    if (!key.empty() && loadedContextKeys_.count(key) > 0) {
+        appendTrace("context_cache_hit", "{\"key\":" + jsonString(key) + "}");
+        return;
+    }
+    loadedContextRecords_.push_back(normalized);
+    if (!key.empty()) {
+        loadedContextKeys_.insert(key);
+    }
+    appendTrace("context_loaded", normalized);
+}
+
+std::string RuntimeSession::loadedContextSetJson() const {
+    std::ostringstream output;
+    output << "[";
+    for (size_t index = 0; index < loadedContextRecords_.size(); index++) {
+        if (index > 0) {
+            output << ",";
+        }
+        output << loadedContextRecords_[index];
+    }
+    output << "]";
+    return output.str();
 }
 
 void RuntimeSession::setLastObservationJson(const std::string &observationJson) {

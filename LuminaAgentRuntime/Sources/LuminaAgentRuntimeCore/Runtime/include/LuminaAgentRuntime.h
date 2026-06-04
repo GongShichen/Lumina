@@ -90,6 +90,18 @@ typedef char *(*LuminaAgentToolCallback)(const char *tool_call_json, void *user_
 typedef char *(*LuminaAgentContextCallback)(const char *context_request_json, void *user_context);
 
 /**
+ * Callback used by the runtime to progressively discover and load host-owned
+ * context.
+ *
+ * The input is a UTF-8 JSON object with `action`: `catalog`, `search`, `load`,
+ * `range`, or `invalidate`, plus session correlation and budget fields. Return
+ * a heap-allocated JSON object with `status`, optional lightweight `items`,
+ * loaded `sections`, and optional `next_cursor`. Returning NULL or invalid JSON
+ * falls back to the older context callback when available.
+ */
+typedef char *(*LuminaAgentContextLoadingPluginCallback)(const char *context_loading_request_json, void *user_context);
+
+/**
  * Callback used by the runtime to ask whether a tool call is allowed.
  *
  * The input is a UTF-8 JSON object containing the proposed tool call and schema.
@@ -340,6 +352,18 @@ void LuminaAgentRuntimeSetToolCallback(
 void LuminaAgentRuntimeSetContextCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentContextCallback callback,
+    void *user_context
+);
+
+/**
+ * Installs the optional progressive context loading plugin callback.
+ *
+ * The core runtime owns catalog/search/load lifecycle and session working set.
+ * The host owns memory, files, knowledge bases, history, and persistence.
+ */
+void LuminaAgentRuntimeSetContextLoadingPluginCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentContextLoadingPluginCallback callback,
     void *user_context
 );
 

@@ -22,13 +22,16 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         }
     }
 
-    func installCallbacks(context: UnsafeMutableRawPointer) {
+    func installCallbacks(context: UnsafeMutableRawPointer, installContextLoadingPlugin: Bool) {
         guard let handle = currentHandle() else { return }
         LuminaAgentRuntimeSetModelCallback(handle, luminaAgentSwiftAdapterModelCallback, context)
         LuminaAgentRuntimeSetStreamingModelCallback(handle, luminaAgentSwiftAdapterStreamingModelCallback, context)
         LuminaAgentRuntimeSetModelMetadataCallback(handle, luminaAgentSwiftAdapterModelMetadataCallback, context)
         LuminaAgentRuntimeSetToolCallback(handle, luminaAgentSwiftAdapterToolCallback, context)
         LuminaAgentRuntimeSetContextCallback(handle, luminaAgentSwiftAdapterContextCallback, context)
+        if installContextLoadingPlugin {
+            LuminaAgentRuntimeSetContextLoadingPluginCallback(handle, luminaAgentSwiftAdapterContextLoadingPluginCallback, context)
+        }
         LuminaAgentRuntimeSetPermissionCallback(handle, luminaAgentSwiftAdapterPermissionCallback, context)
         LuminaAgentRuntimeSetConfirmationCallback(handle, luminaAgentSwiftAdapterConfirmationCallback, context)
         LuminaAgentRuntimeSetGuardrailCallback(handle, luminaAgentSwiftAdapterGuardrailCallback, context)

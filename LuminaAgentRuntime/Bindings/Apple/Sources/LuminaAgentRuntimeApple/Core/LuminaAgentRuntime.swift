@@ -22,6 +22,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         observabilitySinks: LuminaRuntimeObservabilitySinks = .disabled,
         guardrails: LuminaRuntimeGuardrails = .empty,
         retryProvider: (any LuminaRuntimeRetryProvider)? = nil,
+        contextLoadingPlugin: (any LuminaContextLoadingPlugin)? = nil,
         toolLoadingPlugin: (any LuminaToolLoadingPlugin)? = nil,
         sessionHistoryStore: (any LuminaSessionHistoryStore)? = nil
     ) {
@@ -38,6 +39,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
             observabilitySinks: observabilitySinks,
             guardrails: guardrails,
             retryProvider: retryProvider,
+            contextLoadingPlugin: contextLoadingPlugin,
             toolLoadingPlugin: toolLoadingPlugin,
             sessionHistoryStore: sessionHistoryStore
         )
@@ -194,7 +196,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
     private func configureRuntime() {
         guard let runtimeHandle else { return }
         let context = Unmanaged.passUnretained(box).toOpaque()
-        runtimeHandle.installCallbacks(context: context)
+        runtimeHandle.installCallbacks(context: context, installContextLoadingPlugin: box.contextLoadingPlugin != nil)
         for index in box.hooks.indices {
             _ = runtimeHandle.registerHookRoute(box.hookRouteJSON(index: index))
         }
@@ -289,6 +291,20 @@ let luminaAgentSwiftAdapterContextCallback: LuminaAgentContextCallback = { reque
     let input = String(cString: requestJSON)
     let response = blockOn(cancellationValue: { "null" }) {
         await box.loadContext(requestJSON: input)
+    }
+    return retainedCString(response)
+}
+
+let luminaAgentSwiftAdapterContextLoadingPluginCallback: LuminaAgentContextLoadingPluginCallback = { requestJSON, context in
+    guard let box = box(from: context), let requestJSON else {
+        return retainedCString("{}")
+    }
+    guard let plugin = box.contextLoadingPlugin else {
+        return retainedCString("{}")
+    }
+    let input = String(cString: requestJSON)
+    let response = blockOn(cancellationValue: { "{}" }) {
+        await plugin.handleContextLoading(requestJSON: input)
     }
     return retainedCString(response)
 }

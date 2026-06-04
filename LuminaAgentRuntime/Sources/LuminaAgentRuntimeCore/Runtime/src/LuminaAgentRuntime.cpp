@@ -106,6 +106,16 @@ extern "C" void LuminaAgentRuntimeSetContextCallback(
     }
 }
 
+extern "C" void LuminaAgentRuntimeSetContextLoadingPluginCallback(
+    LuminaAgentRuntimeRef *runtime,
+    LuminaAgentContextLoadingPluginCallback callback,
+    void *user_context
+) {
+    if (runtime != nullptr) {
+        runtime->runtime.setContextLoadingPluginCallback(callback, user_context);
+    }
+}
+
 extern "C" void LuminaAgentRuntimeSetPermissionCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentPermissionCallback callback,

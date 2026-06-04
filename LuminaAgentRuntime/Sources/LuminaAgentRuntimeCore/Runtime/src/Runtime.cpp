@@ -473,6 +473,10 @@ void Runtime::setContextCallback(LuminaAgentContextCallback callback, void *cont
     callbacks_.setContext(callback, context);
 }
 
+void Runtime::setContextLoadingPluginCallback(LuminaAgentContextLoadingPluginCallback callback, void *context) {
+    callbacks_.setContextLoadingPlugin(callback, context);
+}
+
 void Runtime::setPermissionCallback(LuminaAgentPermissionCallback callback, void *context) {
     callbacks_.setPermission(callback, context);
 }
@@ -841,12 +845,15 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
     }
 
     std::string contextJson = session.contextJson().empty() ? "null" : session.contextJson();
-    if (contextJson == "null" && callbacks_.hasContext()) {
-        contextJson = callbacks_.loadContext(ContextManager(session).initialRequestJson(request));
+    if (contextJson == "null" && (callbacks_.hasContextLoadingPlugin() || callbacks_.hasContext())) {
+        ContextManager contextManager(session);
+        contextJson = callbacks_.hasContextLoadingPlugin()
+            ? contextManager.loadProgressiveInitialContext(request, callbacks_)
+            : callbacks_.loadContext(contextManager.initialRequestJson(request));
         if (trim(contextJson).empty()) {
             contextJson = "null";
         }
-        contextJson = ContextManager(session).compactIfNeeded(request, contextJson, session.stepsSummaryJson(), session.lastObservationJson(), &callbacks_, "auto");
+        contextJson = contextManager.compactIfNeeded(request, contextJson, session.stepsSummaryJson(), session.lastObservationJson(), &callbacks_, "auto");
         execution.setContextJson(contextJson);
         events.emitEvent("context_loaded", contextJson);
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_loaded", contextJson), &contextJson, request)) {
@@ -1032,11 +1039,16 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             break;
         }
         if (type == "reasoning") {
-            if (boolField(fields, "needs_more_context", false) && callbacks_.hasContext()) {
+            if (boolField(fields, "needs_more_context", false) && (callbacks_.hasContextLoadingPlugin() || callbacks_.hasContext())) {
                 ContextManager contextManager(session);
-                std::string additionalContext = callbacks_.loadContext(contextManager.followUpRequestJson(request, stepJson));
+                std::string additionalContext = callbacks_.hasContextLoadingPlugin()
+                    ? contextManager.loadProgressiveFollowUpContext(request, stepJson, contextJson, callbacks_)
+                    : callbacks_.loadContext(contextManager.followUpRequestJson(request, stepJson));
                 if (!trim(additionalContext).empty() && trim(additionalContext) != "null") {
-                    contextJson = contextManager.compactIfNeeded(request, contextManager.mergeContextJson(contextJson, additionalContext), session.stepsSummaryJson(), lastObservation, &callbacks_, "auto");
+                    const std::string mergedContext = callbacks_.hasContextLoadingPlugin()
+                        ? additionalContext
+                        : contextManager.mergeContextJson(contextJson, additionalContext);
+                    contextJson = contextManager.compactIfNeeded(request, mergedContext, session.stepsSummaryJson(), lastObservation, &callbacks_, "auto");
                     execution.setContextJson(contextJson);
                     events.emitControl("context_updated", contextJson);
                     if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("context_updated", contextJson), &contextJson, request)) {

@@ -76,6 +76,10 @@ public:
     const std::string &requestJson() const;
     void setContextJson(const std::string &contextJson);
     const std::string &contextJson() const;
+    void setContextCatalogSummaryJson(const std::string &catalogSummaryJson);
+    const std::string &contextCatalogSummaryJson() const;
+    void recordLoadedContextSection(const std::string &sectionJson);
+    std::string loadedContextSetJson() const;
 
     // Tracks the latest observation so the next ReAct turn can focus on it.
     void setLastObservationJson(const std::string &observationJson);
@@ -172,6 +176,9 @@ private:
     int consecutiveReplayObservationCount_ = 0;
     std::vector<std::string> observations_;
     std::set<std::string> loadedToolNames_;
+    std::string contextCatalogSummaryJson_;
+    std::vector<std::string> loadedContextRecords_;
+    std::set<std::string> loadedContextKeys_;
     std::map<std::string, ToolCallLedgerEntry> toolCallLedger_;
     std::map<std::string, std::map<std::string, std::string>> state_;
     TraceRecorder trace_;

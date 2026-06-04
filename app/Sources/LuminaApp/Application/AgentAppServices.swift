@@ -70,15 +70,24 @@ final class AgentAppServices: ObservableObject {
         confirmationCoordinator: (any LuminaConfirmationCoordinator)? = nil,
         configuration: LuminaAgentRuntimeConfiguration? = nil
     ) -> LuminaAgentRuntime {
-        LuminaAgentRuntime(
+        let resolvedConfiguration = configuration ?? environment.runtimeConfiguration
+        let contextLoadingPlugin: (any LuminaContextLoadingPlugin)? = contextProvider is LuminaEmptyRuntimeContextProvider
+            ? nil
+            : LuminaAppContextLoadingPlugin(
+                contextProvider: contextProvider,
+                tools: tools,
+                configuration: resolvedConfiguration
+            )
+        return LuminaAgentRuntime(
             tools: tools,
             stepGenerator: environment.stepGenerator,
             contextProvider: contextProvider,
-            configuration: configuration ?? environment.runtimeConfiguration,
+            configuration: resolvedConfiguration,
             permissionGate: LuminaAppRuntimePermissionGate(),
             confirmationCoordinator: confirmationCoordinator ?? confirmation,
             auditLogger: auditLogger,
-            hooks: [LuminaAppMemoryPolicyRuntimeHook()]
+            hooks: [LuminaAppMemoryPolicyRuntimeHook()],
+            contextLoadingPlugin: contextLoadingPlugin
         )
     }
 
@@ -154,7 +163,7 @@ final class AgentAppServices: ObservableObject {
         configuration.maximumConsecutiveReplayObservations = 3
         let runtime = makeRuntime(
             tools: tools,
-            contextProvider: LuminaEmptyRuntimeContextProvider(),
+            contextProvider: environment.contextProvider,
             confirmationCoordinator: LuminaAlwaysConfirmCoordinator(),
             configuration: configuration
         )

@@ -27,6 +27,7 @@ public:
     void setModelMetadataCallback(LuminaAgentModelMetadataCallback callback, void *context);
     void setToolCallback(LuminaAgentToolCallback callback, void *context);
     void setContextCallback(LuminaAgentContextCallback callback, void *context);
+    void setContextLoadingPluginCallback(LuminaAgentContextLoadingPluginCallback callback, void *context);
     void setPermissionCallback(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmationCallback(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrailCallback(LuminaAgentGuardrailCallback callback, void *context);

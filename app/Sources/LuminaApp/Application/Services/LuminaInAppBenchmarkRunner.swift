@@ -352,6 +352,9 @@ final class LuminaInAppBenchmarkRunner {
         - Tool discovery hit rate: \(format(report.toolDiscoveryHitRate))
         - Deferred unknown tool rate: \(format(report.deferredUnknownToolRate))
         - Tool loading search / loaded / failed: \(report.toolLoadingSearchCount) / \(report.toolLoadingLoadedCount) / \(report.toolLoadingLoadFailedCount)
+        - Context loading catalog / search / loaded / failed: \(report.contextLoadingCatalogEmittedCount) / \(report.contextLoadingSearchCount) / \(report.contextLoadingLoadedCount + report.contextLoadingRangeLoadedCount) / \(report.contextLoadingLoadFailedCount)
+        - Context loading hit rate: \(format(report.contextLoadingHitRate))
+        - Context cache hits / token estimate: \(report.contextLoadingCacheHitCount) / \(report.contextLoadingTokensEstimate)
 
         ## Model Inference
         - Model invocations: \(report.modelInvocationCount)

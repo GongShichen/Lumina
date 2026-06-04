@@ -32,6 +32,7 @@ struct LuminaRunStreamObserver {
             runtimeMetrics.hookEventCount += 1
             runtimeMetrics.runtimeEventCount += key.hasPrefix("runtime") ? 1 : 0
             classifyToolLoadingEvent(key: key, value: value)
+            classifyContextLoadingEvent(key: key, value: value)
             classifyRuntimeDiagnostic(key: key, value: value)
         case .confirmationRequired:
             confirmationStartedAt = ContinuousClock.now
@@ -121,6 +122,51 @@ struct LuminaRunStreamObserver {
             } else if let saved = payload["schema_tokens_saved_estimate"] as? Double {
                 runtimeMetrics.schemaTokensSavedEstimate += Int(saved)
             }
+        }
+    }
+
+    private mutating func classifyContextLoadingEvent(key: String, value: LuminaJSONValue) {
+        guard key.hasPrefix("runtime_event.context_loading") else { return }
+        switch key {
+        case "runtime_event.context_loading.catalog_emitted":
+            runtimeMetrics.contextLoadingCatalogEmittedCount += 1
+        case "runtime_event.context_loading.search":
+            runtimeMetrics.contextLoadingSearchCount += 1
+        case "runtime_event.context_loading.loaded":
+            break
+        case "runtime_event.context_loading.range_loaded":
+            break
+        case "runtime_event.context_loading.cache_hit":
+            runtimeMetrics.contextLoadingCacheHitCount += 1
+        case "runtime_event.context_loading.load_failed":
+            runtimeMetrics.contextLoadingLoadFailedCount += 1
+        default:
+            break
+        }
+
+        guard case let .string(eventJSON) = value,
+              let data = eventJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        let outerPayload = object["payload"] as? [String: Any]
+        let payload = (outerPayload?["payload"] as? [String: Any]) ?? outerPayload ?? [:]
+        if let estimate = payload["tokens_estimate"] as? Int {
+            runtimeMetrics.contextLoadingTokensEstimate += estimate
+        } else if let estimate = payload["tokens_estimate"] as? Double {
+            runtimeMetrics.contextLoadingTokensEstimate += Int(estimate)
+        }
+        let loadedCount: Int
+        if let loaded = payload["loaded_count"] as? Int {
+            loadedCount = loaded
+        } else if let loaded = payload["loaded_count"] as? Double {
+            loadedCount = Int(loaded)
+        } else {
+            loadedCount = 0
+        }
+        if key == "runtime_event.context_loading.loaded" {
+            runtimeMetrics.contextLoadingLoadedCount += loadedCount
+        } else if key == "runtime_event.context_loading.range_loaded" {
+            runtimeMetrics.contextLoadingRangeLoadedCount += loadedCount
         }
     }
 

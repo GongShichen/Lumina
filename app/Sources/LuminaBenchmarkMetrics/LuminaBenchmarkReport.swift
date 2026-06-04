@@ -50,6 +50,14 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let toolLoadingSearchCount: Int
     let toolLoadingLoadedCount: Int
     let toolLoadingLoadFailedCount: Int
+    let contextLoadingCatalogEmittedCount: Int
+    let contextLoadingSearchCount: Int
+    let contextLoadingLoadedCount: Int
+    let contextLoadingRangeLoadedCount: Int
+    let contextLoadingCacheHitCount: Int
+    let contextLoadingLoadFailedCount: Int
+    let contextLoadingHitRate: Double
+    let contextLoadingTokensEstimate: Int
     let memoryAccessDisabled: Bool
     let results: [LuminaBenchmarkTaskResult]
     let jsonReportURL: URL?
@@ -133,6 +141,17 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             toolLoadingSearchCount: runtimeMetrics.toolLoadingSearchCount,
             toolLoadingLoadedCount: runtimeMetrics.toolLoadingLoadedCount,
             toolLoadingLoadFailedCount: runtimeMetrics.toolLoadingLoadFailedCount,
+            contextLoadingCatalogEmittedCount: runtimeMetrics.contextLoadingCatalogEmittedCount,
+            contextLoadingSearchCount: runtimeMetrics.contextLoadingSearchCount,
+            contextLoadingLoadedCount: runtimeMetrics.contextLoadingLoadedCount,
+            contextLoadingRangeLoadedCount: runtimeMetrics.contextLoadingRangeLoadedCount,
+            contextLoadingCacheHitCount: runtimeMetrics.contextLoadingCacheHitCount,
+            contextLoadingLoadFailedCount: runtimeMetrics.contextLoadingLoadFailedCount,
+            contextLoadingHitRate: ratio(
+                runtimeMetrics.contextLoadingLoadedCount + runtimeMetrics.contextLoadingRangeLoadedCount + runtimeMetrics.contextLoadingCacheHitCount,
+                runtimeMetrics.contextLoadingSearchCount
+            ),
+            contextLoadingTokensEstimate: runtimeMetrics.contextLoadingTokensEstimate,
             memoryAccessDisabled: true,
             results: results,
             jsonReportURL: jsonReportURL,

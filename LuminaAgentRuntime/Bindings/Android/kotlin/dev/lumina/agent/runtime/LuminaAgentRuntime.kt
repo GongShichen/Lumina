@@ -9,6 +9,7 @@ class LuminaAgentRuntime(
         val modelMetadata: ModelMetadataProvider = ModelMetadataProvider { "{}" },
         val tool: ToolProvider = ToolProvider { """{"status":"failed","content":"","errorMessage":"tool provider unavailable"}""" },
         val context: ContextProvider = ContextProvider { "null" },
+        val contextLoadingPlugin: ContextLoadingPlugin = ContextLoadingPlugin { "{}" },
         val permission: PermissionProvider = PermissionProvider { """{"decision":"allowed"}""" },
         val confirmation: ConfirmationProvider = ConfirmationProvider { """{"confirmed":false,"reason":"confirmation provider unavailable"}""" },
         val guardrail: GuardrailProvider = GuardrailProvider { """{"decision":"allow"}""" },
@@ -37,6 +38,10 @@ class LuminaAgentRuntime(
 
     fun interface ContextProvider {
         fun load(contextRequestJson: String): String
+    }
+
+    fun interface ContextLoadingPlugin {
+        fun handle(contextLoadingRequestJson: String): String
     }
 
     fun interface PermissionProvider {
@@ -141,6 +146,9 @@ class LuminaAgentRuntime(
 
     private fun loadContext(contextRequestJson: String): String =
         providers.context.load(contextRequestJson)
+
+    private fun handleContextLoading(contextLoadingRequestJson: String): String =
+        providers.contextLoadingPlugin.handle(contextLoadingRequestJson)
 
     private fun decidePermission(permissionRequestJson: String): String =
         providers.permission.decide(permissionRequestJson)

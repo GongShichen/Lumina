@@ -12,6 +12,7 @@ Runtime Core 是跨端的 C/C++ 执行核心。宿主负责提供模型、工具
 - 消费 blocking 或 streaming model callback，解析并校验 canonical ReAct step。
 - 调度工具调用，执行参数校验、权限检查、用户确认和幂等控制。
 - 支持 deferred tool loading：模型先看到轻量工具目录，需要时通过 `tool_discovery` 加载完整 schema。
+- 支持 progressive context loading：宿主先暴露轻量 context catalog，Runtime 在 session 内按需 search/load scoped sections。
 - 将 tool result 转成 runtime-owned observation，模型不得伪造 observation。
 - 管理 session、checkpoint、snapshot、cancel、resume 和 replay。
 - 根据 provider/model 的上下文窗口动态管理预算，并在接近上限或 prompt-too-long 时压缩上下文。
@@ -36,6 +37,7 @@ Canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi
 
 - **Tool Registry & Executor**：工具 schema、参数校验、副作用、幂等策略、external provider。
 - **Deferred Tool Loading**：Core 维护 always-loaded tools、deferred catalog 和 session loaded tool set；未加载工具不可直接执行。
+- **Progressive Context Loading**：Core 维护 per-session `loaded_context_set` 和 context catalog summary；memory、文件、知识库、历史会话由宿主 provider 拥有。
 - **Session / Checkpoint / Replay**：Core 导出 checkpoint JSON，宿主负责持久化；replay 可固定 model output 或 tool observation。
 - **RuntimeState**：`temp`、`session`、`user`、`app` 四类 scope；模型不能直接写 state。
 - **Context Budget & Compaction**：从 provider/model 读取 `max_context_tokens`，动态计算可用窗口和压缩阈值；默认先清理大型工具结果，再按预算摘要压缩。
@@ -65,6 +67,20 @@ auto_compact_threshold = effective_context_window - auto_compact_buffer_tokens
 - `reactive_compact`：模型请求因为 prompt-too-long 失败时触发恢复压缩。
 
 宿主可以注册 `LuminaAgentCompactionProviderCallback`，替换完整 pipeline 或只处理某个 strategy；返回 `{"status":"skipped"}` 时 Core 会继续执行默认策略。压缩请求会携带 redacted `context_frame`、`trace_summary`、`tool_result_candidates` 和预算快照；API key、token、secret 会在进入 compaction payload 前脱敏。压缩事件、边界、tokens saved estimate 和失败原因会通过可选 observability sinks 暴露，未注册 sink 时不做持久化输出。
+
+## 上下文渐进式加载
+
+Context progressive loading 用于 memory、文件、知识库和历史会话很多、但当前任务只需要其中一小部分的场景。Runtime 不内置长期 memory、不做 embedding、不连接数据库；宿主拥有 memory 和持久化，Runtime 只维护当前 session 的 context working set。
+
+流程：
+
+1. 宿主可注册 `LuminaAgentContextLoadingPluginCallback`，支持 `catalog`、`search`、`load`、`range`、`invalidate`。
+2. 首轮 planner input 只包含轻量 `available_sources` 和已加载的 `loaded_sections`。
+3. 模型需要更多上下文时输出现有 `reasoning` step，并设置 `needs_more_context=true`；Runtime 用用户目标、reasoning thought 和最近 observation 生成 search/load 请求。
+4. 插件返回 scoped `sections` 后，Runtime 把它们加入 session `loaded_context_set`，下一轮 planner input 才暴露给模型。
+5. Checkpoint、snapshot 和 replay artifact 保存 `loaded_context_set` 与 `context_catalog_summary`，恢复后保持同一上下文工作集。
+
+如果插件返回 `{}`、`{"status":"skipped"}` 或未注册，Runtime 会沿用旧的 `LuminaAgentContextCallback` initial/follow-up 行为。Context loading 事件和指标通过可选 sinks 暴露，例如 `context_loading.catalog_emitted`、`context_loading.search`、`context_loading.loaded`、`context_loading.load_failed`。
 
 ## 工具延迟加载
 
@@ -98,6 +114,7 @@ let runtime = LuminaAgentRuntime(
     observabilitySinks: sinks,
     guardrails: guardrails,
     retryProvider: retryProvider,
+    contextLoadingPlugin: contextLoadingPlugin,
     toolLoadingPlugin: toolLoadingPlugin
 )
 
@@ -127,7 +144,7 @@ cmake -S LuminaAgentRuntime -B build/android-arm64 \
 cmake --build build/android-arm64
 ```
 
-宿主侧实现 model、tool、context、permission、confirmation、guardrail、compaction、tool loading、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 或 deferred tool metadata 并运行：
+宿主侧实现 model、tool、context、context loading、permission、confirmation、guardrail、compaction、tool loading、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 或 deferred tool metadata 并运行：
 
 ```kotlin
 val runtime = LuminaAgentRuntime(configurationJson, providers)
@@ -142,7 +159,7 @@ runtime.cancel(requestId)
 
 HarmonyOS 侧通过 ETS wrapper 调用 native runtime。编译时把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
 
-ETS 侧提供 providers，把模型、工具、上下文、权限、确认、压缩、tool loading、事件和审计回调交给 Runtime：
+ETS 侧提供 providers，把模型、工具、上下文、context loading、权限、确认、压缩、tool loading、事件和审计回调交给 Runtime：
 
 ```ts
 const runtime = new LuminaAgentRuntime(configurationJson, providers)

@@ -15,6 +15,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
     private var historyEvents: [String] = []
     private var retryRequests: [String] = []
     private var compactionRequests: [String] = []
+    private var contextLoadingRequests: [String] = []
     private var toolLoadingRequests: [String] = []
     private var toolCalls: [String] = []
     private var toolCallCount = 0
@@ -30,6 +31,7 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         historyEvents = []
         retryRequests = []
         compactionRequests = []
+        contextLoadingRequests = []
         toolLoadingRequests = []
         toolCalls = []
         toolCallCount = 0
@@ -85,6 +87,12 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         lock.unlock()
     }
 
+    func appendContextLoadingRequest(_ value: String) {
+        lock.lock()
+        contextLoadingRequests.append(value)
+        lock.unlock()
+    }
+
     func appendToolLoadingRequest(_ value: String) {
         lock.lock()
         toolLoadingRequests.append(value)
@@ -121,10 +129,10 @@ private final class LuminaRuntimeCaptureStore: @unchecked Sendable {
         return value
     }
 
-    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], historyEvents: [String], retryRequests: [String], compactionRequests: [String], toolLoadingRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
+    func snapshot() -> (plannerInputs: [String], events: [String], traces: [String], metrics: [String], spans: [String], historyEvents: [String], retryRequests: [String], compactionRequests: [String], contextLoadingRequests: [String], toolLoadingRequests: [String], toolCalls: [String], toolCallCount: Int, modelCallCount: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (plannerInputs, events, traces, metrics, spans, historyEvents, retryRequests, compactionRequests, toolLoadingRequests, toolCalls, toolCallCount, modelCallCount)
+        return (plannerInputs, events, traces, metrics, spans, historyEvents, retryRequests, compactionRequests, contextLoadingRequests, toolLoadingRequests, toolCalls, toolCallCount, modelCallCount)
     }
 }
 
@@ -379,6 +387,21 @@ private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest
         return luminaRuntimeCString(#"[{"id":"deep","title":"Deep context","summary":"更深层上下文","priority":10,"disclosure_level":1}]"#)
     }
     return luminaRuntimeCString(#"[{"id":"initial","title":"Initial context","summary":"首轮摘要","priority":100,"disclosure_level":0}]"#)
+}
+
+private let luminaContextLoadingPluginCallback: LuminaAgentContextLoadingPluginCallback = { request, _ in
+    let json = request.map { String(cString: $0) } ?? "{}"
+    LuminaRuntimeCaptureStore.shared.appendContextLoadingRequest(json)
+    if json.contains(#""action":"catalog""#) {
+        return luminaRuntimeCString(#"{"status":"ok","items":[{"id":"memory.index","source":"memory","title":"Memory index","summary":"可搜索记忆目录","token_estimate":12}],"sections":[{"id":"memory.seed","source":"memory","title":"Seed context","summary":"轻量首轮上下文","priority":100,"disclosure_level":0,"token_estimate":18}]}"#)
+    }
+    if json.contains(#""action":"search""#) {
+        return luminaRuntimeCString(#"{"status":"ok","items":[{"id":"memory.deep","source":"memory","title":"Deep memory","summary":"命中的深层记忆","token_estimate":24}]}"#)
+    }
+    if json.contains(#""action":"load""#) {
+        return luminaRuntimeCString(#"{"status":"ok","sections":[{"id":"memory.deep","source":"memory","title":"Deep memory","summary":"插件加载的更深层上下文","hash":"h1","priority":10,"disclosure_level":1,"token_estimate":24}]}"#)
+    }
+    return luminaRuntimeCString(#"{"status":"skipped"}"#)
 }
 
 private let luminaLargeContextCallback: LuminaAgentContextCallback = { _, _ in
@@ -894,6 +917,46 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertEqual(inputs.count, 2)
         XCTAssertTrue(inputs[0].contains("首轮摘要"))
         XCTAssertTrue(inputs[1].contains("更深层上下文"))
+    }
+
+    func testContextLoadingPluginProgressivelyLoadsAndCheckpointsWorkingSet() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaNeedsContextThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetContextLoadingPluginCallback(runtime, luminaContextLoadingPluginCallback, nil)
+
+        guard let session = LuminaAgentRuntimeCreateSession(
+            runtime,
+            #"{"id":"context-plugin","text":"需要记忆上下文","content":[{"modality":"text","text":"需要记忆上下文"}]}"#
+        ) else {
+            XCTFail("Failed to create session")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroySession(session) }
+
+        let result = LuminaAgentRuntimeRunSession(runtime, session)
+        if let result {
+            LuminaAgentRuntimeReleaseString(result)
+        }
+        let checkpointPointer = LuminaAgentRuntimeExportSessionCheckpoint(session)
+        let checkpoint = checkpointPointer.map { String(cString: $0) } ?? "{}"
+        if let checkpointPointer {
+            LuminaAgentRuntimeReleaseString(checkpointPointer)
+        }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertEqual(snapshot.plannerInputs.count, 2)
+        XCTAssertTrue(snapshot.plannerInputs[0].contains("Memory index"))
+        XCTAssertTrue(snapshot.plannerInputs[0].contains("轻量首轮上下文"))
+        XCTAssertTrue(snapshot.plannerInputs[1].contains("插件加载的更深层上下文"))
+        XCTAssertTrue(snapshot.contextLoadingRequests.contains { $0.contains(#""action":"catalog""#) })
+        XCTAssertTrue(snapshot.contextLoadingRequests.contains { $0.contains(#""action":"search""#) })
+        XCTAssertTrue(snapshot.contextLoadingRequests.contains { $0.contains(#""action":"load""#) })
+        XCTAssertTrue(checkpoint.contains(#""loaded_context_set""#))
+        XCTAssertTrue(checkpoint.contains("memory.deep"))
     }
 
     func testToolDiscoveryReturnsFocusedSchemaWithoutExecutingTool() throws {

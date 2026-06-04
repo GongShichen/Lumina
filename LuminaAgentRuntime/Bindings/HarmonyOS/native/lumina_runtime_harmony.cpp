@@ -106,6 +106,10 @@ char *contextCallback(const char *contextRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "loadContext", contextRequestJson));
 }
 
+char *contextLoadingPluginCallback(const char *contextLoadingRequestJson, void *context) {
+    return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "handleContextLoading", contextLoadingRequestJson));
+}
+
 char *permissionCallback(const char *permissionRequestJson, void *context) {
     return copyCString(callStringMethod(static_cast<NativeRuntime *>(context), "decidePermission", permissionRequestJson));
 }
@@ -171,6 +175,7 @@ napi_value create(napi_env env, napi_callback_info info) {
     LuminaAgentRuntimeSetModelMetadataCallback(native->runtime, modelMetadataCallback, native);
     LuminaAgentRuntimeSetToolCallback(native->runtime, toolCallback, native);
     LuminaAgentRuntimeSetContextCallback(native->runtime, contextCallback, native);
+    LuminaAgentRuntimeSetContextLoadingPluginCallback(native->runtime, contextLoadingPluginCallback, native);
     LuminaAgentRuntimeSetPermissionCallback(native->runtime, permissionCallback, native);
     LuminaAgentRuntimeSetConfirmationCallback(native->runtime, confirmationCallback, native);
     LuminaAgentRuntimeSetGuardrailCallback(native->runtime, guardrailCallback, native);

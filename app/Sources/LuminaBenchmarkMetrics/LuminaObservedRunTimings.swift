@@ -25,6 +25,13 @@ struct LuminaBenchmarkRuntimeMetrics: Codable, Hashable {
     var toolLoadingLoadFailedCount: Int = 0
     var toolLoadingUnknownToolCount: Int = 0
     var schemaTokensSavedEstimate: Int = 0
+    var contextLoadingCatalogEmittedCount: Int = 0
+    var contextLoadingSearchCount: Int = 0
+    var contextLoadingLoadedCount: Int = 0
+    var contextLoadingRangeLoadedCount: Int = 0
+    var contextLoadingCacheHitCount: Int = 0
+    var contextLoadingLoadFailedCount: Int = 0
+    var contextLoadingTokensEstimate: Int = 0
 
     var contractFailureCount: Int {
         normalizationFailureCount +
@@ -57,6 +64,13 @@ struct LuminaBenchmarkRuntimeMetrics: Codable, Hashable {
         toolLoadingLoadFailedCount += other.toolLoadingLoadFailedCount
         toolLoadingUnknownToolCount += other.toolLoadingUnknownToolCount
         schemaTokensSavedEstimate += other.schemaTokensSavedEstimate
+        contextLoadingCatalogEmittedCount += other.contextLoadingCatalogEmittedCount
+        contextLoadingSearchCount += other.contextLoadingSearchCount
+        contextLoadingLoadedCount += other.contextLoadingLoadedCount
+        contextLoadingRangeLoadedCount += other.contextLoadingRangeLoadedCount
+        contextLoadingCacheHitCount += other.contextLoadingCacheHitCount
+        contextLoadingLoadFailedCount += other.contextLoadingLoadFailedCount
+        contextLoadingTokensEstimate += other.contextLoadingTokensEstimate
     }
 }
 

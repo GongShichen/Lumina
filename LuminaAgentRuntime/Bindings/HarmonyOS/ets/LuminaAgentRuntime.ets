@@ -3,6 +3,7 @@ export type LuminaRuntimeProviders = {
   modelMetadata?: (metadataRequestJson: string) => string
   tool?: (toolCallJson: string) => string
   context?: (contextRequestJson: string) => string
+  contextLoadingPlugin?: (contextLoadingRequestJson: string) => string
   permission?: (permissionRequestJson: string) => string
   confirmation?: (confirmationRequestJson: string) => string
   guardrail?: (guardrailRequestJson: string) => string
@@ -125,6 +126,10 @@ export class LuminaAgentRuntime {
 
   loadContext(contextRequestJson: string): string {
     return this.providers.context?.(contextRequestJson) ?? 'null'
+  }
+
+  handleContextLoading(contextLoadingRequestJson: string): string {
+    return this.providers.contextLoadingPlugin?.(contextLoadingRequestJson) ?? '{}'
   }
 
   decidePermission(permissionRequestJson: string): string {

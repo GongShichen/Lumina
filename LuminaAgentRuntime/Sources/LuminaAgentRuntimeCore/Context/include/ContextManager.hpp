@@ -26,6 +26,16 @@ public:
     // Merges existing and newly disclosed context sections into one container.
     std::string mergeContextJson(const std::string &currentContextJson, const std::string &additionalContextJson) const;
 
+    // Uses the optional context-loading plugin to build initial and follow-up
+    // context working sets. Host-owned memory/files remain outside the core.
+    std::string loadProgressiveInitialContext(const std::string &requestJson, RuntimeCallbacks &callbacks) const;
+    std::string loadProgressiveFollowUpContext(
+        const std::string &requestJson,
+        const std::string &reasoningStepJson,
+        const std::string &currentContextJson,
+        RuntimeCallbacks &callbacks
+    ) const;
+
     // Drops or summarizes low-priority context when the context window is tight.
     std::string compactIfNeeded(const std::string &contextJson, RuntimeCallbacks *callbacks = nullptr, const std::string &trigger = "auto") const;
     std::string compactIfNeeded(

@@ -29,6 +29,167 @@ std::string ContextManager::followUpRequestJson(const std::string &requestJson, 
         "\"request_more_context\":true}";
 }
 
+static std::string contextLoadingBudgetJson(const RuntimeSession &session) {
+    return "{\"remaining_tokens_estimate\":" + std::to_string(session.remainingContextTokensEstimate()) +
+        ",\"max_context_tokens\":" + std::to_string(session.maxContextTokens()) +
+        ",\"reserved_output_tokens\":" + std::to_string(session.reservedOutputTokens()) +
+        ",\"auto_compact_buffer_tokens\":" + std::to_string(session.autoCompactBufferTokens()) + "}";
+}
+
+static std::string requestTextForQuery(const std::string &requestJson) {
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(requestJson, fields)) {
+        return "";
+    }
+    return stringField(fields, "text", truncateToCharacters(requestJson, 800));
+}
+
+static std::string contextLoadingRequestJson(
+    const RuntimeSession &session,
+    const std::string &action,
+    const std::string &requestJson,
+    const std::string &query,
+    const std::string &reasoningStepJson,
+    const std::string &itemsJson = "[]"
+) {
+    return "{\"action\":" + jsonString(action) +
+        ",\"session_id\":" + jsonString(session.sessionId()) +
+        ",\"run_id\":" + jsonString(session.runId()) +
+        ",\"request\":" + (trim(requestJson).empty() ? "{}" : requestJson) +
+        ",\"query\":" + jsonString(query) +
+        ",\"reasoning_step\":" + (trim(reasoningStepJson).empty() ? "null" : reasoningStepJson) +
+        ",\"context_budget\":" + contextLoadingBudgetJson(session) +
+        ",\"loaded_context_set\":" + session.loadedContextSetJson() +
+        ",\"context_catalog_summary\":" + (trim(session.contextCatalogSummaryJson()).empty() ? "null" : session.contextCatalogSummaryJson()) +
+        ",\"items\":" + (trim(itemsJson).empty() ? "[]" : itemsJson) +
+        "}";
+}
+
+static bool parseContextLoadingResponse(const std::string &responseJson, std::map<std::string, JsonField> &fields) {
+    if (!parseFieldsOrEmpty(responseJson, fields)) {
+        return false;
+    }
+    const std::string status = lowercased(stringField(fields, "status", "ok"));
+    return status.empty() || status == "ok" || status == "skipped";
+}
+
+static bool shouldFallbackContextLoadingResponse(const std::string &responseJson, const std::map<std::string, JsonField> &fields) {
+    const std::string text = trim(responseJson);
+    const std::string status = lowercased(stringField(fields, "status", ""));
+    return text.empty() || text == "{}" || text == "null" || status == "skipped" || status == "failed";
+}
+
+static int recordContextSections(RuntimeSession &session, const std::string &sectionsJson) {
+    int count = 0;
+    for (const std::string &section : extractObjectArrayItems(sectionsJson)) {
+        session.recordLoadedContextSection(section);
+        count += 1;
+    }
+    return count;
+}
+
+static std::string contextContainerJson(
+    RuntimeSession &session,
+    const std::string &sectionsJson,
+    int disclosureLevel
+) {
+    const std::string sections = trim(sectionsJson).empty() ? "[]" : sectionsJson;
+    return "{\"sections\":" + sections +
+        ",\"disclosure_level\":" + std::to_string(disclosureLevel) +
+        ",\"loaded_context_set\":" + session.loadedContextSetJson() +
+        ",\"context_catalog_summary\":" + (trim(session.contextCatalogSummaryJson()).empty() ? "null" : session.contextCatalogSummaryJson()) +
+        "}";
+}
+
+static void emitContextLoadingEvent(
+    RuntimeCallbacks &callbacks,
+    const std::string &type,
+    const RuntimeSession &session,
+    const std::string &source,
+    int loadedCount,
+    const std::string &payloadJson
+) {
+    callbacks.emitEvent(
+        type,
+        "{\"source\":" + jsonString(source) +
+            ",\"loaded_count\":" + std::to_string(std::max(0, loadedCount)) +
+            ",\"tokens_estimate\":" + std::to_string(static_cast<int>(payloadJson.size() / 4)) +
+            ",\"budget_snapshot\":" + contextLoadingBudgetJson(session) + "}"
+    );
+    callbacks.metric("runtime.context_loading.loaded_count", static_cast<double>(std::max(0, loadedCount)), "{\"event\":" + jsonString(type) + ",\"source\":" + jsonString(source) + "}");
+}
+
+std::string ContextManager::loadProgressiveInitialContext(const std::string &requestJson, RuntimeCallbacks &callbacks) const {
+    const std::string catalogRequest = contextLoadingRequestJson(session_, "catalog", requestJson, requestTextForQuery(requestJson), "");
+    const std::string catalogResponse = callbacks.callContextLoadingPlugin(catalogRequest);
+    std::map<std::string, JsonField> fields;
+    if (!parseContextLoadingResponse(catalogResponse, fields)) {
+        callbacks.emitEvent("context_loading.load_failed", "{\"source\":\"context_loading_plugin\",\"action\":\"catalog\",\"reason\":\"invalid response\"}");
+        return callbacks.hasContext() ? callbacks.loadContext(initialRequestJson(requestJson)) : "null";
+    }
+    if (shouldFallbackContextLoadingResponse(catalogResponse, fields)) {
+        return callbacks.hasContext() ? callbacks.loadContext(initialRequestJson(requestJson)) : "null";
+    }
+
+    const std::string itemsJson = rawField(fields, "items", "[]");
+    const std::string sectionsJson = rawField(fields, "sections", "[]");
+    session_.setContextCatalogSummaryJson("{\"items\":" + itemsJson +
+        ",\"next_cursor\":" + jsonString(stringField(fields, "next_cursor", stringField(fields, "nextCursor"))) + "}");
+    const int loaded = recordContextSections(session_, sectionsJson);
+    emitContextLoadingEvent(callbacks, "context_loading.catalog_emitted", session_, "context_loading_plugin", loaded, catalogResponse);
+    if (loaded == 0) {
+        return contextContainerJson(session_, "[]", 0);
+    }
+    return contextContainerJson(session_, sectionsJson, 0);
+}
+
+std::string ContextManager::loadProgressiveFollowUpContext(
+    const std::string &requestJson,
+    const std::string &reasoningStepJson,
+    const std::string &currentContextJson,
+    RuntimeCallbacks &callbacks
+) const {
+    std::map<std::string, JsonField> reasoningFields;
+    parseFieldsOrEmpty(reasoningStepJson, reasoningFields);
+    const std::string query = stringField(reasoningFields, "thought", requestTextForQuery(requestJson));
+    const std::string searchRequest = contextLoadingRequestJson(session_, "search", requestJson, query, reasoningStepJson);
+    const std::string searchResponse = callbacks.callContextLoadingPlugin(searchRequest);
+    std::map<std::string, JsonField> searchFields;
+    if (!parseContextLoadingResponse(searchResponse, searchFields)) {
+        callbacks.emitEvent("context_loading.load_failed", "{\"source\":\"context_loading_plugin\",\"action\":\"search\",\"reason\":\"invalid response\"}");
+        return callbacks.hasContext() ? callbacks.loadContext(followUpRequestJson(requestJson, reasoningStepJson)) : "null";
+    }
+    if (shouldFallbackContextLoadingResponse(searchResponse, searchFields)) {
+        return callbacks.hasContext() ? callbacks.loadContext(followUpRequestJson(requestJson, reasoningStepJson)) : "null";
+    }
+
+    emitContextLoadingEvent(callbacks, "context_loading.search", session_, "context_loading_plugin", 0, searchResponse);
+    std::string sectionsJson = rawField(searchFields, "sections", "[]");
+    int loaded = recordContextSections(session_, sectionsJson);
+    if (loaded == 0) {
+        const std::string itemsJson = rawField(searchFields, "items", "[]");
+        if (!extractObjectArrayItems(itemsJson).empty()) {
+            const std::string loadRequest = contextLoadingRequestJson(session_, "load", requestJson, query, reasoningStepJson, itemsJson);
+            const std::string loadResponse = callbacks.callContextLoadingPlugin(loadRequest);
+            std::map<std::string, JsonField> loadFields;
+            if (parseContextLoadingResponse(loadResponse, loadFields)) {
+                sectionsJson = rawField(loadFields, "sections", "[]");
+                loaded = recordContextSections(session_, sectionsJson);
+                emitContextLoadingEvent(callbacks, "context_loading.loaded", session_, "context_loading_plugin", loaded, loadResponse);
+            } else {
+                callbacks.emitEvent("context_loading.load_failed", "{\"source\":\"context_loading_plugin\",\"action\":\"load\",\"reason\":\"invalid response\"}");
+            }
+        }
+    } else {
+        emitContextLoadingEvent(callbacks, "context_loading.loaded", session_, "context_loading_plugin", loaded, searchResponse);
+    }
+
+    if (loaded == 0) {
+        return callbacks.hasContext() ? callbacks.loadContext(followUpRequestJson(requestJson, reasoningStepJson)) : "null";
+    }
+    return mergeContextJson(currentContextJson, contextContainerJson(session_, sectionsJson, 1));
+}
+
 std::string ContextManager::normalizeLoadedContext(const std::string &contextJson) const {
     if (trim(contextJson).empty() || trim(contextJson) == "null") {
         return "{\"sections\":[]}";

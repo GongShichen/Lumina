@@ -74,6 +74,10 @@ std::string runtimeContextSectionSchemaJson() {
     return R"({"schema_version":"1.0","type":"object","required":["title","content"],"fields":{"id":"string","title":"string","content":"string","priority":"integer","metadata":"object"}})";
 }
 
+std::string contextLoadingPluginSchemaJson() {
+    return R"({"schema_version":"1.0","type":"object","actions":["catalog","search","load","range","invalidate"],"request_fields":{"action":"string","session_id":"string","run_id":"string","request":"AgentRequest","query":"string","reasoning_step":"ReActStep|null","context_budget":"object","loaded_context_set":"ContextSection metadata[]","context_catalog_summary":"object|null","items":"ContextSection metadata[]"},"response_fields":{"status":"ok|skipped|failed","items":"ContextSection metadata[]","sections":"RuntimeContextSection[]","next_cursor":"string","failure_reason":"string"},"rules":["Host owns memory, files, knowledge bases, history, and persistence.","Runtime Core only manages per-session context working set and budget.","Returning skipped or empty JSON falls back to the legacy context callback when installed.","Secrets must never be included."]})";
+}
+
 std::string plannerInputEnvelopeSchemaJson() {
     return taskEnvelopeSchemaJson();
 }
@@ -123,7 +127,7 @@ std::string runtimeStateSchemaJson() {
 }
 
 std::string checkpointSchemaJson() {
-    return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","loaded_tool_set":"string[]","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
+    return R"({"schema_version":"1.0","type":"object","required":["contract","session_id","run_id","request","runtime_state"],"fields":{"contract":"runtime_checkpoint","session_id":"string","run_id":"string","request":"AgentRequest","context":"RuntimeContext","step_index":"integer","pending":"object","budget":"object","last_observation":"ReActObservation","loaded_tool_set":"string[]","loaded_context_set":"ContextSection metadata[]","context_catalog_summary":"object|null","runtime_state":"RuntimeState","tool_replay_ledger":"array","trace_summary":"array","trace":"array","resultMarkdown":"string"}})";
 }
 
 std::string replayScriptSchemaJson() {
@@ -163,6 +167,7 @@ std::string allContractsJson() {
         R"("runtime_context_request":)" + runtimeContextRequestSchemaJson() + ","
         R"("runtime_context":)" + runtimeContextSchemaJson() + ","
         R"("runtime_context_section":)" + runtimeContextSectionSchemaJson() + ","
+        R"("context_loading_plugin":)" + contextLoadingPluginSchemaJson() + ","
         R"("planner_input_envelope":)" + plannerInputEnvelopeSchemaJson() + ","
         R"("react_step":)" + reactStepSchemaJson() + ","
         R"("react_observation":)" + reactObservationSchemaJson() + ","

@@ -56,6 +56,7 @@ public:
     void setModelMetadata(LuminaAgentModelMetadataCallback callback, void *context);
     void setTool(LuminaAgentToolCallback callback, void *context);
     void setContext(LuminaAgentContextCallback callback, void *context);
+    void setContextLoadingPlugin(LuminaAgentContextLoadingPluginCallback callback, void *context);
     void setPermission(LuminaAgentPermissionCallback callback, void *context);
     void setConfirmation(LuminaAgentConfirmationCallback callback, void *context);
     void setGuardrail(LuminaAgentGuardrailCallback callback, void *context);
@@ -79,6 +80,7 @@ public:
     bool hasModelMetadata() const;
     bool hasTool() const;
     bool hasContext() const;
+    bool hasContextLoadingPlugin() const;
     bool hasPermission() const;
     bool hasConfirmation() const;
     bool hasGuardrail() const;
@@ -100,6 +102,7 @@ public:
     // Invoke platform/application callbacks for tools, context, policy, and hooks.
     std::string callTool(const std::string &toolCall) const;
     std::string loadContext(const std::string &contextRequest) const;
+    std::string callContextLoadingPlugin(const std::string &requestJson) const;
     std::string decidePermission(const std::string &permissionRequest) const;
     std::string confirm(const std::string &confirmationRequest) const;
     RuntimeGuardrailDecision evaluateGuardrail(const std::string &stage, const std::string &payloadJson) const;
@@ -131,6 +134,7 @@ private:
     CallbackSlot modelMetadata_;
     CallbackSlot tool_;
     CallbackSlot context_;
+    CallbackSlot contextLoadingPlugin_;
     CallbackSlot permission_;
     CallbackSlot confirmation_;
     CallbackSlot guardrail_;

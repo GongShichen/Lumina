@@ -145,6 +145,10 @@ void RuntimeCallbacks::setContext(LuminaAgentContextCallback callback, void *con
     context_ = {reinterpret_cast<void *>(callback), context};
 }
 
+void RuntimeCallbacks::setContextLoadingPlugin(LuminaAgentContextLoadingPluginCallback callback, void *context) {
+    contextLoadingPlugin_ = {reinterpret_cast<void *>(callback), context};
+}
+
 void RuntimeCallbacks::setPermission(LuminaAgentPermissionCallback callback, void *context) {
     permission_ = {reinterpret_cast<void *>(callback), context};
 }
@@ -221,6 +225,7 @@ bool RuntimeCallbacks::hasStreamingModel() const { return streamingModel_.functi
 bool RuntimeCallbacks::hasModelMetadata() const { return modelMetadata_.function != nullptr; }
 bool RuntimeCallbacks::hasTool() const { return tool_.function != nullptr; }
 bool RuntimeCallbacks::hasContext() const { return context_.function != nullptr; }
+bool RuntimeCallbacks::hasContextLoadingPlugin() const { return contextLoadingPlugin_.function != nullptr; }
 bool RuntimeCallbacks::hasPermission() const { return permission_.function != nullptr; }
 bool RuntimeCallbacks::hasConfirmation() const { return confirmation_.function != nullptr; }
 bool RuntimeCallbacks::hasGuardrail() const { return guardrail_.function != nullptr; }
@@ -316,6 +321,11 @@ std::string RuntimeCallbacks::callTool(const std::string &toolCall) const {
 std::string RuntimeCallbacks::loadContext(const std::string &contextRequest) const {
     auto callback = reinterpret_cast<LuminaAgentContextCallback>(context_.function);
     return callback == nullptr ? "" : consumeCString(callback(contextRequest.c_str(), context_.context));
+}
+
+std::string RuntimeCallbacks::callContextLoadingPlugin(const std::string &requestJson) const {
+    auto callback = reinterpret_cast<LuminaAgentContextLoadingPluginCallback>(contextLoadingPlugin_.function);
+    return callback == nullptr ? "" : consumeCString(callback((trim(requestJson).empty() ? "{}" : requestJson).c_str(), contextLoadingPlugin_.context));
 }
 
 std::string RuntimeCallbacks::decidePermission(const std::string &permissionRequest) const {
