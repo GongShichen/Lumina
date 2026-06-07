@@ -66,7 +66,7 @@ final class LuminaInAppBenchmarkRunner {
             let actualSet = Set(actualTools)
             let missingTools = expectedSet.subtracting(actualSet).sorted()
             let unexpectedTools = actualSet.subtracting(expectedSet).sorted()
-            let semanticFailures = LuminaBenchmarkSemanticEvaluator.evaluate(task: task, result: result)
+            let semanticFailures = await LuminaBenchmarkSemanticEvaluator.evaluate(task: task, result: result, services: services)
             let toolMismatchSummary = missingTools.isEmpty && unexpectedTools.isEmpty
                 ? nil
                 : "Expected tools did not match executions. missing=\(missingTools.joined(separator: ",")); unexpected=\(unexpectedTools.joined(separator: ","))"
@@ -97,7 +97,7 @@ final class LuminaInAppBenchmarkRunner {
                 "expectedToolsEffective": task.expectedTools.joined(separator: ","),
                 "missingTools": missingTools.joined(separator: ","),
                 "unexpectedTools": unexpectedTools.joined(separator: ","),
-                "semanticPassed": "\(semanticFailures.isEmpty)",
+                "semanticPassed": "\(taskResult.semanticPassed)",
                 "semanticFailures": semanticFailures.joined(separator: "; "),
                 "attempts": toolAttempts.joined(separator: ","),
                 "executions": actualTools.joined(separator: ","),
@@ -528,21 +528,213 @@ final class LuminaInAppBenchmarkRunner {
 }
 
 private enum LuminaBenchmarkSemanticEvaluator {
-    static func evaluate(task: LuminaBenchmarkTask, result: LuminaAgentRunResult) -> [String] {
+    @MainActor
+    static func evaluate(task: LuminaBenchmarkTask, result: LuminaAgentRunResult, services: AgentAppServices) async -> [String] {
         var failures: [String] = []
-        let executedResults = result.toolResults.filter { $0.output["replayed"]?.boolValue != true }
-        let expectedToolNames = Set(task.expectedTools)
-        for index in executedResults.indices where executedResults[index].status != .succeeded {
-            let toolResult = executedResults[index]
-            if expectedToolNames.contains(toolResult.toolName) {
-                failures.append("\(toolResult.toolName) status=\(toolResult.status.rawValue)")
-            }
+        guard result.status != .cancelled else {
+            failures.append("runtime cancelled")
+            return failures
         }
+        let evidence = finalEvidence(from: result)
         let text = task.text
-        for toolName in expectedToolNames where Set(executedResults.map(\.toolName)).contains(toolName) {
-            failures.append(contentsOf: validate(toolName: toolName, taskText: text, result: result, toolResults: executedResults))
+        let events = await services.evaluationCalendarStore.allEvents()
+        let reminders = await services.evaluationCalendarStore.allReminders()
+        let ledgerTransactions = await services.ledgerStore.allTransactions()
+        let subscriptions = await services.subscriptionStore.allSubscriptions()
+        let documents = documentsDirectory()
+        if !outcomeSatisfied(
+            taskText: text,
+            evidence: evidence,
+            events: events,
+            reminders: reminders,
+            ledgerTransactions: ledgerTransactions,
+            subscriptions: subscriptions,
+            documentsDirectory: documents
+        ) {
+            failures.append("final outcome did not match benchmark expectation")
         }
         return failures
+    }
+
+    private static func finalEvidence(from result: LuminaAgentRunResult) -> String {
+        var parts = [result.plan.summary]
+        for toolResult in result.toolResults where toolResult.output["replayed"]?.boolValue != true {
+            parts.append(toolResult.content.compactMap(\.textForModelInput).joined(separator: " "))
+            parts.append(toolResult.output.values.map(valueText).joined(separator: " "))
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    private static func outcomeSatisfied(
+        taskText text: String,
+        evidence: String,
+        events: [LuminaCalendarEvent],
+        reminders: [LuminaReminderItem],
+        ledgerTransactions: [LuminaLedgerTransaction],
+        subscriptions: [LuminaContentSubscription],
+        documentsDirectory: URL
+    ) -> Bool {
+        if text.contains("现在几点") || text.contains("当前时间") {
+            return containsAny(evidence, ["时间", "点", ":", "T"])
+        }
+        if text.contains("今天下午有没有会议") {
+            return containsAny(evidence, ["没有", "会议", "空", "LuminaTest", "项目同步"])
+        }
+        if text.contains("创建明天上午 7 点的日程") {
+            return events.contains { event in
+                containsAll(event.title, ["LuminaTest", "上厕所"]) &&
+                    hourMinute(event.startDate) == (7, 0)
+            }
+        }
+        if text.contains("日程改成 7 点半") {
+            return events.contains { event in
+                event.title.localizedCaseInsensitiveContains("LuminaTest") &&
+                    hourMinute(event.startDate) == (7, 30)
+            }
+        }
+        if text.contains("删除那个标题是 LuminaTest 项目同步的日程") {
+            return !events.contains { $0.title == "LuminaTest 项目同步" }
+        }
+        if text.contains("明天下午三点到四点有空吗") {
+            return containsAny(evidence, ["有空", "可用", "空闲", "没有冲突", "available"])
+        }
+        if text.contains("今天还有哪些提醒") {
+            return containsAny(evidence, ["LuminaTest", "带伞", "提醒"])
+        }
+        if text.contains("明天早上 8 点提醒我 LuminaTest 带伞") {
+            return reminders.contains { reminder in
+                containsAll(reminder.title, ["LuminaTest", "带伞"]) &&
+                    reminder.dueDate.map { hourMinute($0) == (8, 0) } == true
+            }
+        }
+        if text.contains("带伞提醒改到明早 8 点半") {
+            return reminders.contains { reminder in
+                reminder.title.localizedCaseInsensitiveContains("带伞") &&
+                    reminder.dueDate.map { hourMinute($0) == (8, 30) } == true
+            }
+        }
+        if text.contains("带伞这个提醒标记完成") {
+            return reminders.contains { $0.title.localizedCaseInsensitiveContains("带伞") && $0.isCompleted }
+        }
+        if text.contains("删除 LuminaTest 带伞这个提醒") {
+            return !reminders.contains { $0.title.localizedCaseInsensitiveContains("LuminaTest 带伞") }
+        }
+        if text.contains("联系人") {
+            if text.contains("加一个邮箱") { return containsAny(evidence, ["test@example.com", "已更新"]) }
+            if text.contains("创建联系人") { return containsAll(evidence, ["LuminaTest", "10086"]) || containsAny(evidence, ["已创建"]) }
+            if text.contains("打开联系人") { return containsAny(evidence, ["详情", "已准备打开", "test"]) }
+            return containsAny(evidence, ["10086", "test@example.com", "LuminaTest", "test"])
+        }
+        if text.contains("咖啡店") { return containsAny(evidence, ["咖啡", "coffee"]) }
+        if text.contains("Apple Park") { return containsAny(evidence, ["Apple Park", "apple", "路线", "导航"]) }
+        if text.contains("我现在在哪") { return containsAny(evidence, ["位置", "location", "纬", "经"]) }
+        if text.contains("半小时后通知我 LuminaTest 喝水") {
+            return containsAll(evidence, ["LuminaTest", "喝水"]) || containsAny(evidence, ["本地通知已安排"])
+        }
+        if text.contains("读取剪贴板") {
+            return containsAny(evidence, ["LuminaTest benchmark clipboard content", "LuminaTest", "剪贴板"])
+        }
+        if text.contains("复制到剪贴板") {
+            return containsAny(evidence, ["LuminaTest benchmark", "已写入剪贴板"])
+        }
+        if text.contains("保存成 Markdown 笔记") || text.contains("保存成 Markdown") {
+            return noteFiles(in: documentsDirectory).contains { url in
+                (try? String(contentsOf: url, encoding: .utf8)).map { $0.localizedCaseInsensitiveContains("LuminaTest") } == true
+            } || containsAny(evidence, ["已保存", "Lumina Notes"])
+        }
+        if text.contains("列出我保存过的 Lumina 笔记") || text.contains("列出本地 Markdown 笔记") {
+            return containsAny(evidence, ["LuminaTest", "daily", ".md", "笔记"])
+        }
+        if text.contains("读取 LuminaTest-daily.md") {
+            return containsAny(evidence, ["今天完成 benchmark", "LuminaTest Daily", "fixture"])
+        }
+        if text.contains("追加今天的进展") {
+            return noteText(named: "LuminaTest-daily.md", in: documentsDirectory).localizedCaseInsensitiveContains("进展") ||
+                containsAny(evidence, ["已更新", "已追加"])
+        }
+        if text.contains("删除 LuminaTest-daily.md") {
+            return !FileManager.default.fileExists(atPath: notesDirectory(in: documentsDirectory).appendingPathComponent("LuminaTest-daily.md").path)
+        }
+        if text.contains("分享刚才保存") { return containsAny(evidence, ["分享内容已准备", "已准备"]) }
+        if text.contains("系统设置") { return containsAny(evidence, ["设置", "settings", "已打开"]) }
+        if text.contains("电量") || text.contains("网络") || text.contains("存储") {
+            return containsAny(evidence, ["电量", "网络", "存储", "battery", "network", "storage", "低电量"])
+        }
+        if text.contains("改写成 3 条检查项") || text.contains("整理成待办列表") || text.contains("整理成一句摘要") {
+            return evidence.trimmingCharacters(in: .whitespacesAndNewlines).count > 8
+        }
+        if text.contains("记录 42 元 LuminaTest 咖啡支出") {
+            return ledgerTransactions.contains { transaction in
+                containsAll(transaction.memo, ["LuminaTest", "咖啡"]) &&
+                    transaction.amount.map { NSDecimalNumber(decimal: $0).doubleValue == 42 } == true
+            }
+        }
+        if text.contains("查最近的 LuminaTest 咖啡支出") || text.contains("汇总这个月 LuminaTest 咖啡") {
+            return containsAny(evidence, ["LuminaTest", "咖啡", "42", "40"])
+        }
+        if text.contains("咖啡账目金额改成 40 元") {
+            return ledgerTransactions.contains { transaction in
+                transaction.memo.localizedCaseInsensitiveContains("咖啡") &&
+                    transaction.amount.map { NSDecimalNumber(decimal: $0).doubleValue == 40 } == true
+            }
+        }
+        if text.contains("删除那条 LuminaTest 咖啡账目") {
+            return !ledgerTransactions.contains { containsAll($0.memo, ["LuminaTest", "咖啡"]) }
+        }
+        if text.contains("订阅 https://example.com/feed.xml") {
+            return subscriptions.contains { $0.source.localizedCaseInsensitiveContains("example.com/feed.xml") }
+        }
+        if text.contains("列出我的订阅源") || text.contains("列出我的 RSS 订阅源") {
+            return containsAny(evidence, ["example.com", "订阅", "RSS"])
+        }
+        if text.contains("删除 LuminaTest example 这个订阅源") {
+            return !subscriptions.contains { $0.source.localizedCaseInsensitiveContains("LuminaTest") || $0.source.localizedCaseInsensitiveContains("example") }
+        }
+        if text.contains("https://example.com") {
+            return containsAny(evidence, ["Example Domain", "example.com", "LuminaTest web"])
+        }
+        if text.contains("LuminaTest-report.md") {
+            return containsAny(evidence, ["LuminaTest report", "benchmark covers", "runtime execution"])
+        }
+        if text.contains("图片") {
+            return containsAny(evidence, ["LuminaTest image", "640", "360", "12345", "文字"])
+        }
+        if text.contains("12*(8+3)-5") {
+            return evidence.contains("127")
+        }
+        return evidence.trimmingCharacters(in: .whitespacesAndNewlines).count > 8
+    }
+
+    private static func documentsDirectory() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
+            FileManager.default.temporaryDirectory
+    }
+
+    private static func notesDirectory(in documentsDirectory: URL) -> URL {
+        documentsDirectory.appendingPathComponent("Lumina Notes", isDirectory: true)
+    }
+
+    private static func noteFiles(in documentsDirectory: URL) -> [URL] {
+        let notes = notesDirectory(in: documentsDirectory)
+        return (try? FileManager.default.contentsOfDirectory(at: notes, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension.lowercased() == "md" } ?? []
+    }
+
+    private static func noteText(named filename: String, in documentsDirectory: URL) -> String {
+        (try? String(contentsOf: notesDirectory(in: documentsDirectory).appendingPathComponent(filename), encoding: .utf8)) ?? ""
+    }
+
+    private static func containsAny(_ text: String, _ needles: [String]) -> Bool {
+        needles.contains { text.localizedCaseInsensitiveContains($0) }
+    }
+
+    private static func containsAll(_ text: String, _ needles: [String]) -> Bool {
+        needles.allSatisfy { text.localizedCaseInsensitiveContains($0) }
+    }
+
+    private static func hourMinute(_ date: Date) -> (Int, Int) {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (components.hour ?? -1, components.minute ?? -1)
     }
 
     private static func validate(

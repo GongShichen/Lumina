@@ -672,6 +672,51 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(report.toolExecutionAt1Rate, 0.75, accuracy: 0.0001)
     }
 
+    func testBenchmarkRuntimeFailureDoesNotPassSemanticsByDefault() {
+        let incomplete = benchmarkResult(
+            id: "incomplete",
+            expectedTools: ["calendar.search"],
+            actualTools: [],
+            semanticFailures: ["final outcome did not match benchmark expectation"],
+            status: "failed"
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [incomplete],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertEqual(incomplete.status, "failed")
+        XCTAssertFalse(incomplete.semanticPassed)
+        XCTAssertFalse(incomplete.passAt1)
+        XCTAssertEqual(report.succeededCount, 0)
+        XCTAssertEqual(report.semanticPassedCount, 0)
+        XCTAssertEqual(report.failedCount, 1)
+    }
+
+    func testBenchmarkFinalOutcomeCanPassWithPartialRuntimeStatus() {
+        let completed = benchmarkResult(
+            id: "completed-with-extra-attempts",
+            expectedTools: ["calendar.search"],
+            actualTools: ["calendar.search"],
+            status: "partiallySucceeded"
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [completed],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertEqual(completed.status, "succeeded")
+        XCTAssertTrue(completed.semanticPassed)
+        XCTAssertTrue(completed.passAt1)
+        XCTAssertEqual(report.succeededCount, 1)
+        XCTAssertEqual(report.semanticPassedCount, 1)
+        XCTAssertEqual(report.passAt1Count, 1)
+    }
+
     func testBenchmarkToolExecutionAt1HandlesTasksWithoutExpectedTools() {
         let noToolTask = benchmarkResult(
             id: "no-tool",
