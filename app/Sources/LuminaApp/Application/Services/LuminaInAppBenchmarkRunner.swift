@@ -557,12 +557,7 @@ private enum LuminaBenchmarkSemanticEvaluator {
     }
 
     private static func finalEvidence(from result: LuminaAgentRunResult) -> String {
-        var parts = [result.plan.summary]
-        for toolResult in result.toolResults where toolResult.output["replayed"]?.boolValue != true {
-            parts.append(toolResult.content.compactMap(\.textForModelInput).joined(separator: " "))
-            parts.append(toolResult.output.values.map(valueText).joined(separator: " "))
-        }
-        return parts.joined(separator: "\n")
+        result.plan.summary
     }
 
     private static func outcomeSatisfied(
