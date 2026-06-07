@@ -542,7 +542,16 @@ private enum LuminaBenchmarkSemanticEvaluator {
         let ledgerTransactions = await services.ledgerStore.allTransactions()
         let subscriptions = await services.subscriptionStore.allSubscriptions()
         let documents = documentsDirectory()
-        if !outcomeSatisfied(
+        let executedResults = result.toolResults.filter { $0.output["replayed"]?.boolValue != true }
+        failures.append(contentsOf: validateExpectedTools(
+            expectedTools: task.expectedTools,
+            taskText: text,
+            result: result,
+            toolResults: executedResults
+        ))
+        if finalAnswerRejectsCompletion(evidence) {
+            failures.append("final answer indicates task was not completed")
+        } else if !outcomeSatisfied(
             taskText: text,
             evidence: evidence,
             events: events,
@@ -698,6 +707,53 @@ private enum LuminaBenchmarkSemanticEvaluator {
             return evidence.contains("127")
         }
         return evidence.trimmingCharacters(in: .whitespacesAndNewlines).count > 8
+    }
+
+    private static func validateExpectedTools(
+        expectedTools: [String],
+        taskText: String,
+        result: LuminaAgentRunResult,
+        toolResults: [LuminaToolResult]
+    ) -> [String] {
+        var failures: [String] = []
+        for toolName in expectedTools {
+            guard hasSucceededTool(toolName, in: result) else {
+                failures.append("\(toolName) did not succeed")
+                continue
+            }
+            failures.append(contentsOf: validate(
+                toolName: toolName,
+                taskText: taskText,
+                result: result,
+                toolResults: toolResults
+            ))
+        }
+        return failures
+    }
+
+    private static func hasSucceededTool(_ toolName: String, in result: LuminaAgentRunResult) -> Bool {
+        result.toolResults.contains { toolResult in
+            toolResult.toolName == toolName &&
+                toolResult.status == .succeeded &&
+                toolResult.output["replayed"]?.boolValue != true
+        }
+    }
+
+    private static func finalAnswerRejectsCompletion(_ evidence: String) -> Bool {
+        let failureMarkers = [
+            "无法完成",
+            "无法继续",
+            "执行预算",
+            "没有生成result",
+            "没有生成 result",
+            "不能重复",
+            "缺少",
+            "未找到",
+            "did not return",
+            "空转保护",
+            "Agent 已停止"
+        ]
+        return failureMarkers.contains { evidence.localizedCaseInsensitiveContains($0) }
     }
 
     private static func documentsDirectory() -> URL {
