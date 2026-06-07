@@ -43,14 +43,11 @@ final class AgentAppServices: ObservableObject {
             messageDrafts: messageDrafts,
             calendarStore: evaluationCalendarStore
         )
-        var configuration = environment.runtimeConfiguration
-        configuration.stopOnToolFailure = true
-        configuration.maximumConsecutiveReplayObservations = 3
         return makeRuntime(
             tools: tools,
             contextProvider: LuminaEmptyRuntimeContextProvider(),
             confirmationCoordinator: LuminaAlwaysConfirmCoordinator(),
-            configuration: configuration
+            configuration: evaluationRuntimeConfiguration()
         )
     }()
 
@@ -89,6 +86,15 @@ final class AgentAppServices: ObservableObject {
             hooks: [LuminaAppMemoryPolicyRuntimeHook()],
             contextLoadingPlugin: contextLoadingPlugin
         )
+    }
+
+    private func evaluationRuntimeConfiguration() -> LuminaAgentRuntimeConfiguration {
+        var configuration = environment.runtimeConfiguration
+        configuration.stopOnToolFailure = false
+        configuration.maximumConsecutiveReplayObservations = 3
+        configuration.toolSchemaDisclosureProfile = .full
+        configuration.toolLoadingMode = "direct"
+        return configuration
     }
 
     init(environment: AppEnvironment = .live()) {
@@ -157,15 +163,13 @@ final class AgentAppServices: ObservableObject {
             messageDrafts: messageDrafts,
             calendarStore: evaluationCalendarStore,
             enabledToolNames: Self.evaluationToolNames(for: task.text, category: task.category)
+                .union(task.expectedTools)
         )
-        var configuration = environment.runtimeConfiguration
-        configuration.stopOnToolFailure = true
-        configuration.maximumConsecutiveReplayObservations = 3
         let runtime = makeRuntime(
             tools: tools,
             contextProvider: environment.contextProvider,
             confirmationCoordinator: LuminaAlwaysConfirmCoordinator(),
-            configuration: configuration
+            configuration: evaluationRuntimeConfiguration()
         )
         return runtime.runStream(request: LuminaAgentRequest(
             systemInstructions: LuminaAppSystemInstructions.evaluation,
@@ -266,9 +270,7 @@ final class AgentAppServices: ObservableObject {
             has("写入", "复制到剪贴板") ? add("clipboard.write") : add("clipboard.read")
             if has("整理", "摘要", "总结", "改写") { add("text.transform") }
         case "file":
-            if has("保存成", "保存") {
-                add("file.save_note")
-            } else if has("列出") {
+            if has("列出") {
                 add("file.list_notes")
             } else if has("读取") {
                 add("file.read_note")
@@ -276,6 +278,8 @@ final class AgentAppServices: ObservableObject {
                 add("file.list_notes", "file.update_note")
             } else if has("删除") {
                 add("file.list_notes", "file.delete_note")
+            } else if has("保存成", "保存") {
+                add("file.save_note")
             }
             if has("整理", "摘要", "总结", "改写") { add("text.transform") }
         case "share":
@@ -308,7 +312,11 @@ final class AgentAppServices: ObservableObject {
             add("document.read_text")
             if has("整理", "摘要", "总结", "提取") { add("text.transform") }
         case "image":
-            add("image.extract_text")
+            if has("尺寸", "大小", "文件大小", "metadata", "元数据") {
+                add("image.describe_metadata")
+            } else {
+                add("image.extract_text")
+            }
         case "media":
             add("image.describe_metadata")
         case "local":

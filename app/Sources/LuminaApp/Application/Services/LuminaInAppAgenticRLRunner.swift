@@ -51,6 +51,7 @@ final class LuminaInAppAgenticRLRunner {
         var latestPromptTokens: Int?
         var latestSampledTokens = 0
         var latestOutputTokens = 0
+        var latestActivity = "模型生成"
         let taskStartedAt = ContinuousClock.now
         observer.start()
         for await event in services.runEvaluationStream(content: [.text(task.instruction)]) {
@@ -72,10 +73,11 @@ final class LuminaInAppAgenticRLRunner {
                     currentTask: "\(task.instruction) · 模型生成中 \(Self.elapsedText(since: taskStartedAt))\(promptText)\(outputText)",
                     completed: completed,
                     total: total,
-                    latestTool: "model.generating"
+                    latestTool: latestActivity
                 ))
             }
             if case let .actionProposed(call) = event {
+                latestActivity = call.toolName
                 progress(LuminaAgenticRLSnapshot(
                     state: .running,
                     currentTask: "\(task.instruction) · action \(call.toolName)",
@@ -85,15 +87,17 @@ final class LuminaInAppAgenticRLRunner {
                 ))
             }
             if case let .confirmationRequired(call) = event {
+                latestActivity = "确认 \(call.toolName)"
                 progress(LuminaAgenticRLSnapshot(
                     state: .running,
                     currentTask: "\(task.instruction) · 自动确认 \(call.toolName)",
                     completed: completed,
                     total: total,
-                    latestTool: "confirming.\(call.toolName)"
+                    latestTool: latestActivity
                 ))
             }
             if case let .toolStarted(call) = event {
+                latestActivity = call.toolName
                 progress(LuminaAgenticRLSnapshot(
                     state: .running,
                     currentTask: "\(task.instruction) · 执行 \(call.toolName)",
@@ -103,6 +107,7 @@ final class LuminaInAppAgenticRLRunner {
                 ))
             }
             if case let .toolFinished(result) = event {
+                latestActivity = result.toolName
                 progress(LuminaAgenticRLSnapshot(
                     state: .running,
                     currentTask: "\(task.instruction) · \(result.toolName) \(result.status.rawValue)",

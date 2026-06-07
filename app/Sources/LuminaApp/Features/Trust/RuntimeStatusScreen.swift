@@ -66,8 +66,8 @@ struct RuntimeStatusScreen: View {
                         tint: LuminaTheme.amber
                     )
                     LuminaStatusPill(
-                        title: "Tool",
-                        value: benchmarkSnapshot.latestTool ?? "waiting",
+                        title: "Activity",
+                        value: benchmarkActivityText,
                         systemImage: "hammer.fill",
                         tint: LuminaTheme.aqua
                     )
@@ -108,27 +108,71 @@ struct RuntimeStatusScreen: View {
         }
     }
 
+    private var benchmarkActivityText: String {
+        guard let rawValue = benchmarkSnapshot.latestTool?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawValue.isEmpty else {
+            return benchmarkSnapshot.isRunning ? "模型生成" : "等待"
+        }
+        if rawValue == "model.generating" || rawValue.hasPrefix("model.") {
+            return "模型生成"
+        }
+        if rawValue.hasPrefix("confirming.") {
+            return "确认 \(String(rawValue.dropFirst("confirming.".count)))"
+        }
+        return rawValue
+    }
+
     private func benchmarkReportSummary(_ report: LuminaBenchmarkReport) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("最近报告")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(LuminaTheme.ink)
-            HStack(spacing: 10) {
-                LuminaMetricTile(title: "F1", value: percent(report.microF1), caption: "tool micro F1", tint: LuminaTheme.mint)
-                LuminaMetricTile(title: "Recall", value: percent(report.microRecall), caption: "tool recall", tint: LuminaTheme.aqua)
-            }
-            HStack(spacing: 10) {
-                LuminaMetricTile(title: "P95", value: "\(Int(report.latencyP95Milliseconds))ms", caption: "end-to-end", tint: LuminaTheme.amber)
-                LuminaMetricTile(title: "Pass@1", value: percent(report.passAt1Rate), caption: "\(report.passAt1Count)/\(report.completedCount)", tint: LuminaTheme.lavender)
-            }
-            HStack(spacing: 10) {
-                LuminaMetricTile(title: "Exec@1", value: percent(report.toolExecutionAt1Rate), caption: "\(report.toolExecutionAt1Count) tool task(s)", tint: LuminaTheme.rose)
-                LuminaMetricTile(title: "Ctx", value: "\(report.contextLoadingCatalogEmittedCount)", caption: "catalog emitted", tint: LuminaTheme.mint)
-            }
-            HStack(spacing: 10) {
-                LuminaMetricTile(title: "Ctx Load", value: "\(report.contextLoadingLoadedCount + report.contextLoadingRangeLoadedCount)", caption: "sections loaded", tint: LuminaTheme.aqua)
-                LuminaMetricTile(title: "Ctx Hit", value: percent(report.contextLoadingHitRate), caption: "\(report.contextLoadingSearchCount) search(es)", tint: LuminaTheme.amber)
-            }
+
+            benchmarkMetricSection("结果", metrics: [
+                BenchmarkMetric(title: "Succeeded", value: "\(report.succeededCount)/\(report.completedCount)", caption: "任务完成数", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Semantic", value: percent(report.semanticPassRate), caption: "\(report.semanticPassedCount)/\(report.completedCount)", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Pass@1", value: percent(report.passAt1Rate), caption: "\(report.passAt1Count)/\(report.completedCount) strict", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Failed", value: "\(report.failedCount)", caption: "语义未完成", tint: LuminaTheme.rose)
+            ])
+
+            benchmarkMetricSection("工具选择", metrics: [
+                BenchmarkMetric(title: "F1", value: percent(report.microF1), caption: "tool micro F1", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Precision", value: percent(report.microPrecision), caption: "tool precision", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Recall", value: percent(report.microRecall), caption: "tool recall", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Exact", value: percent(report.exactToolMatch), caption: "工具集合完全匹配", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Exec@1", value: percent(report.toolExecutionAt1Rate), caption: "\(report.toolExecutionAt1Count) tool task(s)", tint: LuminaTheme.rose)
+            ])
+
+            benchmarkMetricSection("运行时诊断", metrics: [
+                BenchmarkMetric(title: "Normalize", value: "\(report.normalizationFailureCount)", caption: "XML/JSON 修复失败", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Schema", value: "\(report.schemaValidationFailureCount)", caption: "入参校验失败", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Unknown", value: "\(report.unknownToolRejectCount)", caption: "未知工具拒绝", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Obs Reject", value: "\(report.modelOwnedObservationRejectCount)", caption: "模型伪 observation", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Retry", value: "\(report.retryCount)", caption: "runtime retry", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Fallback", value: "\(report.fallbackCount)", caption: "fallback count", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Tool Fail", value: "\(report.toolFailureCount)", caption: "工具执行失败", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Contract", value: "\(report.runtimeContractFailureCount)", caption: percent(report.runtimeContractFailureRate), tint: LuminaTheme.lavender)
+            ])
+
+            benchmarkMetricSection("性能", metrics: [
+                BenchmarkMetric(title: "Active P95", value: milliseconds(report.latencyP95Milliseconds), caption: "runtime active", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Wall P95", value: milliseconds(report.wallClockP95Milliseconds), caption: "wall-clock", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Gen P95", value: milliseconds(report.stepGenerationP95Milliseconds), caption: "model step", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Tool P95", value: milliseconds(report.toolP95Milliseconds), caption: "tool latency", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "TTFT P95", value: milliseconds(report.modelTTFTP95Milliseconds), caption: "time to first token", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Tok/s", value: decimal(report.modelTokensPerSecondP50), caption: "model p50", tint: LuminaTheme.amber)
+            ])
+
+            benchmarkMetricSection("工具/上下文加载", metrics: [
+                BenchmarkMetric(title: "Tool Hit", value: percent(report.toolDiscoveryHitRate), caption: "\(report.toolLoadingSearchCount) search(es)", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Deferred Unk", value: percent(report.deferredUnknownToolRate), caption: "deferred unknown rate", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Tool Load", value: "\(report.toolLoadingLoadedCount)", caption: "\(report.toolLoadingLoadFailedCount) failed", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Ctx", value: "\(report.contextLoadingCatalogEmittedCount)", caption: "catalog emitted", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Ctx Load", value: "\(report.contextLoadingLoadedCount + report.contextLoadingRangeLoadedCount)", caption: "sections loaded", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Ctx Hit", value: percent(report.contextLoadingHitRate), caption: "\(report.contextLoadingSearchCount) search(es)", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Ctx Cache", value: "\(report.contextLoadingCacheHitCount)", caption: "\(report.contextLoadingTokensEstimate) token est.", tint: LuminaTheme.lavender)
+            ])
+
             if let url = report.markdownReportURL ?? report.jsonReportURL {
                 Text("已导出：\(url.lastPathComponent)")
                     .font(.caption2.monospaced())
@@ -137,7 +181,41 @@ struct RuntimeStatusScreen: View {
         }
     }
 
+    private func benchmarkMetricSection(_ title: String, metrics: [BenchmarkMetric]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 10),
+                GridItem(.flexible(), spacing: 10)
+            ], spacing: 10) {
+                ForEach(metrics) { metric in
+                    LuminaMetricTile(title: metric.title, value: metric.value, caption: metric.caption, tint: metric.tint)
+                }
+            }
+        }
+    }
+
     private func percent(_ value: Double) -> String {
         "\(Int((value * 100).rounded()))%"
     }
+
+    private func milliseconds(_ value: Double?) -> String {
+        guard let value else { return "n/a" }
+        return "\(Int(value.rounded()))ms"
+    }
+
+    private func decimal(_ value: Double?) -> String {
+        guard let value else { return "n/a" }
+        return String(format: "%.1f", value)
+    }
+}
+
+private struct BenchmarkMetric: Identifiable {
+    var id: String { "\(title)-\(caption)" }
+    let title: String
+    let value: String
+    let caption: String
+    let tint: Color
 }

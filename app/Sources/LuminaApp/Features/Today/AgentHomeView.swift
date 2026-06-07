@@ -657,7 +657,7 @@ private struct RuntimeLabSuite {
             tools: [runtimeEchoTool(signals: signals)],
             stepGenerator: LuminaUnavailableReActStepGenerator(),
             configuration: LuminaAgentRuntimeConfiguration(
-                maximumToolCalls: 4,
+                maximumToolCalls: 10,
                 maximumReActIterations: 4,
                 maximumObservationCharacters: 2_000,
                 contextWindowTokens: 4_096,
@@ -673,6 +673,7 @@ private struct RuntimeLabSuite {
                 emitVerboseEvents: true,
                 preservedStepsAfterCompaction: 4,
                 toolSchemaDisclosureProfile: .compact,
+                toolLoadingMode: "direct",
                 checkpointPolicy: .onStep
             ),
             permissionGate: LuminaDefaultPermissionGate(),

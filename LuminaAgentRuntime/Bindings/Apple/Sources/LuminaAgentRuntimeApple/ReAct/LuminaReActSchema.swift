@@ -20,6 +20,7 @@ public enum LuminaReActSchema {
     - parameters must be a JSON object; use {} when there are no inputs.
     - requires_confirmation is optional; set true for side-effect tools.
     - The runtime creates observations after tools run. The model must never output type=observation.
+    - Use result only after the whole user goal is complete; otherwise call the next required tool.
     - Do not use nested tool_use, tool_call, action, tool_code, arguments, input, targetReference, or put the tool name in type.
     - Do not use markdown fences, XML tags, Action:, or Observation:.
     - Invalid: {"type":"device.current_time","input":{}}
@@ -34,7 +35,7 @@ public enum LuminaReActSchema {
     <thought>blocked</thought><cannot_complete>reason</cannot_complete>
     For tools, put the exact tool name in the name attribute and put only the JSON parameters object inside the tag.
     Forbidden keys/values: tool_call, function, args, arguments, input, targetReference, action, toolUse.
-    Use only tool names from Tools(all). Never output observation; observations are runtime-only. No markdown fences.
+    Use only tool names from Tools(all). Never output observation; observations are runtime-only. Use <result> only after the whole user goal is complete. No markdown fences.
     """
 
     public static func repairPrompt(
@@ -69,9 +70,9 @@ public enum LuminaReActSchema {
 
         Repair rules:
         - If a tool is still needed, use type="tool_use"; put the exact tool name in tool_name; put only tool parameters in parameters.
-        - If the latest runtime observation already satisfies the user task, use result.content as user-facing Markdown.
+        - If the latest runtime observation satisfies the whole user task, use result.content as user-facing Markdown; otherwise continue with the next needed tool.
         - Never output observation; observations are runtime-owned.
-        - Never repeat an identical tool call that the latest observation says already succeeded or was replayed.
+        - Do not blindly repeat an identical tool call that the latest observation says already succeeded or was replayed; if repeating is intentional, use a distinct idempotency key when supported.
         - Never output keys named tool_call, tool_use, function, args, arguments, input, targetReference, action, name, duration, or command.
         - If the invalid response said "Call some.tool" or contained a tool_use field, convert that intention to the valid tool_use shape.
         - If the invalid response used a date from the past, recompute from the latest device.current_time observation when possible.
@@ -111,9 +112,10 @@ public enum LuminaReActSchema {
 
         Repair rules:
         - If a tool is still needed, use <tool_use>; put the exact tool name in name; put only one JSON object inside the tag.
+        - Use <result> only when the whole user task is complete from runtime-observed facts.
         - Never output <think>, <parameters>, <observation>, <result> inside <tool_use>, schema fields, placeholder IDs, args, arguments, input, or tool_call.
-        - If the latest runtime observation failed due to permission, cancellation, schema, missing parameter, unknown tool, or repeated identical tool call, do not retry it; output <cannot_complete> or choose a different valid tool.
-        - If the latest runtime observation says replayed=true, do not repeat the identical tool_name + parameters.
+        - If the latest runtime observation failed due to permission, cancellation, schema, missing parameter, unknown tool, or repeated identical tool call, do not blindly retry it; correct the call, output <cannot_complete>, or choose a different valid tool.
+        - If the latest runtime observation says replayed=true, continue from that observation; only repeat intentionally with a distinct idempotency key when supported.
         - Use only these tool names: \(availableToolNames.sorted().joined(separator: ", ")).
         - The invalid response was intentionally omitted so forbidden tags are not copied. Rewrite from the task and latest observation only.
         """

@@ -67,7 +67,7 @@ struct AppEnvironment {
             ),
             contextProvider: LuminaEmptyRuntimeContextProvider(),
             runtimeConfiguration: LuminaAgentRuntimeConfiguration(
-                maximumToolCalls: 8,
+                maximumToolCalls: 10,
                 maximumReActIterations: 12,
                 maximumObservationCharacters: 1_500,
                 contextWindowTokens: 12_000,
@@ -81,7 +81,8 @@ struct AppEnvironment {
                 stopOnToolFailure: false,
                 rollbackFailedSideEffects: true,
                 emitVerboseEvents: true,
-                preservedStepsAfterCompaction: 6
+                preservedStepsAfterCompaction: 6,
+                toolLoadingMode: "direct"
             )
         )
     }

@@ -146,7 +146,6 @@ bool ensure_model_loaded(const std::string & model_path, std::string & error) {
         llama_log_set(llama_log_callback, nullptr);
         ggml_backend_load_all();
         llama_backend_init();
-        std::atexit(cleanup_backend);
         g_backend_initialized = true;
     }
 
@@ -197,8 +196,8 @@ std::string chat_wrapped_prompt(const std::string & prompt) {
            "<|im_start|>assistant\n";
 }
 
-std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::string & text, std::string & error) {
-    int32_t count = llama_tokenize(vocab, text.c_str(), static_cast<int32_t>(text.size()), nullptr, 0, true, true);
+std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::string & text, bool add_special, std::string & error) {
+    int32_t count = llama_tokenize(vocab, text.c_str(), static_cast<int32_t>(text.size()), nullptr, 0, add_special, true);
     if (count == 0) {
         error = "Tokenizer returned zero tokens.";
         return {};
@@ -207,7 +206,7 @@ std::vector<llama_token> tokenize(const llama_vocab * vocab, const std::string &
         count = -count;
     }
     std::vector<llama_token> tokens(static_cast<size_t>(count));
-    int32_t actual = llama_tokenize(vocab, text.c_str(), static_cast<int32_t>(text.size()), tokens.data(), count, true, true);
+    int32_t actual = llama_tokenize(vocab, text.c_str(), static_cast<int32_t>(text.size()), tokens.data(), count, add_special, true);
     if (actual < 0) {
         error = "Failed to tokenize MiniCPM-V prompt.";
         return {};
@@ -403,35 +402,6 @@ bool violates_forbidden_xml_contract(const std::string & candidate) {
     return ends_with_forbidden_xml_prefix(lowered);
 }
 
-llama_token sample_xml_contract_token(
-    llama_sampler * sampler,
-    llama_context * ctx,
-    const llama_vocab * vocab,
-    const std::string & output
-) {
-    float * logits = llama_get_logits_ith(ctx, -1);
-    if (logits == nullptr) {
-        return llama_sampler_sample(sampler, ctx, -1);
-    }
-    const int n_vocab = llama_vocab_n_tokens(vocab);
-    for (int attempt = 0; attempt < 128; ++attempt) {
-        llama_token token = llama_sampler_sample(sampler, ctx, -1);
-        if (llama_vocab_is_eog(vocab, token)) {
-            return token;
-        }
-        const std::string piece = token_piece(vocab, token);
-        if (!violates_forbidden_xml_contract(output + piece)) {
-            return token;
-        }
-        if (token >= 0 && token < n_vocab) {
-            logits[token] = -std::numeric_limits<float>::infinity();
-        } else {
-            break;
-        }
-    }
-    return llama_sampler_sample(sampler, ctx, -1);
-}
-
 } // namespace
 
 extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
@@ -465,7 +435,8 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     const llama_vocab * vocab = llama_model_get_vocab(g_model);
     const std::string prompt_text = chat_wrapped_prompt(raw_prompt);
     printf("[Lumina][C++] Tokenizing prompt (length: %zu)...\n", prompt_text.size());
-    std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, error);
+    const bool prompt_has_chat_template = prompt_text.find("<|im_start|>") != std::string::npos;
+    std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, !prompt_has_chat_template, error);
     if (prompt_tokens.empty()) {
         printf("[Lumina][C++] Tokenization FAILED.\n");
         return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
@@ -546,9 +517,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
 
     int tokens_after_first_json_char = 0;
     for (int i = 0; i < effective_max_output_tokens; ++i) {
-        llama_token token = xml_step
-            ? sample_xml_contract_token(sampler, ctx, vocab, output)
-            : llama_sampler_sample(sampler, ctx, -1);
+        llama_token token = llama_sampler_sample(sampler, ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) {
             if (xml_step && append_xml_eog_closing_repair(output) && contains_complete_xml_step(output)) {
                 break;

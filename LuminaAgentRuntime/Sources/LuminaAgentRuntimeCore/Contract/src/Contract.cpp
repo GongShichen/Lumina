@@ -3,7 +3,7 @@
 namespace LuminaAgent {
 
 std::string reactStepSchemaJson() {
-    return R"({"schema_version":"1.0","dialect":"xml_tags","allowed_step_tags":["thought","tool_use","result","cannot_complete","ask_user"],"rules":["Output exactly one Lumina XML ReAct step and nothing else.","The first bytes must be <thought>.","Tool step shape: <thought>why</thought><tool_use name=\"tool.name\" requires_confirmation=\"false\">{}</tool_use>.","The content inside <tool_use> must be exactly one JSON object.","Answer shape: <thought>done</thought><result>Markdown answer</result>.","Blocker shape: <thought>blocked</thought><cannot_complete>reason</cannot_complete>.","Never emit observations; observations are runtime-owned.","Never output <tools_use>, <think>, <tool_call>, <observation>, prose before XML, markdown fences, or JSON ReAct objects."]})";
+    return R"({"schema_version":"1.0","dialect":"xml_tags","allowed_step_tags":["thought","tool_use","result","cannot_complete","ask_user"],"rules":["Output exactly one Lumina XML ReAct step and nothing else.","The first bytes must be <thought>.","Tool step shape: <thought>why</thought><tool_use name=\"tool.name\" requires_confirmation=\"false\">{}</tool_use>.","The content inside <tool_use> must be exactly one JSON object.","Answer shape: <thought>done</thought><result>Markdown answer</result>.","Use result only after the whole user goal is complete from runtime-observed facts.","Blocker shape: <thought>blocked</thought><cannot_complete>reason</cannot_complete>.","Never emit observations; observations are runtime-owned.","Never output <tools_use>, <think>, <tool_call>, <observation>, prose before XML, markdown fences, or JSON ReAct objects."]})";
 }
 
 std::string taskEnvelopeSchemaJson() {

@@ -28,10 +28,14 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
 
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
+        let dueDate = Self.date(from: arguments.string("dueDateISO"))
+        if let dueDate, dueDate < Date().addingTimeInterval(-300) {
+            return Self.failedResult("reminder.create dueDateISO is in the past; call device.current_time and recompute a future ISO8601 time.")
+        }
         let reminder = LuminaReminderItem(
             title: arguments.string("title") ?? "Agent Reminder",
             notes: arguments.string("notes"),
-            dueDate: Self.date(from: arguments.string("dueDateISO"))
+            dueDate: dueDate
         )
         let id = await store.addReminder(reminder)
         return LuminaToolResult(
@@ -52,5 +56,16 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
     private static func date(from value: String?) -> Date? {
         guard let value else { return nil }
         return ISO8601DateFormatter().date(from: value)
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "reminder.create",
+            status: .failed,
+            output: ["summary": .string(message)],
+            content: [.text(message)],
+            errorMessage: message
+        )
     }
 }

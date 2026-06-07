@@ -37,6 +37,370 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue(result.plan.summary.contains("真实记忆摘要"))
     }
 
+    func testToolRouterReturnsFailedResultForMissingRequiredParameter() async {
+        let schema = LuminaToolSchema(
+            name: "file.save_note",
+            description: "Save note",
+            parameters: [
+                LuminaToolParameterSchema(name: "body", type: .string, description: "Body")
+            ],
+            sideEffect: .appLocalWrite
+        )
+        let calls = ActorBox(0)
+        let tool = AnyLuminaAgentTool(schema: schema) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "file.save_note", status: .succeeded)
+        }
+        let router = LuminaToolRouter(
+            tools: [tool],
+            permissionGate: LuminaDefaultPermissionGate(),
+            confirmationCoordinator: LuminaAlwaysConfirmCoordinator()
+        )
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(toolName: "file.save_note", arguments: [:], requiresConfirmation: false),
+            request: LuminaAgentRequest(text: "save")
+        )
+
+        XCTAssertEqual(result.status, .failed)
+        let callCount = await calls.value
+        XCTAssertEqual(callCount, 0)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter body") == true)
+    }
+
+    func testToolRouterRejectsReminderAliasesWithoutRequiredTitle() async {
+        let schema = LuminaToolSchema(
+            name: "reminder.create",
+            description: "Create reminder",
+            parameters: [
+                LuminaToolParameterSchema(name: "title", type: .string, description: "Reminder title."),
+                LuminaToolParameterSchema(name: "dueDateISO", type: .dateISO8601, description: "Due date.", required: false)
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "reminder.create", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "reminder.create",
+                arguments: [
+                    "text": .string("LuminaTest 带伞"),
+                    "time": .string("2026-06-05T08:00:00+08:00")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "明天早上 8 点提醒我 LuminaTest 带伞")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.failed)
+        XCTAssertTrue(arguments.isEmpty)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter title") == true)
+    }
+
+    func testToolRouterRejectsFileUpdateAliasesWithoutRequiredFilename() async {
+        let schema = LuminaToolSchema(
+            name: "file.update_note",
+            description: "Update note",
+            parameters: [
+                LuminaToolParameterSchema(name: "filename", type: .string, description: "Filename."),
+                LuminaToolParameterSchema(name: "body", type: .string, description: "Body."),
+                LuminaToolParameterSchema(name: "mode", type: .string, description: "Mode.", required: false)
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "file.update_note", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "file.update_note",
+                arguments: [
+                    "note": .string("LuminaTest-daily.md"),
+                    "update": .string("今天的进展")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "给 LuminaTest-daily.md 追加今天的进展")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.failed)
+        XCTAssertTrue(arguments.isEmpty)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter filename") == true)
+    }
+
+    func testToolRouterRejectsLedgerRecordAliasesWithoutRequiredMemo() async {
+        let schema = LuminaToolSchema(
+            name: "ledger.record",
+            description: "Record ledger",
+            parameters: [
+                LuminaToolParameterSchema(name: "memo", type: .string, description: "Memo."),
+                LuminaToolParameterSchema(name: "amount", type: .number, description: "Amount.", required: false)
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "ledger.record", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "ledger.record",
+                arguments: [
+                    "note": .string("LuminaTest 咖啡"),
+                    "amount": .string("42")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "记录 42 元 LuminaTest 咖啡支出")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.failed)
+        XCTAssertTrue(arguments.isEmpty)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter memo") == true)
+    }
+
+    func testToolRouterPassesLedgerUpdateObjectAliasesThrough() async {
+        let schema = LuminaToolSchema(
+            name: "ledger.update",
+            description: "Update ledger",
+            parameters: [
+                LuminaToolParameterSchema(name: "id", type: .string, description: "ID."),
+                LuminaToolParameterSchema(name: "memo", type: .string, description: "Memo.", required: false),
+                LuminaToolParameterSchema(name: "amount", type: .number, description: "Amount.", required: false)
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "ledger.update", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "ledger.update",
+                arguments: [
+                    "id": .string("ledger-1"),
+                    "query": .string("LuminaTest 咖啡"),
+                    "update": .object(["amount": .number(40)])
+                ]
+            ),
+            request: LuminaAgentRequest(text: "把 LuminaTest 咖啡金额改成 40 元")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.succeeded)
+        XCTAssertEqual(arguments["id"]?.stringValue, "ledger-1")
+        XCTAssertNil(arguments["amount"]?.numberValue)
+        XCTAssertNotNil(arguments["update"])
+    }
+
+    func testToolRouterRejectsLedgerUpdateQueryWithoutRequiredID() async {
+        let schema = LuminaToolSchema(
+            name: "ledger.update",
+            description: "Update ledger",
+            parameters: [
+                LuminaToolParameterSchema(name: "id", type: .string, description: "ID."),
+                LuminaToolParameterSchema(name: "amount", type: .number, description: "Amount.", required: false)
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "ledger.update", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "ledger.update",
+                arguments: [
+                    "query": .string("LuminaTest 咖啡"),
+                    "update": .object(["amount": .number(40)])
+                ]
+            ),
+            request: LuminaAgentRequest(text: "把 LuminaTest 咖啡账目金额改成 40 元")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.failed)
+        XCTAssertTrue(arguments.isEmpty)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter id") == true)
+    }
+
+    func testToolRouterRejectsContactUpdateQueryWithoutRequiredName() async {
+        let schema = LuminaToolSchema(
+            name: "contacts.update",
+            description: "Update contact",
+            parameters: [
+                LuminaToolParameterSchema(name: "name", type: .string, description: "Name."),
+                LuminaToolParameterSchema(name: "email", type: .string, description: "Email.")
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "contacts.update", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "contacts.update",
+                arguments: [
+                    "query": .string("LuminaTest test"),
+                    "email": .string("test@example.com")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "给 LuminaTest test 加一个邮箱 test@example.com")
+        )
+
+        let arguments = await captured.value
+
+        XCTAssertEqual(result.status, LuminaToolResultStatus.failed)
+        XCTAssertTrue(arguments.isEmpty)
+        XCTAssertTrue(result.errorMessage?.contains("missing required parameter name") == true)
+    }
+
+    func testToolRouterPassesCalendarAvailabilityArgumentsThrough() async {
+        let schema = LuminaToolSchema(
+            name: "calendar.availability",
+            description: "Check availability",
+            parameters: [
+                LuminaToolParameterSchema(name: "startDateISO", type: .dateISO8601, description: "Start date."),
+                LuminaToolParameterSchema(name: "endDateISO", type: .dateISO8601, description: "End date.")
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "calendar.availability", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "calendar.availability",
+                arguments: [
+                    "startDateISO": .string("2026-06-05T00:00:00+08:00"),
+                    "endDateISO": .string("2026-06-05T00:30:00+08:00")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "我明天下午三点到四点有空吗")
+        )
+
+        let arguments = await captured.value
+        XCTAssertEqual(result.status, LuminaToolResultStatus.succeeded)
+        XCTAssertEqual(arguments["startDateISO"]?.stringValue, "2026-06-05T00:00:00+08:00")
+        XCTAssertEqual(arguments["endDateISO"]?.stringValue, "2026-06-05T00:30:00+08:00")
+    }
+
+    func testToolRouterPassesCalendarUpdateArgumentsThrough() async {
+        let schema = LuminaToolSchema(
+            name: "calendar.update",
+            description: "Update calendar event",
+            parameters: [
+                LuminaToolParameterSchema(name: "id", type: .string, description: "Event id."),
+                LuminaToolParameterSchema(name: "startDateISO", type: .dateISO8601, description: "Start date."),
+                LuminaToolParameterSchema(name: "endDateISO", type: .dateISO8601, description: "End date.")
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(callID: UUID(), toolName: "calendar.update", status: .succeeded)
+        }
+        let router = LuminaToolRouter(tools: [tool])
+
+        let (result, _, _) = await router.execute(
+            call: LuminaToolCall(
+                toolName: "calendar.update",
+                arguments: [
+                    "id": .string("event-1"),
+                    "startDateISO": .string("2026-06-05T07:00:00+08:00"),
+                    "endDateISO": .string("2026-06-05T07:15:00+08:00")
+                ]
+            ),
+            request: LuminaAgentRequest(text: "把 LuminaTest 明天 7 点的日程改成 7 点半")
+        )
+
+        let arguments = await captured.value
+        XCTAssertEqual(result.status, LuminaToolResultStatus.succeeded)
+        XCTAssertEqual(arguments["startDateISO"]?.stringValue, "2026-06-05T07:00:00+08:00")
+        XCTAssertEqual(arguments["endDateISO"]?.stringValue, "2026-06-05T07:15:00+08:00")
+    }
+
+    func testRuntimeExecutesModelToolArgumentsWithoutAnnotation() async {
+        let schema = LuminaToolSchema(
+            name: "calendar.create",
+            description: "Create event",
+            parameters: [
+                LuminaToolParameterSchema(name: "title", type: .string, description: "Title."),
+                LuminaToolParameterSchema(name: "startDateISO", type: .dateISO8601, description: "Start date."),
+                LuminaToolParameterSchema(name: "endDateISO", type: .dateISO8601, description: "End date.")
+            ],
+            sideEffect: .readOnly
+        )
+        let captured = ArgumentBox()
+        let tool = AnyLuminaAgentTool(schema: schema) { arguments, _ in
+            await captured.set(arguments)
+            return LuminaToolResult(
+                callID: UUID(),
+                toolName: "calendar.create",
+                status: .succeeded,
+                output: ["title": arguments["title"] ?? .string("")]
+            )
+        }
+        let model = ScriptedReActModel(steps: [
+            .action(
+                thought: "Create event.",
+                call: LuminaToolCall(
+                    toolName: "calendar.create",
+                    arguments: [
+                        "title": .string("LuminaTest 去上厕所"),
+                        "startDateISO": .string("2026-06-05T07:00:00+08:00"),
+                        "endDateISO": .string("2026-06-05T07:30:00+08:00")
+                    ],
+                    requiresConfirmation: false
+                )
+            ),
+            .result("done")
+        ])
+        let runtime = LuminaAgentRuntime(tools: [tool], stepGenerator: model, configuration: luminaTestRuntimeConfiguration)
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "创建明天上午 7 点的日程：LuminaTest 去上厕所"))
+
+        let arguments = await captured.value
+        let output = result.toolResults.first?.output
+
+        XCTAssertEqual(result.status, .succeeded)
+        XCTAssertEqual(arguments["startDateISO"]?.stringValue, "2026-06-05T07:00:00+08:00")
+        XCTAssertEqual(arguments["endDateISO"]?.stringValue, "2026-06-05T07:30:00+08:00")
+        XCTAssertNil(output?["_executed_arguments"])
+    }
+
     func testRuntimeHookOrderIsObservable() async {
         let hook = RecordingRuntimeHook()
         let runtime = LuminaAgentRuntime(
@@ -243,12 +607,14 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertFalse(result.toolResults.contains { $0.output["replayed"]?.boolValue == true })
     }
 
-    func testReActParserRejectsUnknownTool() throws {
+    func testReActParserPreservesUnknownToolForRuntimeObservation() throws {
         let json = """
         {"type":"tool_use","thought":"x","tool_name":"missing","parameters":{},"requires_confirmation":false}
         """
 
-        XCTAssertThrowsError(try LuminaReActStepParser.parse(json: json, availableTools: []))
+        let step = try LuminaReActStepParser.parse(json: json, availableTools: [])
+        XCTAssertEqual(step.kind, .action)
+        XCTAssertEqual(step.action?.toolName, "missing")
     }
 
     func testReActParserParsesStandardFinalAnswerShape() throws {
@@ -602,6 +968,18 @@ private actor ActorBox {
 
     func increment() {
         storage += 1
+    }
+}
+
+private actor ArgumentBox {
+    private var storage: [String: LuminaJSONValue] = [:]
+
+    var value: [String: LuminaJSONValue] {
+        storage
+    }
+
+    func set(_ value: [String: LuminaJSONValue]) {
+        storage = value
     }
 }
 

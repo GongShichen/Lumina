@@ -25,7 +25,23 @@ extension LuminaExtendedToolCatalog {
                 param("notes", "备注。", required: false, sensitive: true)
             ], sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = arguments.string("id") else { return failed("calendar.update", "缺少事件 identifier。") }
+                guard let id = await calendarID(arguments: arguments, store: calendarStore) else { return failed("calendar.update", "缺少事件 identifier。") }
+                if let rawStart = arguments.string("startDateISO") {
+                    guard let parsedStart = date(rawStart) else {
+                        return failed("calendar.update", "startDateISO 不是有效 ISO8601 时间。")
+                    }
+                    guard parsedStart >= Date().addingTimeInterval(-300) else {
+                        return failed("calendar.update", "startDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
+                    }
+                }
+                if let rawEnd = arguments.string("endDateISO") {
+                    guard let parsedEnd = date(rawEnd) else {
+                        return failed("calendar.update", "endDateISO 不是有效 ISO8601 时间。")
+                    }
+                    guard parsedEnd >= Date().addingTimeInterval(-300) else {
+                        return failed("calendar.update", "endDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
+                    }
+                }
                 let event = await calendarStore.updateEvent(
                     id: id,
                     title: arguments.string("title"),
@@ -42,7 +58,7 @@ extension LuminaExtendedToolCatalog {
             },
             tool(name: "calendar.delete", description: "删除指定日历事件。", params: [param("id", "事件 identifier。")], sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = arguments.string("id") else { return failed("calendar.delete", "缺少事件 identifier。") }
+                guard let id = await calendarID(arguments: arguments, store: calendarStore) else { return failed("calendar.delete", "缺少事件 identifier。") }
                 let removed = await calendarStore.removeEvent(id: id)
                 return removed ? succeeded("calendar.delete", "日历事件已删除。", ["id": .string(id)]) : failed("calendar.delete", "没有找到要删除的日历事件。")
             },
@@ -51,8 +67,18 @@ extension LuminaExtendedToolCatalog {
                 param("endDateISO", "结束时间。", type: .dateISO8601)
             ], sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                let start = date(arguments.string("startDateISO")) ?? Date()
-                let end = date(arguments.string("endDateISO")) ?? start.addingTimeInterval(3_600)
+                guard let start = date(arguments.string("startDateISO")) else {
+                    return failed("calendar.availability", "missing required parameter startDateISO")
+                }
+                guard let end = date(arguments.string("endDateISO")) else {
+                    return failed("calendar.availability", "missing required parameter endDateISO")
+                }
+                guard start >= Date().addingTimeInterval(-300), end >= Date().addingTimeInterval(-300) else {
+                    return failed("calendar.availability", "查询时间在过去；请先读取 device.current_time 并重新计算未来时间。")
+                }
+                guard end > start else {
+                    return failed("calendar.availability", "endDateISO 必须晚于 startDateISO。")
+                }
                 let events = await calendarStore.allEvents().filter { event in
                     let eventEnd = event.endDate ?? event.startDate.addingTimeInterval(1_800)
                     return event.startDate < end && eventEnd > start
@@ -95,6 +121,14 @@ extension LuminaExtendedToolCatalog {
             ], sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
                 guard let id = arguments.string("id") else { return failed("reminder.update", "缺少提醒 identifier。") }
+                if let rawDueDate = arguments.string("dueDateISO") {
+                    guard let parsedDueDate = date(rawDueDate) else {
+                        return failed("reminder.update", "dueDateISO 不是有效 ISO8601 时间。")
+                    }
+                    guard parsedDueDate >= Date().addingTimeInterval(-300) else {
+                        return failed("reminder.update", "dueDateISO 在过去；请先读取 device.current_time 并重新计算未来提醒时间。")
+                    }
+                }
                 let reminder = await calendarStore.updateReminder(
                     id: id,
                     title: arguments.string("title"),
@@ -264,7 +298,7 @@ extension LuminaExtendedToolCatalog {
                 param("amount", "新金额。", type: .number, required: false)
             ], sideEffect: .appLocalWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = arguments.string("id") else { return failed("ledger.update", "缺少账目 id。") }
+                guard let id = await ledgerID(arguments: arguments, store: ledgerStore) else { return failed("ledger.update", "缺少账目 id。") }
                 let amount = arguments.number("amount").map { Decimal($0) }
                 guard let updated = await ledgerStore.update(id: id, memo: arguments.string("memo"), amount: amount) else {
                     return failed("ledger.update", "没有找到要修改的账目。")
@@ -273,7 +307,7 @@ extension LuminaExtendedToolCatalog {
             },
             tool(name: "ledger.delete", description: "删除账目记录。", params: [param("id", "账目 id。")], sideEffect: .appLocalWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = arguments.string("id") else { return failed("ledger.delete", "缺少账目 id。") }
+                guard let id = await ledgerID(arguments: arguments, store: ledgerStore) else { return failed("ledger.delete", "缺少账目 id。") }
                 let removed = await ledgerStore.remove(id: id)
                 return removed ? succeeded("ledger.delete", "账目已删除。", ["id": .string(id)]) : failed("ledger.delete", "没有找到要删除的账目。")
             },
@@ -303,7 +337,7 @@ extension LuminaExtendedToolCatalog {
             },
             tool(name: "subscription.remove", description: "删除订阅源。", params: [param("id", "订阅 id。")], sideEffect: .appLocalWrite, sensitivity: .normal) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = arguments.string("id") else { return failed("subscription.remove", "缺少订阅 id。") }
+                guard let id = await subscriptionID(arguments: arguments, store: subscriptionStore) else { return failed("subscription.remove", "缺少订阅 id。") }
                 let removed = await subscriptionStore.remove(id: id)
                 return removed ? succeeded("subscription.remove", "订阅源已删除。", ["id": .string(id)]) : failed("subscription.remove", "没有找到要删除的订阅源。")
             }
@@ -587,6 +621,94 @@ private func delegatedTool(
         }
         return try await delegate(arguments)
     }
+}
+
+private func ledgerID(
+    arguments: [String: LuminaJSONValue],
+    store: LuminaLedgerStore
+) async -> String? {
+    if let id = arguments.string("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
+       UUID(uuidString: id) != nil {
+        return id
+    }
+    let query = [
+        arguments.string("id"),
+        arguments.string("query"),
+        arguments.string("memo"),
+        arguments.string("note")
+    ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        .first { !$0.isEmpty }
+    guard let query else { return nil }
+    let transactions = await store.allTransactions()
+        .sorted { $0.createdAt > $1.createdAt }
+    return transactions.first { transaction in
+        transaction.memo.lowercased().contains(query) || query.contains(transaction.memo.lowercased())
+    }?.id.uuidString
+}
+
+private func calendarID(
+    arguments: [String: LuminaJSONValue],
+    store: LuminaVolatileCalendarStore
+) async -> String? {
+    if let id = arguments.string("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
+       UUID(uuidString: id) != nil {
+        return id
+    }
+    let query = [
+        arguments.string("id"),
+        arguments.string("query"),
+        arguments.string("title"),
+        arguments.string("name"),
+        arguments.string("notes")
+    ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        .first { !$0.isEmpty }
+    guard let query else { return nil }
+    let queryTokens = Set(query.split { character in
+        !(character.isLetter || character.isNumber)
+    }.map(String.init).filter { !$0.isEmpty })
+    let events = await store.allEvents()
+        .sorted { $0.startDate < $1.startDate }
+    return events.first { event in
+        let haystack = [event.title, event.notes ?? ""]
+            .joined(separator: " ")
+            .lowercased()
+        if haystack.contains(query) || query.contains(haystack) {
+            return true
+        }
+        return !queryTokens.isEmpty && queryTokens.contains { token in
+            token.count >= 4 && haystack.contains(token)
+        }
+    }?.id.uuidString
+}
+
+private func subscriptionID(
+    arguments: [String: LuminaJSONValue],
+    store: LuminaSubscriptionStore
+) async -> String? {
+    if let id = arguments.string("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
+       UUID(uuidString: id) != nil {
+        return id
+    }
+    let query = [
+        arguments.string("id"),
+        arguments.string("source"),
+        arguments.string("url"),
+        arguments.string("feed"),
+        arguments.string("query"),
+        arguments.string("name")
+    ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        .first { !$0.isEmpty }
+    let subscriptions = await store.allSubscriptions()
+    guard let query else { return subscriptions.first?.id.uuidString }
+    return subscriptions.first { subscription in
+        let source = subscription.source.lowercased()
+        return source.contains(query) ||
+            query.contains(source) ||
+            query.contains("example") && source.contains("example.com")
+    }?.id.uuidString
 }
 
 private func param(

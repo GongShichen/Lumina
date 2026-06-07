@@ -512,6 +512,38 @@ final class LuminaAppCoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 
+    func testCalendarUpdateResolvesNonUUIDBenchmarkIDToMatchingEvent() async throws {
+        let start = Date().addingTimeInterval(86_400)
+        let store = LuminaVolatileCalendarStore(events: [
+            LuminaCalendarEvent(
+                title: "LuminaTest 项目同步",
+                startDate: start,
+                endDate: start.addingTimeInterval(1_800),
+                notes: "Lumina benchmark fixture"
+            )
+        ])
+        let tools = LuminaExtendedToolCatalog.makeTools(
+            memoryStore: LuminaMemoryStore(configuration: LuminaMemoryStoreConfiguration(scheduleBackgroundEmbedding: false, persistAfterIngest: false)),
+            ledgerStore: LuminaLedgerStore(),
+            subscriptionStore: LuminaSubscriptionStore(),
+            calendarStore: store,
+            documentsDirectory: FileManager.default.temporaryDirectory,
+            openURL: { _ in true }
+        )
+        let update = try XCTUnwrap(tools.first { $0.schema.name == "calendar.update" })
+        let newStart = start.addingTimeInterval(1_800)
+
+        let result = try await update.call(arguments: [
+            "id": .string("LuminaTest-001"),
+            "startDateISO": .string(ISO8601DateFormatter().string(from: newStart))
+        ], cancellation: LuminaCancellationToken())
+        let events = await store.allEvents()
+        let updated = try XCTUnwrap(events.first)
+
+        XCTAssertEqual(result.status, .succeeded)
+        XCTAssertEqual(updated.startDate.timeIntervalSince1970, newStart.timeIntervalSince1970, accuracy: 1)
+    }
+
     func testReActAgentCalendarReminderFlow() async {
         let memory = LuminaMemoryStore(configuration: LuminaMemoryStoreConfiguration(scheduleBackgroundEmbedding: false, persistAfterIngest: false))
         let ledger = LuminaLedgerStore()
@@ -629,6 +661,11 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertTrue(toolMismatch.toolExecutedAt1)
         XCTAssertFalse(semanticFailure.passAt1)
         XCTAssertFalse(skippedTool.toolExecutedAt1)
+        XCTAssertEqual(toolMismatch.status, "succeeded")
+        XCTAssertEqual(semanticFailure.status, "failed")
+        XCTAssertEqual(skippedTool.status, "succeeded")
+        XCTAssertEqual(report.succeededCount, 3)
+        XCTAssertEqual(report.failedCount, 1)
         XCTAssertEqual(report.passAt1Count, 1)
         XCTAssertEqual(report.passAt1Rate, 0.25, accuracy: 0.0001)
         XCTAssertEqual(report.toolExecutionAt1Count, 3)

@@ -984,7 +984,10 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
         XCTAssertTrue(result.contains(#""status":"succeeded""#), result)
         XCTAssertEqual(snapshot.toolCallCount, 0)
-        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[]"#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""mode":"direct""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains("All callable tools are already listed") == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[{"name":"calendar.search""#) == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains("tool_name MUST exactly equal") == true)
         XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""calendar.search""#))
     }
 

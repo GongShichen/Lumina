@@ -30,7 +30,12 @@ public struct LuminaNotificationScheduleTool: LuminaAgentTool {
         try cancellation.checkCancellation()
         let title = arguments.string("title") ?? "Lumina 提醒"
         let body = arguments.string("body") ?? title
-        let fireDate = Self.fireDate(arguments: arguments)
+        guard let fireDate = Self.fireDate(arguments: arguments) else {
+            return Self.failedResult("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")
+        }
+        guard fireDate >= Date().addingTimeInterval(-300) else {
+            return Self.failedResult("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")
+        }
         let notification = LuminaScheduledNotification(title: title, body: body, fireDate: fireDate)
         await store.append(notification)
         return LuminaToolResult(
@@ -46,14 +51,24 @@ public struct LuminaNotificationScheduleTool: LuminaAgentTool {
         )
     }
 
-    private static func fireDate(arguments: [String: LuminaJSONValue]) -> Date {
-        if let iso = arguments.string("dateISO"),
-           let date = ISO8601DateFormatter().date(from: iso) {
-            return date
+    private static func fireDate(arguments: [String: LuminaJSONValue]) -> Date? {
+        if let iso = arguments.string("dateISO") {
+            return ISO8601DateFormatter().date(from: iso)
         }
         if let interval = arguments.number("timeIntervalSeconds") {
             return Date().addingTimeInterval(max(1, interval))
         }
         return Date().addingTimeInterval(1_800)
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "notification.schedule",
+            status: .failed,
+            output: ["summary": .string(message)],
+            content: [.text(message)],
+            errorMessage: message
+        )
     }
 }

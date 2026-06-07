@@ -22,11 +22,28 @@ extension LuminaAgentRuntimeAdapterBox {
             }
             let request = currentRequest ?? LuminaAgentRequest(text: "")
             let schema = tool.schema
-            let call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: parsed.requiresConfirmation)
+            let call = LuminaToolCall(
+                toolName: parsed.toolName,
+                arguments: parsed.arguments,
+                requiresConfirmation: parsed.requiresConfirmation
+            )
             let context = LuminaToolExecutionContext(request: request, call: call, schema: schema)
             let startedAt = ContinuousClock.now
             currentEventSink?(.toolStarted(call))
-            let result = try await tool.call(context: context, cancellation: LuminaCancellationToken())
+            let rawResult: LuminaToolResult
+            do {
+                rawResult = try await tool.call(context: context, cancellation: LuminaCancellationToken())
+            } catch {
+                rawResult = LuminaToolResult(
+                    callID: call.id,
+                    toolName: call.toolName,
+                    status: .failed,
+                    output: ["summary": .string(error.localizedDescription)],
+                    content: [.text(error.localizedDescription)],
+                    errorMessage: error.localizedDescription
+                )
+            }
+            let result = rawResult
             toolExecutionMilliseconds += Self.milliseconds(since: startedAt)
             toolResults.append(result)
             currentEventSink?(.toolFinished(result))
@@ -71,11 +88,11 @@ extension LuminaAgentRuntimeAdapterBox {
                 return Self.guardrailDecisionJSON("rewrite", payload: payload)
 
             case "tool_input":
-                guard !guardrails.toolInput.isEmpty else { return Self.guardrailDecisionJSON("allow") }
                 let call = try Self.toolCallFromObject(payload)
                 guard let tool = toolsByName[call.toolName] else {
                     return Self.guardrailDecisionJSON("reject", message: "tool is not registered")
                 }
+                guard !guardrails.toolInput.isEmpty else { return Self.guardrailDecisionJSON("allow") }
                 let request = currentRequest ?? LuminaAgentRequest(text: "")
                 var current = call
                 var rewritten = false
@@ -125,21 +142,22 @@ extension LuminaAgentRuntimeAdapterBox {
                     : Self.guardrailDecisionJSON("allow")
 
             case "result":
-                guard !guardrails.result.isEmpty else { return Self.guardrailDecisionJSON("allow") }
                 let request = currentRequest ?? LuminaAgentRequest(text: "")
                 var markdown = payload["resultMarkdown"] as? String ?? payload["content"] as? String ?? ""
                 var rewritten = false
-                for guardrail in guardrails.result {
-                    switch await guardrail.evaluate(markdown: markdown, request: request) {
-                    case .allow:
-                        continue
-                    case let .rewrite(value):
-                        markdown = value
-                        rewritten = true
-                    case let .reject(message):
-                        return Self.guardrailDecisionJSON("reject", message: message)
-                    case let .tripwireFailure(message):
-                        return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                if !guardrails.result.isEmpty {
+                    for guardrail in guardrails.result {
+                        switch await guardrail.evaluate(markdown: markdown, request: request) {
+                        case .allow:
+                            continue
+                        case let .rewrite(value):
+                            markdown = value
+                            rewritten = true
+                        case let .reject(message):
+                            return Self.guardrailDecisionJSON("reject", message: message)
+                        case let .tripwireFailure(message):
+                            return Self.guardrailDecisionJSON("tripwire_failure", message: message)
+                        }
                     }
                 }
                 return rewritten
@@ -178,8 +196,12 @@ extension LuminaAgentRuntimeAdapterBox {
             guard let tool = toolsByName[parsed.toolName] else {
                 return #"{"decision":"denied","reason":"tool is not registered"}"#
             }
-            let call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: parsed.requiresConfirmation)
             let request = currentRequest ?? LuminaAgentRequest(text: "")
+            let call = LuminaToolCall(
+                toolName: parsed.toolName,
+                arguments: parsed.arguments,
+                requiresConfirmation: parsed.requiresConfirmation
+            )
             let decision = await permissionGate.decision(for: call, schema: tool.schema, request: request)
             currentEventSink?(.permissionChecked(call, decision))
             switch decision {
@@ -201,7 +223,11 @@ extension LuminaAgentRuntimeAdapterBox {
             guard let tool = toolsByName[parsed.toolName] else {
                 return #"{"confirmed":false,"reason":"tool is not registered"}"#
             }
-            let call = LuminaToolCall(toolName: parsed.toolName, arguments: parsed.arguments, requiresConfirmation: true)
+            let call = LuminaToolCall(
+                toolName: parsed.toolName,
+                arguments: parsed.arguments,
+                requiresConfirmation: true
+            )
             currentEventSink?(.confirmationRequired(call))
             let confirmed = await confirmationCoordinator.confirm(call: call, schema: tool.schema, reason: "Lumina 需要执行 \(tool.schema.name)")
             currentEventSink?(.confirmationResolved(call, confirmed))

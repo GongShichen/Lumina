@@ -22,10 +22,16 @@ std::string TaskEnvelopeBuilder::build(
     parseFieldsOrEmpty(requestJson, requestFields);
     std::ostringstream output;
     const std::string schemaProfile = session_.toolSchemaProfile();
-    const bool includeFocusedSchemas = schemaProfile == "full";
     const std::string capabilities = schemaProfile == "name-only"
         ? tools_.nameOnlyListJson(session_.loadedToolNames())
         : tools_.capabilityListJson(session_.loadedToolNames());
+    const std::string deferredCatalog = tools_.deferredCatalogJson(session_.loadedToolNames());
+    const bool hasDeferredCatalog = trim(deferredCatalog) != "[]";
+    const bool includeFocusedSchemas = schemaProfile == "full" || (schemaProfile != "name-only" && !hasDeferredCatalog);
+    const std::string toolMode = hasDeferredCatalog ? "progressive_disclosure" : "direct";
+    const std::string discoveryHint = hasDeferredCatalog
+        ? "Use available capabilities first. Emit tool_discovery only to search deferred_catalog or load a full schema before tool_use. Deferred schemas become callable on the next turn."
+        : "All callable tools are already listed. Do not emit tool_discovery; choose only an exact listed tool_name, or produce result/cannot_complete when no listed tool fits.";
     output << "{"
            << "\"schema_version\":\"1.0\","
            << "\"instructions\":{"
@@ -34,13 +40,14 @@ std::string TaskEnvelopeBuilder::build(
            << "},"
            << "\"task\":" << taskJson(requestJson) << ","
            << "\"available_tools\":{"
-           << "\"mode\":\"progressive_disclosure\","
+           << "\"mode\":" << jsonString(toolMode) << ","
            << "\"profile\":" << jsonString(schemaProfile) << ","
            << "\"capabilities\":" << capabilities << ","
            << "\"focused_schemas\":" << (includeFocusedSchemas ? tools_.modelFacingSchemasJson(session_.loadedToolNames()) : "[]") << ","
-           << "\"deferred_catalog\":" << tools_.deferredCatalogJson(session_.loadedToolNames()) << ","
+           << "\"deferred_catalog\":" << deferredCatalog << ","
            << "\"loaded_tool_set\":" << session_.loadedToolSetJson() << ","
-           << "\"discovery_hint\":\"Use available capabilities first. Emit tool_discovery to search deferred_catalog or load a full schema before tool_use. Deferred schemas become callable on the next turn.\""
+           << "\"tool_name_contract\":\"For tool_use, tool_name MUST exactly equal one capabilities[].name or focused_schemas[].name. Never invent aliases, placeholders, summary/text tools, or answer tools. Write result only when the whole user goal is complete from runtime-observed facts; otherwise call the next required listed tool. If a previous observation says a tool/parameter failed, correct the call with a listed tool and valid parameters; do not blindly repeat the same invalid call.\","
+           << "\"discovery_hint\":" << jsonString(discoveryHint)
            << "},"
            << "\"context\":{"
            << "\"available_sources\":" << (trim(session_.contextCatalogSummaryJson()).empty() ? "null" : session_.contextCatalogSummaryJson()) << ","

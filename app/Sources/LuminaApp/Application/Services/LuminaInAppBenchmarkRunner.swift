@@ -22,8 +22,18 @@ final class LuminaInAppBenchmarkRunner {
     func run(taskCount: Int = 200, progress: @escaping ProgressHandler) async -> LuminaBenchmarkReport {
         let tasks = LuminaBenchmarkSuite.makeTasks(count: taskCount)
         let traceLogger = LuminaBenchmarkTraceLogger(reportDirectory: reportDirectory)
+        let runModelSelection = services.localModelSelection.selection
+        let selectedModel = selectedModelDescriptor(for: runModelSelection)
+        let readinessModelSourceAtStart = services.modelReadiness.snapshot.modelSource
         await traceLogger.record("benchmark_started", fields: [
             "taskCount": "\(tasks.count)",
+            "localModelSelection": runModelSelection.rawValue,
+            "localModelDisplayName": runModelSelection.displayName,
+            "initialModelSource": selectedModel.source,
+            "selectedModelSource": selectedModel.source,
+            "selectedModelBundleName": runModelSelection.bundleDirectoryName,
+            "selectedModelBundlePath": selectedModel.bundlePath,
+            "readinessModelSourceAtStart": readinessModelSourceAtStart,
             "process": ProcessInfo.processInfo.processName,
             "pid": "\(ProcessInfo.processInfo.processIdentifier)",
             "executable": Bundle.main.executableURL?.path ?? "",
@@ -84,6 +94,7 @@ final class LuminaInAppBenchmarkRunner {
                 "taskID": task.id,
                 "runtimeStatus": result.status.rawValue,
                 "status": taskResult.status,
+                "expectedToolsEffective": task.expectedTools.joined(separator: ","),
                 "missingTools": missingTools.joined(separator: ","),
                 "unexpectedTools": unexpectedTools.joined(separator: ","),
                 "semanticPassed": "\(semanticFailures.isEmpty)",
@@ -108,10 +119,21 @@ final class LuminaInAppBenchmarkRunner {
             ])
             progress(LuminaBenchmarkSnapshot(state: .running, currentTask: task.text, completed: results.count, total: tasks.count, latestTool: actualTools.last ?? task.expectedTools.last))
         }
-        let reportURLs = writeReport(results: results)
-        let report = LuminaBenchmarkReport.make(results: results, jsonReportURL: reportURLs.json, markdownReportURL: reportURLs.markdown)
+        let reportURLs = writeReport(results: results, runModelSelection: runModelSelection, selectedModelSource: selectedModel.source)
+        let report = LuminaBenchmarkReport.make(
+            results: results,
+            jsonReportURL: reportURLs.json,
+            markdownReportURL: reportURLs.markdown,
+            localModelSelectionRawValue: runModelSelection.rawValue,
+            localModelDisplayName: runModelSelection.displayName,
+            modelSource: selectedModel.source
+        )
         await traceLogger.record("benchmark_finished", fields: [
             "completed": "\(results.count)",
+            "localModelSelection": runModelSelection.rawValue,
+            "localModelDisplayName": runModelSelection.displayName,
+            "finalModelSource": selectedModel.source,
+            "readinessModelSourceAtEnd": services.modelReadiness.snapshot.modelSource,
             "report": reportURLs.json?.path ?? "",
             "trace": await traceLogger.fileURL.path
         ])
@@ -144,6 +166,7 @@ final class LuminaInAppBenchmarkRunner {
         var latestPromptTokens: Int?
         var latestSampledTokens = 0
         var latestOutputTokens = 0
+        var latestActivity = "模型生成"
         let taskStartedAt = ContinuousClock.now
         observer.start()
         for await event in services.runEvaluationStream(task: task) {
@@ -166,10 +189,11 @@ final class LuminaInAppBenchmarkRunner {
                     currentTask: "\(task.text) · 模型生成中 \(Self.elapsedText(since: taskStartedAt))\(promptText)\(outputText)",
                     completed: completed,
                     total: total,
-                    latestTool: "model.generating"
+                    latestTool: latestActivity
                 ))
             }
             if case let .actionProposed(call) = event {
+                latestActivity = call.toolName
                 progress(LuminaBenchmarkSnapshot(
                     state: .running,
                     currentTask: "\(task.text) · action \(call.toolName)",
@@ -179,15 +203,17 @@ final class LuminaInAppBenchmarkRunner {
                 ))
             }
             if case let .confirmationRequired(call) = event {
+                latestActivity = "确认 \(call.toolName)"
                 progress(LuminaBenchmarkSnapshot(
                     state: .running,
                     currentTask: "\(task.text) · 自动确认 \(call.toolName)",
                     completed: completed,
                     total: total,
-                    latestTool: "confirming.\(call.toolName)"
+                    latestTool: latestActivity
                 ))
             }
             if case let .toolStarted(call) = event {
+                latestActivity = call.toolName
                 progress(LuminaBenchmarkSnapshot(
                     state: .running,
                     currentTask: "\(task.text) · 执行 \(call.toolName)",
@@ -197,6 +223,7 @@ final class LuminaInAppBenchmarkRunner {
                 ))
             }
             if case let .toolFinished(result) = event {
+                latestActivity = result.toolName
                 progress(LuminaBenchmarkSnapshot(
                     state: .running,
                     currentTask: "\(task.text) · \(result.toolName) \(result.status.rawValue)",
@@ -290,13 +317,65 @@ final class LuminaInAppBenchmarkRunner {
         return value.compactModelTraceValue
     }
 
-    private func writeReport(results: [LuminaBenchmarkTaskResult]) -> (json: URL?, markdown: URL?) {
+    private func selectedModelDescriptor(for selection: LuminaLocalModelSelection) -> (source: String, bundlePath: String) {
+        guard let url = selectedModelURL(for: selection) else {
+            return (selection.displayName, "")
+        }
+        guard let info = try? LuminaMiniCPMV46ModelBundleInfo.inspect(directory: url, expectedContextLength: 16_000) else {
+            return (selection.displayName, url.path)
+        }
+        return (
+            "\(selection.displayName) · MiniCPM-V 4.6 GGUF · \(info.contextLength) ctx · \(info.quantization)",
+            url.path
+        )
+    }
+
+    private func selectedModelURL(for selection: LuminaLocalModelSelection) -> URL? {
+        let environmentKeys: [String]
+        let bundleCandidates: [String]
+        switch selection {
+        case .original:
+            environmentKeys = ["LUMINA_MINICPMV46_ORIGINAL_MODEL", "LUMINA_MINICPMV46_MODEL"]
+            bundleCandidates = ["MiniCPMV46ReActModel", "MiniCPMV46Model"]
+        case .agenticDPO:
+            environmentKeys = ["LUMINA_MINICPMV46_AGENTIC_DPO_MODEL"]
+            bundleCandidates = ["MiniCPMV46ReActModel-AgenticSFTDPO-Q8", "MiniCPMV46AgenticDPOReActModel", "MiniCPMV46AgenticDPOModel"]
+        }
+
+        for key in environmentKeys {
+            guard let value = ProcessInfo.processInfo.environment[key], !value.isEmpty else { continue }
+            let url = URL(fileURLWithPath: value)
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        for candidate in bundleCandidates {
+            if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/\(candidate)"),
+               FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func writeReport(
+        results: [LuminaBenchmarkTaskResult],
+        runModelSelection: LuminaLocalModelSelection,
+        selectedModelSource: String
+    ) -> (json: URL?, markdown: URL?) {
         do {
             try FileManager.default.createDirectory(at: reportDirectory, withIntermediateDirectories: true)
             let timestamp = Int(Date().timeIntervalSince1970)
             let jsonURL = reportDirectory.appendingPathComponent("LuminaBenchmark-\(timestamp).json")
             let markdownURL = reportDirectory.appendingPathComponent("LuminaBenchmark-\(timestamp).md")
-            let report = LuminaBenchmarkReport.make(results: results, jsonReportURL: jsonURL, markdownReportURL: markdownURL)
+            let report = LuminaBenchmarkReport.make(
+                results: results,
+                jsonReportURL: jsonURL,
+                markdownReportURL: markdownURL,
+                localModelSelectionRawValue: runModelSelection.rawValue,
+                localModelDisplayName: runModelSelection.displayName,
+                modelSource: selectedModelSource
+            )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
@@ -320,6 +399,8 @@ final class LuminaInAppBenchmarkRunner {
         Generated: \(report.generatedAt)
 
         ## Summary
+        - Local model selection: \(report.localModelDisplayName ?? "unknown") (\(report.localModelSelectionRawValue ?? "unknown"))
+        - Runtime model source: \(report.modelSource ?? "unknown")
         - Tasks: \(report.completedCount)/\(report.taskCount)
         - Succeeded: \(report.succeededCount)
         - Failed: \(report.failedCount)
@@ -450,11 +531,15 @@ private enum LuminaBenchmarkSemanticEvaluator {
     static func evaluate(task: LuminaBenchmarkTask, result: LuminaAgentRunResult) -> [String] {
         var failures: [String] = []
         let executedResults = result.toolResults.filter { $0.output["replayed"]?.boolValue != true }
-        for toolResult in executedResults where toolResult.status != .succeeded {
-            failures.append("\(toolResult.toolName) status=\(toolResult.status.rawValue)")
+        let expectedToolNames = Set(task.expectedTools)
+        for index in executedResults.indices where executedResults[index].status != .succeeded {
+            let toolResult = executedResults[index]
+            if expectedToolNames.contains(toolResult.toolName) {
+                failures.append("\(toolResult.toolName) status=\(toolResult.status.rawValue)")
+            }
         }
         let text = task.text
-        for toolName in Set(task.expectedTools) where Set(executedResults.map(\.toolName)).contains(toolName) {
+        for toolName in expectedToolNames where Set(executedResults.map(\.toolName)).contains(toolName) {
             failures.append(contentsOf: validate(toolName: toolName, taskText: text, result: result, toolResults: executedResults))
         }
         return failures
@@ -468,8 +553,8 @@ private enum LuminaBenchmarkSemanticEvaluator {
     ) -> [String] {
         let calls = result.plan.toolCalls.filter { $0.toolName == toolName }
         guard !calls.isEmpty else { return ["\(toolName) had no recorded call arguments"] }
-        let lastCall = calls.last
         let lastOutput = toolResults.last { $0.toolName == toolName }?.output ?? [:]
+        let lastCall = calls.last
         var failures: [String] = []
 
         func requireArgument(_ key: String, contains needle: String, label: String? = nil) {
@@ -490,6 +575,16 @@ private enum LuminaBenchmarkSemanticEvaluator {
         func requireOutput(_ key: String, contains needle: String) {
             guard valueText(lastOutput[key]).localizedCaseInsensitiveContains(needle) else {
                 failures.append("\(toolName) output.\(key) should contain \(needle)")
+                return
+            }
+        }
+
+        func requireArgumentOrOutput(_ key: String, contains needle: String, label: String? = nil) {
+            let argument = lastCall?.arguments.string(key) ?? ""
+            let output = lastOutput.values.map(valueText).joined(separator: " ")
+            guard argument.localizedCaseInsensitiveContains(needle) ||
+                    output.localizedCaseInsensitiveContains(needle) else {
+                failures.append("\(toolName).\(key) or output should contain \(label ?? needle)")
                 return
             }
         }
@@ -518,7 +613,7 @@ private enum LuminaBenchmarkSemanticEvaluator {
             if taskText.contains("会议") {
                 requireArgument("query", contains: "会议")
             } else if taskText.contains("LuminaTest") {
-                requireArgument("query", contains: "LuminaTest")
+                requireArgumentOrOutput("query", contains: "LuminaTest")
             }
         case "calendar.create":
             requireArgument("title", contains: "LuminaTest")

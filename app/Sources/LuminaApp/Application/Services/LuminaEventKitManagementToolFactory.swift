@@ -34,8 +34,23 @@ enum LuminaEventKitManagementToolFactory {
                 return failed("calendar.update", "没有找到要修改的日历事件。")
             }
             if let title = arguments.string("title"), !title.isEmpty { event.title = title }
-            if let start = date(arguments.string("startDateISO")) { event.startDate = start }
-            if let end = date(arguments.string("endDateISO")) { event.endDate = end }
+            if let rawStart = arguments.string("startDateISO") {
+                guard let start = date(rawStart) else { return failed("calendar.update", "startDateISO 不是有效 ISO8601 时间。") }
+                guard start >= Date().addingTimeInterval(-300) else {
+                    return failed("calendar.update", "startDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
+                }
+                event.startDate = start
+            }
+            if let rawEnd = arguments.string("endDateISO") {
+                guard let end = date(rawEnd) else { return failed("calendar.update", "endDateISO 不是有效 ISO8601 时间。") }
+                guard end >= Date().addingTimeInterval(-300) else {
+                    return failed("calendar.update", "endDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
+                }
+                event.endDate = end
+            }
+            guard event.endDate > event.startDate else {
+                return failed("calendar.update", "endDateISO 必须晚于 startDateISO。")
+            }
             if let notes = arguments.string("notes") { event.notes = notes }
             try store.save(event, span: .thisEvent, commit: true)
             return succeeded("calendar.update", "日程已更新：\(event.title ?? "Untitled")", [
@@ -67,8 +82,18 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestCalendarAccess(store)
-            let start = date(arguments.string("startDateISO")) ?? Date()
-            let end = date(arguments.string("endDateISO")) ?? start.addingTimeInterval(3_600)
+            guard let start = date(arguments.string("startDateISO")) else {
+                return failed("calendar.availability", "missing required parameter startDateISO")
+            }
+            guard let end = date(arguments.string("endDateISO")) else {
+                return failed("calendar.availability", "missing required parameter endDateISO")
+            }
+            guard start >= Date().addingTimeInterval(-300), end >= Date().addingTimeInterval(-300) else {
+                return failed("calendar.availability", "查询时间在过去；请先读取 device.current_time 并重新计算未来时间。")
+            }
+            guard end > start else {
+                return failed("calendar.availability", "endDateISO 必须晚于 startDateISO。")
+            }
             let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
             let events = store.events(matching: predicate)
             let values = events.map { LuminaJSONValue.object([
@@ -113,7 +138,11 @@ enum LuminaEventKitManagementToolFactory {
             }
             if let title = arguments.string("title"), !title.isEmpty { reminder.title = title }
             if let notes = arguments.string("notes") { reminder.notes = notes }
-            if let due = date(arguments.string("dueDateISO")) {
+            if let rawDueDate = arguments.string("dueDateISO") {
+                guard let due = date(rawDueDate) else { return failed("reminder.update", "dueDateISO 不是有效 ISO8601 时间。") }
+                guard due >= Date().addingTimeInterval(-300) else {
+                    return failed("reminder.update", "dueDateISO 在过去；请先读取 device.current_time 并重新计算未来提醒时间。")
+                }
                 reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
             }
             try store.save(reminder, commit: true)

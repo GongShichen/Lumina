@@ -28,7 +28,10 @@ public struct LuminaFileSaveNoteTool: LuminaAgentTool {
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
         let title = arguments.string("title") ?? "Lumina Note"
-        let body = arguments.string("body") ?? arguments.string("text") ?? ""
+        guard let body = arguments.string("body") ?? arguments.string("text"),
+              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return Self.failedResult("missing required parameter body")
+        }
         let filename = Self.sanitizedFilename(arguments.string("filename") ?? title)
         let directory = documentsDirectory.appendingPathComponent("Lumina Notes", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -54,5 +57,16 @@ public struct LuminaFileSaveNoteTool: LuminaAgentTool {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let name = stem.isEmpty ? "Lumina-Note" : stem
         return name.hasSuffix(".md") ? name : "\(name).md"
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "file.save_note",
+            status: .failed,
+            output: ["summary": .string(message)],
+            content: [.text(message)],
+            errorMessage: message
+        )
     }
 }

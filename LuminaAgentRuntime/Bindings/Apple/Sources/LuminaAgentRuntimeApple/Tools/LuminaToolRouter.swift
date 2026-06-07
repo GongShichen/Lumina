@@ -42,6 +42,17 @@ public actor LuminaToolRouter {
         }
 
         let schema = tool.schema
+        if let validationError = Self.validate(call.arguments, against: schema) {
+            let result = LuminaToolResult(
+                callID: call.id,
+                toolName: call.toolName,
+                status: .failed,
+                output: ["summary": .string(validationError)],
+                content: [.text(validationError)],
+                errorMessage: validationError
+            )
+            return (result, .denied(reason: validationError), false)
+        }
         let decision = await cachedDecision(for: call, schema: schema, request: request)
         eventSink?(.permissionChecked(call, decision))
         var confirmed = false
@@ -129,5 +140,35 @@ public actor LuminaToolRouter {
             errorMessage: result.errorMessage,
             rollbackToken: result.rollbackToken
         )
+    }
+
+    private static func validate(_ arguments: [String: LuminaJSONValue], against schema: LuminaToolSchema) -> String? {
+        for parameter in schema.parameters {
+            guard let value = arguments[parameter.name] else {
+                if parameter.required {
+                    return "missing required parameter \(parameter.name)"
+                }
+                continue
+            }
+            if !matches(value, parameter.type) {
+                return "parameter \(parameter.name) has invalid type"
+            }
+        }
+        return nil
+    }
+
+    private static func matches(_ value: LuminaJSONValue, _ type: LuminaToolParameterType) -> Bool {
+        switch (type, value) {
+        case (.string, .string),
+             (.number, .number),
+             (.bool, .bool),
+             (.object, .object),
+             (.array, .array):
+            return true
+        case (.dateISO8601, .string):
+            return true
+        default:
+            return false
+        }
     }
 }

@@ -2,6 +2,9 @@ import Foundation
 
 struct LuminaBenchmarkReport: Codable, Hashable {
     let generatedAt: Date
+    let localModelSelectionRawValue: String?
+    let localModelDisplayName: String?
+    let modelSource: String?
     let taskCount: Int
     let completedCount: Int
     let succeededCount: Int
@@ -63,7 +66,14 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let jsonReportURL: URL?
     let markdownReportURL: URL?
 
-    static func make(results: [LuminaBenchmarkTaskResult], jsonReportURL: URL?, markdownReportURL: URL?) -> LuminaBenchmarkReport {
+    static func make(
+        results: [LuminaBenchmarkTaskResult],
+        jsonReportURL: URL?,
+        markdownReportURL: URL?,
+        localModelSelectionRawValue: String? = nil,
+        localModelDisplayName: String? = nil,
+        modelSource: String? = nil
+    ) -> LuminaBenchmarkReport {
         let completed = results.count
         let succeeded = results.filter { $0.status == "succeeded" }.count
         let failed = results.filter { $0.status != "succeeded" }.count
@@ -93,6 +103,9 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
         return LuminaBenchmarkReport(
             generatedAt: Date(),
+            localModelSelectionRawValue: localModelSelectionRawValue,
+            localModelDisplayName: localModelDisplayName,
+            modelSource: modelSource,
             taskCount: completed,
             completedCount: completed,
             succeededCount: succeeded,

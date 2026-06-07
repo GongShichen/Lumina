@@ -17,17 +17,17 @@ public enum LuminaReActStepParser {
             return .thought(thought)
         case "tool_use":
             guard let toolName = dto.toolName,
-                  !toolName.isEmpty,
-                  let schema = schemasByName[toolName]
+                  !toolName.isEmpty
             else {
                 throw LuminaReActParserError.invalidAction
             }
+            let schemaRequiresConfirmation = schemasByName[toolName].map { $0.sideEffect != .readOnly } ?? false
             return .action(
                 thought: thought,
                 call: LuminaToolCall(
                     toolName: toolName,
                     arguments: dto.parameters ?? [:],
-                    requiresConfirmation: (dto.requiresConfirmation ?? false) || schema.sideEffect != .readOnly
+                    requiresConfirmation: (dto.requiresConfirmation ?? false) || schemaRequiresConfirmation
                 )
             )
         case "result":

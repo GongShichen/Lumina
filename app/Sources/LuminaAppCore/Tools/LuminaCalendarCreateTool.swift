@@ -29,8 +29,16 @@ public struct LuminaCalendarCreateTool: LuminaAgentTool {
 
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        let startDate = Self.date(from: arguments.string("startDateISO")) ?? Date().addingTimeInterval(3_600)
+        guard let startDate = Self.date(from: arguments.string("startDateISO")) else {
+            return Self.failedResult("missing required parameter startDateISO")
+        }
         let endDate = Self.date(from: arguments.string("endDateISO")) ?? startDate.addingTimeInterval(1_800)
+        guard startDate >= Date().addingTimeInterval(-300) else {
+            return Self.failedResult("calendar.create startDateISO is in the past; call device.current_time and recompute a future ISO8601 time.")
+        }
+        guard endDate > startDate else {
+            return Self.failedResult("calendar.create endDateISO must be later than startDateISO.")
+        }
         let event = LuminaCalendarEvent(
             title: arguments.string("title") ?? "Lumina 日程",
             startDate: startDate,
@@ -64,5 +72,16 @@ public struct LuminaCalendarCreateTool: LuminaAgentTool {
 
     private static func string(from date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
+    }
+
+    private static func failedResult(_ message: String) -> LuminaToolResult {
+        LuminaToolResult(
+            callID: UUID(),
+            toolName: "calendar.create",
+            status: .failed,
+            output: ["summary": .string(message)],
+            content: [.text(message)],
+            errorMessage: message
+        )
     }
 }

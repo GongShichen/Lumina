@@ -56,7 +56,7 @@ public struct LuminaLedgerSearchTool: LuminaAgentTool {
         guard !transactions.isEmpty else { return "## 账目\n\n没有找到匹配账目。" }
         let rows = transactions.map { transaction -> String in
             let amount = transaction.amount.map { "，金额 \(NSDecimalNumber(decimal: $0).stringValue)" } ?? ""
-            return "- \(transaction.memo)\(amount)"
+            return "- [id=\(transaction.id.uuidString)] \(transaction.memo)\(amount)"
         }
         return "## 账目\n\n" + rows.joined(separator: "\n")
     }

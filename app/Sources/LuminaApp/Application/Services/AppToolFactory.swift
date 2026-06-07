@@ -305,6 +305,28 @@ enum AppToolFactory {
             )
         ) { arguments, cancellation in
             try cancellation.checkCancellation()
+            if let iso = arguments.string("dateISO") {
+                guard let date = ISO8601DateFormatter().date(from: iso) else {
+                    return LuminaToolResult(
+                        callID: UUID(),
+                        toolName: "notification.schedule",
+                        status: .failed,
+                        output: ["summary": .string("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")],
+                        content: [.text("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")],
+                        errorMessage: "notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds."
+                    )
+                }
+                guard date >= Date().addingTimeInterval(-300) else {
+                    return LuminaToolResult(
+                        callID: UUID(),
+                        toolName: "notification.schedule",
+                        status: .failed,
+                        output: ["summary": .string("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")],
+                        content: [.text("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")],
+                        errorMessage: "notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds."
+                    )
+                }
+            }
             return LuminaToolResult(
                 callID: UUID(),
                 toolName: "notification.schedule",
