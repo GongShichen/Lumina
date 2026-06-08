@@ -52,20 +52,24 @@ struct AgentHomeView: View {
             .tag(LuminaTab.memory)
             .tabItem { Label("Memory", systemImage: "brain.head.profile") }
 
-            NavigationStack {
-                LuminaSettingsScreen(
-                    settings: services.remoteInferenceSettings,
-                    localModelSelection: services.localModelSelection
-                )
+            if LuminaFeatureFlags.showSettingsTab {
+                NavigationStack {
+                    LuminaSettingsScreen(
+                        settings: services.remoteInferenceSettings,
+                        localModelSelection: services.localModelSelection
+                    )
+                }
+                .tag(LuminaTab.settings)
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
             }
-            .tag(LuminaTab.settings)
-            .tabItem { Label("Settings", systemImage: "gearshape.fill") }
 
-            NavigationStack {
-                RuntimeLabScreen()
+            if LuminaFeatureFlags.showRuntimeTab {
+                NavigationStack {
+                    RuntimeLabScreen()
+                }
+                .tag(LuminaTab.runtimeLab)
+                .tabItem { Label("Runtime", systemImage: "point.3.connected.trianglepath.dotted") }
             }
-            .tag(LuminaTab.runtimeLab)
-            .tabItem { Label("Runtime", systemImage: "point.3.connected.trianglepath.dotted") }
 
             if LuminaFeatureFlags.showTrustTab {
                 NavigationStack {
@@ -117,8 +121,16 @@ struct AgentHomeView: View {
         .onChange(of: viewModel.photoSelection) { _, _ in
             viewModel.importSelectedPhotos()
         }
+        .onChange(of: viewModel.selectedTab) { _, newValue in
+            if !newValue.isVisible {
+                viewModel.selectedTab = newValue.visibleFallback
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             viewModel.updateScenePhase(phase)
+        }
+        .onAppear {
+            viewModel.selectedTab = viewModel.selectedTab.visibleFallback
         }
         .task {
             viewModel.start()

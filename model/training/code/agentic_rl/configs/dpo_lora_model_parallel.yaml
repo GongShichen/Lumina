@@ -1,0 +1,84 @@
+model:
+  name_or_path: /root/rivermind-data/lumina-agentic-training/models/base/openbmb-MiniCPM-V-4.6
+  adapter_path: /root/rivermind-data/lumina-agentic-training/runs/sft-lora
+  load_in_8bit: false
+  torch_dtype: bfloat16
+  device_map:
+    model.vision_tower: 1
+    model.merger: 1
+    model.language_model.embed_tokens: 0
+    model.language_model.layers.0: 0
+    model.language_model.layers.1: 0
+    model.language_model.layers.2: 0
+    model.language_model.layers.3: 0
+    model.language_model.layers.4: 0
+    model.language_model.layers.5: 0
+    model.language_model.layers.6: 1
+    model.language_model.layers.7: 1
+    model.language_model.layers.8: 1
+    model.language_model.layers.9: 1
+    model.language_model.layers.10: 1
+    model.language_model.layers.11: 1
+    model.language_model.layers.12: 1
+    model.language_model.layers.13: 1
+    model.language_model.layers.14: 1
+    model.language_model.layers.15: 1
+    model.language_model.layers.16: 1
+    model.language_model.layers.17: 1
+    model.language_model.layers.18: 1
+    model.language_model.layers.19: 1
+    model.language_model.layers.20: 1
+    model.language_model.layers.21: 1
+    model.language_model.layers.22: 1
+    model.language_model.layers.23: 1
+    model.language_model.norm: 0
+    model.language_model.rotary_emb: 0
+    lm_head: 0
+  freeze_patterns:
+    - vision
+    - visual
+    - projector
+    - resampler
+data:
+  train_file: ../TrainingData/splits/dpo_general_train.jsonl
+  eval_file: ../TrainingData/splits/dpo_general_test.jsonl
+  downsample_mode: 16x
+  max_slice_nums: 9
+training:
+  output_dir: /root/rivermind-data/lumina-agentic-training/runs/dpo-lora
+  run_name: minicpmv46-agentic-xml-standard-dpo
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 16
+  learning_rate: 0.000005
+  num_train_epochs: 2
+  logging_steps: 5
+  eval_strategy: "no"
+  save_steps: 100
+  save_total_limit: 3
+  report_to: swanlab
+  beta: 0.05
+  reference_free: false
+  length_normalize: false
+  max_length: 8192
+  bf16: true
+  tf32: true
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  remove_unused_columns: false
+lora:
+  r: 128
+  lora_alpha: 256
+  lora_dropout: 0.04
+  bias: none
+  task_type: CAUSAL_LM
+  exclude_modules: ".*(vision|visual|projector|resampler|merger).*"
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

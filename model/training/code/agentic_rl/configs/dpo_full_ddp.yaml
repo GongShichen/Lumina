@@ -1,0 +1,43 @@
+model:
+  name_or_path: /root/rivermind-data/lumina-agentic-training/models/base/openbmb-MiniCPM-V-4.6
+  adapter_path: /root/rivermind-data/lumina-agentic-training/runs/sft-lora
+  merge_adapter_for_full_finetune: true
+  load_in_8bit: false
+  torch_dtype: bfloat16
+  freeze_patterns:
+    - vision
+    - visual
+    - projector
+    - resampler
+    - merger
+data:
+  train_file: ../TrainingData/splits/dpo_general_train.jsonl
+  eval_file: ../TrainingData/splits/dpo_general_test.jsonl
+  downsample_mode: 16x
+  max_slice_nums: 9
+training:
+  output_dir: /root/rivermind-data/lumina-agentic-training/artifacts/merged-hf/MiniCPM-V-4.6-AgenticSFTDPO
+  run_name: minicpmv46-agentic-dpo-full-ddp-bf16
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0000005
+  num_train_epochs: 1
+  logging_steps: 5
+  eval_strategy: "no"
+  save_steps: 100
+  save_total_limit: 2
+  report_to: swanlab
+  beta: 0.1
+  reference_free: true
+  max_length: 4864
+  bf16: true
+  tf32: true
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  remove_unused_columns: false
+  optim: adamw_torch
+  max_grad_norm: 0.3
+  warmup_ratio: 0.03
+  lr_scheduler_type: cosine

@@ -1,0 +1,262 @@
+{
+  "assistantDialect": "xml_tags",
+  "assistantEnvelope": "xml_tags",
+  "benchmarkTraceUsedForTraining": false,
+  "benchmarkTracePolicy": "Benchmark traces are used only for aggregate diagnostics, not as training examples.",
+  "evaluation": {
+    "copied_from_general": false,
+    "families": [
+      "eval_budget_reminder",
+      "eval_failure_recovery",
+      "eval_plan_adjust_note",
+      "eval_replay_recovery"
+    ],
+    "independent_holdout": true,
+    "split_policy": "evaluation is holdout-only; no evaluation_train split is generated",
+    "used_by_holdout": "sft_evaluation_test.jsonl",
+    "used_by_training": false
+  },
+  "multimodal": {
+    "image_files": 0,
+    "image_records_evaluation_test": 0,
+    "image_records_test": 0,
+    "image_records_train": 0,
+    "note": "Multimodal image records were removed because localImagePath assets did not match the expected OCR text. Current committed training data is text/tool-only."
+  },
+  "qa": {
+    "dpo_evaluation_test": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "evaluation": 1680
+      },
+      "families": {
+        "eval_budget_reminder": 720,
+        "eval_failure_recovery": 120,
+        "eval_plan_adjust_note": 720,
+        "eval_replay_recovery": 120
+      },
+      "kind": "dpo",
+      "multimodal_records": 0,
+      "records": 1680
+    },
+    "dpo_test": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "calendar": 339,
+        "complex": 207,
+        "contacts": 126,
+        "document": 121,
+        "file": 51,
+        "ledger": 129,
+        "local": 81,
+        "reminder": 340,
+        "subscription": 155,
+        "system": 202,
+        "web": 116
+      },
+      "families": {
+        "budget_audit_note_reminder": 104,
+        "calculator": 81,
+        "calendar_create": 121,
+        "calendar_delete": 92,
+        "calendar_update": 87,
+        "contacts_open": 43,
+        "contacts_update": 83,
+        "document_summary_clipboard": 121,
+        "failure_recovery": 39,
+        "ledger_record": 49,
+        "ledger_update": 80,
+        "morning_plan_adjust_save": 103,
+        "reminder_complete": 82,
+        "reminder_create": 86,
+        "reminder_delete": 88,
+        "reminder_update": 84,
+        "replay_recovery": 51,
+        "subscription_add": 49,
+        "subscription_remove": 106,
+        "system_status_chain": 202,
+        "web_summary_save": 116
+      },
+      "kind": "dpo",
+      "multimodal_records": 0,
+      "records": 1867
+    },
+    "dpo_train": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "calendar": 3021,
+        "complex": 1953,
+        "contacts": 1134,
+        "document": 1139,
+        "file": 369,
+        "ledger": 1131,
+        "local": 759,
+        "reminder": 3020,
+        "subscription": 1105,
+        "system": 1898,
+        "web": 1144
+      },
+      "families": {
+        "budget_audit_note_reminder": 976,
+        "calculator": 759,
+        "calendar_create": 1139,
+        "calendar_delete": 748,
+        "calendar_update": 753,
+        "contacts_open": 377,
+        "contacts_update": 757,
+        "document_summary_clipboard": 1139,
+        "failure_recovery": 381,
+        "ledger_record": 371,
+        "ledger_update": 760,
+        "morning_plan_adjust_save": 977,
+        "reminder_complete": 758,
+        "reminder_create": 754,
+        "reminder_delete": 752,
+        "reminder_update": 756,
+        "replay_recovery": 369,
+        "subscription_add": 371,
+        "subscription_remove": 734,
+        "system_status_chain": 1898,
+        "web_summary_save": 1144
+      },
+      "kind": "dpo",
+      "multimodal_records": 0,
+      "records": 16673
+    },
+    "sft_evaluation_test": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "evaluation": 1680
+      },
+      "families": {
+        "eval_budget_reminder": 720,
+        "eval_failure_recovery": 120,
+        "eval_plan_adjust_note": 720,
+        "eval_replay_recovery": 120
+      },
+      "kind": "sft",
+      "multimodal_records": 0,
+      "records": 1680
+    },
+    "sft_test": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "calendar": 339,
+        "complex": 207,
+        "contacts": 126,
+        "document": 121,
+        "file": 51,
+        "ledger": 129,
+        "local": 81,
+        "reminder": 340,
+        "subscription": 155,
+        "system": 202,
+        "web": 116
+      },
+      "families": {
+        "budget_audit_note_reminder": 104,
+        "calculator": 81,
+        "calendar_create": 121,
+        "calendar_delete": 92,
+        "calendar_update": 87,
+        "contacts_open": 43,
+        "contacts_update": 83,
+        "document_summary_clipboard": 121,
+        "failure_recovery": 39,
+        "ledger_record": 49,
+        "ledger_update": 80,
+        "morning_plan_adjust_save": 103,
+        "reminder_complete": 82,
+        "reminder_create": 86,
+        "reminder_delete": 88,
+        "reminder_update": 84,
+        "replay_recovery": 51,
+        "subscription_add": 49,
+        "subscription_remove": 106,
+        "system_status_chain": 202,
+        "web_summary_save": 116
+      },
+      "kind": "sft",
+      "multimodal_records": 0,
+      "records": 1867
+    },
+    "sft_train": {
+      "bad_count": 0,
+      "bad_examples": [],
+      "categories": {
+        "calendar": 3021,
+        "complex": 1953,
+        "contacts": 1134,
+        "document": 1139,
+        "file": 369,
+        "ledger": 1131,
+        "local": 759,
+        "reminder": 3020,
+        "subscription": 1105,
+        "system": 1898,
+        "web": 1144
+      },
+      "families": {
+        "budget_audit_note_reminder": 976,
+        "calculator": 759,
+        "calendar_create": 1139,
+        "calendar_delete": 748,
+        "calendar_update": 753,
+        "contacts_open": 377,
+        "contacts_update": 757,
+        "document_summary_clipboard": 1139,
+        "failure_recovery": 381,
+        "ledger_record": 371,
+        "ledger_update": 760,
+        "morning_plan_adjust_save": 977,
+        "reminder_complete": 758,
+        "reminder_create": 754,
+        "reminder_delete": 752,
+        "reminder_update": 756,
+        "replay_recovery": 369,
+        "subscription_add": 371,
+        "subscription_remove": 734,
+        "system_status_chain": 1898,
+        "web_summary_save": 1144
+      },
+      "kind": "sft",
+      "multimodal_records": 0,
+      "records": 16673
+    }
+  },
+  "removed": {
+    "policy": "Removed every record with metadata.localImagePath or metadata.modalities containing image.",
+    "total_records_removed": 6120,
+    "by_file": {
+      "dpo_evaluation_test.jsonl": {
+        "records": 1680,
+        "removed_multimodal": 720
+      },
+      "dpo_general_test.jsonl": {
+        "records": 1867,
+        "removed_multimodal": 221
+      },
+      "dpo_general_train.jsonl": {
+        "records": 16673,
+        "removed_multimodal": 2119
+      },
+      "sft_evaluation_test.jsonl": {
+        "records": 1680,
+        "removed_multimodal": 720
+      },
+      "sft_general_test.jsonl": {
+        "records": 1867,
+        "removed_multimodal": 221
+      },
+      "sft_general_train.jsonl": {
+        "records": 16673,
+        "removed_multimodal": 2119
+      }
+    }
+  }
+}

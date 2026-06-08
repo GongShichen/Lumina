@@ -4,124 +4,30 @@ Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它把模型输�
 
 ![Lumina Agent Runtime 架构](docs/lumina-agent-runtime-architecture.png)
 
-## Runtime 概览
+## Runtime SDK
 
-Runtime Core 是跨端的 C/C++ 执行核心。宿主负责提供模型、工具和 UI 策略，Runtime 负责执行循环与契约治理：
-
-- 组装 planner input：用户请求、上下文、工具 schema、trace、预算和历史 observation。
-- 消费 blocking 或 streaming model callback，解析并校验 canonical ReAct step。
-- 调度工具调用，执行参数校验、权限检查、用户确认和幂等控制。
-- 支持 deferred tool loading：模型先看到轻量工具目录，需要时通过 `tool_discovery` 加载完整 schema。
-- 支持 progressive context loading：宿主先暴露轻量 context catalog，Runtime 在 session 内按需 search/load scoped sections。
-- 将 tool result 转成 runtime-owned observation，模型不得伪造 observation。
-- 管理 session、checkpoint、snapshot、cancel、resume 和 replay。
-- 根据 provider/model 的上下文窗口动态管理预算，并在接近上限或 prompt-too-long 时压缩上下文。
-- 通过可选 sinks 暴露 event、trace、metrics、audit、span，未注册时不强制持久化。
-- 通过 hook、guardrail、retry provider 和 compaction provider 让宿主控制运行时行为。
+Runtime Core 是跨端的 C/C++ 执行核心。宿主提供模型、工具、上下文和 UI 策略；Runtime 负责把用户请求组织成 planner input，循环调用模型、校验 ReAct step、执行工具、写入 observation，并在 `result`、`cannot_complete`、失败、暂停或取消时结束。
 
 Canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi_tool_use`、`ask_user`、`result`、`cannot_complete`。最终产物统一是 `result`，不接受 `final_answer`。
 
-## Runtime 架构
+## 核心能力
 
-一次任务的执行流：
+- **ReAct Loop**：解析 blocking 或 streaming model callback，并执行 dialect normalization、schema validation 和工具调度。
+- **Tool Registry**：管理工具 schema、参数校验、副作用、权限确认、幂等策略和 external provider。
+- **Deferred Tool Loading**：模型可通过 `tool_discovery` 按需加载完整工具 schema，避免首轮 prompt 过大。
+- **Progressive Context Loading**：memory、文件、知识库和历史会话由宿主拥有，Runtime 只维护当前 session 的 loaded context。
+- **Context Budget & Compaction**：按 provider/model context window 动态管理预算；宿主可替换 compaction provider。
+- **Session / Checkpoint / Replay**：支持 session 状态、checkpoint、snapshot、cancel、resume 和 replay。
+- **Hooks & Guardrails**：宿主可在请求、工具输入输出、result 输出前做拦截、确认、拒绝或暂停。
+- **Observability**：event、trace、metrics、audit、span、snapshot 都是可选 sink，未注册时不强制持久化。
 
-1. 宿主创建 Runtime session，并传入 Agent request。
-2. Runtime 读取 context、state、tool schemas 和 budget，生成 planner input。
-3. Model provider 返回 ReAct step；Runtime 完成 dialect normalization 和 schema validation。
-4. Hook / guardrail 可以在固定 lifecycle 点拦截、补上下文、改写工具调用、拒绝或暂停。
-5. Tool registry 根据 schema 路由工具调用；permission / confirmation 决定是否执行。
-6. Tool result 被校验、脱敏、截断，并记录为 observation。
-7. Runtime 继续下一轮规划，直到 `result`、`cannot_complete`、failure、pause 或 cancellation。
-
-核心能力：
-
-- **Tool Registry & Executor**：工具 schema、参数校验、副作用、幂等策略、external provider。
-- **Deferred Tool Loading**：Core 维护 always-loaded tools、deferred catalog 和 session loaded tool set；未加载工具不可直接执行。
-- **Progressive Context Loading**：Core 维护 per-session `loaded_context_set` 和 context catalog summary；memory、文件、知识库、历史会话由宿主 provider 拥有。
-- **Session / Checkpoint / Replay**：Core 导出 checkpoint JSON，宿主负责持久化；replay 可固定 model output 或 tool observation。
-- **RuntimeState**：`temp`、`session`、`user`、`app` 四类 scope；模型不能直接写 state。
-- **Context Budget & Compaction**：从 provider/model 读取 `max_context_tokens`，动态计算可用窗口和压缩阈值；默认先清理大型工具结果，再按预算摘要压缩。
-- **RuntimeHook**：按 lifecycle、tool name、sensitivity、side effect 匹配；支持 proceed、append context、rewrite、reject、require confirmation、pause、fail。
-- **Guardrails**：request 入站、tool 输入、tool 输出、result 输出前的策略校验。
-- **Retry Provider**：Core 暴露 retry request / decision contract，默认策略处理 provider、normalization、tool execution 的可重试失败。
-- **Observability**：event、trace、metrics、audit、span、snapshot 都是可插拔接口，外部按需订阅。
-
-## 上下文压缩
-
-上下文压缩是 Runtime Core 的可插拔能力，不依赖某一端的 UI 或模型实现。Runtime 优先通过 `LuminaAgentModelMetadataCallback` 从当前 provider/model metadata 读取 `max_context_tokens`、`model_id` 和 `provider_native_context_management`；如果 provider 不提供，才使用宿主配置的 fallback 窗口。
-
-预算计算：
-
-```text
-effective_context_window = max_context_tokens - reserved_output_tokens
-auto_compact_threshold = effective_context_window - auto_compact_buffer_tokens
-```
-
-默认 pipeline 参考 Claude Code 风格，按顺序执行：
-
-- `snip_projection`：过滤已隐藏、已移除或不应暴露给模型的历史片段。
-- `microcompact`：优先清理旧的大型工具结果和历史大段 context，保留工具调用结构、摘要和最近 observation。
-- `provider_native`：如果模型 provider metadata 声明支持原生上下文管理，则允许 provider 自己清理 tool result / thinking。
-- `summarizing_compact`：超过动态阈值时，把旧上下文压缩成 compact summary，并保留最近上下文。
-- `partial_summarize`：支持只压缩一段历史窗口。
-- `reactive_compact`：模型请求因为 prompt-too-long 失败时触发恢复压缩。
-
-宿主可以注册 `LuminaAgentCompactionProviderCallback`，替换完整 pipeline 或只处理某个 strategy；返回 `{"status":"skipped"}` 时 Core 会继续执行默认策略。压缩请求会携带 redacted `context_frame`、`trace_summary`、`tool_result_candidates` 和预算快照；API key、token、secret 会在进入 compaction payload 前脱敏。压缩事件、边界、tokens saved estimate 和失败原因会通过可选 observability sinks 暴露，未注册 sink 时不做持久化输出。
-
-## 上下文渐进式加载
-
-Context progressive loading 用于 memory、文件、知识库和历史会话很多、但当前任务只需要其中一小部分的场景。Runtime 不内置长期 memory、不做 embedding、不连接数据库；宿主拥有 memory 和持久化，Runtime 只维护当前 session 的 context working set。
-
-流程：
-
-1. 宿主可注册 `LuminaAgentContextLoadingPluginCallback`，支持 `catalog`、`search`、`load`、`range`、`invalidate`。
-2. 首轮 planner input 只包含轻量 `available_sources` 和已加载的 `loaded_sections`。
-3. 模型需要更多上下文时输出现有 `reasoning` step，并设置 `needs_more_context=true`；Runtime 用用户目标、reasoning thought 和最近 observation 生成 search/load 请求。
-4. 插件返回 scoped `sections` 后，Runtime 把它们加入 session `loaded_context_set`，下一轮 planner input 才暴露给模型。
-5. Checkpoint、snapshot 和 replay artifact 保存 `loaded_context_set` 与 `context_catalog_summary`，恢复后保持同一上下文工作集。
-
-如果插件返回 `{}`、`{"status":"skipped"}` 或未注册，Runtime 会沿用旧的 `LuminaAgentContextCallback` initial/follow-up 行为。Context loading 事件和指标通过可选 sinks 暴露，例如 `context_loading.catalog_emitted`、`context_loading.search`、`context_loading.loaded`、`context_loading.load_failed`。
-
-## 工具延迟加载
-
-Deferred tool loading 用于工具很多、完整 schema 会挤占上下文窗口的场景。Runtime 不改变 ReAct schema，而是复用 `tool_discovery` 作为模型侧发现入口：
-
-1. Planner input 默认只包含 always-loaded schemas、已加载 deferred schemas，以及轻量 `deferred_catalog`。
-2. 模型需要更多工具时输出 `tool_discovery`，例如按关键词搜索，或用 `select:tool.a,tool.b` 精确选择。
-3. Runtime 返回匹配 metadata；当 `include_schemas=true` 或 `select:` 查询时，把完整 schema 加入当前 session 的 `loaded_tool_set`。
-4. 下一轮 planner input 才会暴露这些完整 schema；执行前仍走 schema validation、permission、confirmation、guardrail 和 audit。
-
-Core 内置默认插件，支持 `enabled`、`auto`、`disabled`。`auto` 会根据当前 provider/model 的 `max_context_tokens` 和 `toolLoadingThresholdRatio` 动态决定是否启用，而不是写死阈值。宿主也可以注册 `LuminaAgentToolLoadingPluginCallback` 完全接管 `catalog`、`search`、`load`、`invalidate`，用于接 MCP、企业工具目录或自定义排序。Checkpoint、snapshot 和 replay artifact 会保存 `loaded_tool_set`，恢复后保持同一工具工作集。
-
-## 开箱即用接入
+## 端侧接入
 
 接入 Runtime 的核心是同一套 JSON contract 和 C ABI。iOS 可以直接使用 Swift Package；Android / HarmonyOS 通过 native binding 或 C ABI 接入 Core。
 
 ### iOS
 
-通过 Swift Package 引入 `LuminaAgentRuntime`，提供 tools、model、context、permission、confirmation，以及可选 context compactor / hook / guardrail / observability / retry provider：
-
-```swift
-let runtime = LuminaAgentRuntime(
-    tools: tools.map(AnyLuminaAgentTool.init),
-    stepGenerator: stepGenerator,
-    contextProvider: contextProvider,
-    contextCompactor: contextCompactor,
-    configuration: configuration,
-    permissionGate: permissionGate,
-    confirmationCoordinator: confirmation,
-    hooks: hooks,
-    observabilitySinks: sinks,
-    guardrails: guardrails,
-    retryProvider: retryProvider,
-    contextLoadingPlugin: contextLoadingPlugin,
-    toolLoadingPlugin: toolLoadingPlugin
-)
-
-for await event in runtime.runStream(request: request) {
-    // 更新 UI、记录指标或展示工具执行状态。
-}
-```
+通过 Swift Package 引入 `LuminaAgentRuntime`，并提供 model、tools、context、permission、confirmation，以及可选 hook、guardrail、observability、retry、context loading 和 tool loading provider。
 
 运行测试：
 
@@ -144,75 +50,113 @@ cmake -S LuminaAgentRuntime -B build/android-arm64 \
 cmake --build build/android-arm64
 ```
 
-宿主侧实现 model、tool、context、context loading、permission、confirmation、guardrail、compaction、tool loading、hook、event、trace、metrics、audit 等 JSON callback，然后注册工具 schema 或 deferred tool metadata 并运行：
-
-```kotlin
-val runtime = LuminaAgentRuntime(configurationJson, providers)
-runtime.registerToolSchema(calendarSchemaJson)
-runtime.registerDeferredToolMetadata(mcpToolMetadataJson)
-val resultJson = runtime.run(requestJson)
-val checkpoint = runtime.exportSessionCheckpoint(session)
-runtime.cancel(requestId)
-```
-
 ### HarmonyOS
 
 HarmonyOS 侧通过 ETS wrapper 调用 native runtime。编译时把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
 
-ETS 侧提供 providers，把模型、工具、上下文、context loading、权限、确认、压缩、tool loading、事件和审计回调交给 Runtime：
+## Model
 
-```ts
-const runtime = new LuminaAgentRuntime(configurationJson, providers)
-runtime.registerToolSchema(calendarSchemaJson)
-runtime.registerDeferredToolMetadata(mcpToolMetadataJson)
-const resultJson = runtime.run(requestJson)
-const snapshot = runtime.snapshotSession(session)
-runtime.cancel(requestId)
-runtime.close()
+模型、训练脚本和训练数据统一放在根目录 `model/` 下。App 运行时需要的模型副本通过脚本安装到 `app/Resources/Models/`，该目录不作为源码资产保存。
+
+目录结构：
+
+- `model/bundles/original/MiniCPMV46ReActModel/`：原始 MiniCPM-V 4.6 GGUF bundle，本地保留，不提交。
+- `model/bundles/trained/MiniCPMV46ReActModel-AgenticSFTDPO-Q8/`：训练后的 Agentic SFT+DPO Q8 GGUF bundle，提交进 git。
+- `model/embeddings/BGETextEmbedding/`：BGE embedding Core ML 模型和 tokenizer，本地保留，不提交。
+- `model/training/code/agentic_rl/`：SFT/DPO 训练代码、配置和脚本。
+- `model/training/data/TrainingData/`：训练和 holdout 数据，提交进 git。
+
+统一模型脚本：
+
+```bash
+./model/lumina_model.sh download original
+./model/lumina_model.sh download embedding
+./model/lumina_model.sh download all
+./model/lumina_model.sh pull-trained
+./model/lumina_model.sh build-native-engine
+./model/lumina_model.sh install original
+./model/lumina_model.sh install trained
+./model/lumina_model.sh install embedding
+./model/lumina_model.sh install all
 ```
 
-## Observability 与 Benchmark
+MiniCPM-V 4.6 的 GGUF 推理走 app 内的 C++ native engine，需要把
+`app/NativeEngines/MiniCPMV46/LuminaMiniCPMV46GGUFEngine.cpp` 单独编译成
+`libLuminaMiniCPMV46GGUFEngine.dylib`，并和 llama.cpp/ggml 依赖 dylib 一起放进模型 bundle。
+这个编译入口已经合并到统一模型脚本：
 
-Runtime 不内置 benchmark scoring。Benchmark 是外部 harness，通过 public APIs、events、trace、metrics、snapshot、checkpoint 和 replay 接入。
+```bash
+./model/lumina_model.sh build-native-engine
+```
 
-仓库中提供了外部 benchmark harness 示例：`LuminaAgentRuntime/Examples/ExternalBenchmarkHarness`。它可以通过自定义 sink 计算：
+`download original` 默认会在下载后构建 native engine；训练后的模型 bundle 已包含当前编译好的 dylib。
+如果改过 C++ 推理代码、llama.cpp 依赖，或需要重新签名 dylib，重新运行 `build-native-engine`，再执行对应的 `install original` 或 `install trained`。
 
-- runtime status、task completion、contract failure。
-- tool exact match、micro precision / recall / F1。
-- semantic pass、pass@1、tool execution@1。
-- TTFT、step p95、tool p95、wall-clock p95。
-- retry count、fallback count、normalization failure rate、replay diff。
-- deferred tool schema token saved estimate、tool discovery hit rate、unknown tool rate。
+训练方式：
 
-观测 payload 默认遵守 redaction：API key、secret、token 不进入 event、trace、audit、metrics 或 benchmark report。
+- Base model：MiniCPM-V 4.6。
+- 流程：XML ReAct SFT -> holdout 检查 -> standard DPO -> LoRA 合并回 base model -> GGUF Q8 转换。
+- LoRA 微调 language modules，冻结 vision / visual / projector / resampler。
+- SFT train/test：`16,673 / 1,867`。
+- DPO train/test：`16,673 / 1,867`。
+- Holdout evaluation：SFT `1,680`，DPO `1,680`。
 
-## Lumina App
-
-Lumina App 展示端侧 Agent 的完整使用体验：
-
-- Chat 入口：用户输入自然语言任务，Agent 规划步骤并返回最终结果。
-- 真实工具执行：日历、提醒、联系人、通知、位置、文件、网页、剪贴板、消息草稿等工具能力。
-- 权限与确认：在执行敏感或有副作用工具前触发系统权限和用户确认。
-- 推理设置：Settings 中配置本地推理或 OpenAI-compatible 远程流式 API。
-- Benchmark：运行真实任务集，报告 F1、recall、pass@1、tool execution@1、P95、retry / fallback、deferred tool loading 等指标。
-- Trust / Debug：受代码开关控制，用于查看 runtime trace、checkpoint、observability 和诊断信息。
-
-## Setup & Run App
+## App
 
 要求：
 
 - 安装 Xcode。
-- 可运行 iOS App 的真机设备。
 - Swift Package 支持。
+
+准备模型：
+
+```bash
+# 使用训练后的模型
+./model/lumina_model.sh install trained
+
+# 或使用原始模型
+./model/lumina_model.sh install original
+
+# 安装 embedding
+./model/lumina_model.sh install embedding
+
+# 一键安装已有本地资源
+./model/lumina_model.sh install all
+```
+
+前置检查：
+
+```bash
+./scripts/check.sh
+```
+
+这个脚本会运行 Runtime SDK 和 App 的 Swift tests、文件命名检查，并执行一次 macOS Catalyst Debug build。需要清理构建产物时使用：
+
+```bash
+./scripts/clean_build_artifacts.sh
+```
+
+需要运行性能测试报告时使用：
+
+```bash
+./scripts/perf.sh
+```
 
 用 Xcode 运行：
 
 1. 打开 `app/Lumina.xcodeproj`。
 2. 选择 `Lumina` scheme。
-3. 选择已连接的 iPhone 或 iPad。
+3. 选择 Mac Catalyst、已连接的 iPhone 或 iPad。
 4. Build & Run。
 
-本地推理依赖设备侧加速能力，推荐在真机上运行。iOS Simulator 可以用于 UI 和编译检查，但不能完整验证 MPS / ANE 推理路径。
+命令行构建 macOS Catalyst：
+
+```bash
+xcodebuild -project app/Lumina.xcodeproj \
+  -scheme Lumina \
+  -destination 'platform=macOS,variant=Mac Catalyst' \
+  -configuration Debug build
+```
 
 命令行构建真机版本：
 
@@ -220,14 +164,5 @@ Lumina App 展示端侧 Agent 的完整使用体验：
 xcodebuild -project app/Lumina.xcodeproj \
   -scheme Lumina \
   -destination 'generic/platform=iOS' \
-  -configuration Debug build
-```
-
-命令行构建模拟器版本：
-
-```bash
-xcodebuild -project app/Lumina.xcodeproj \
-  -scheme Lumina \
-  -destination 'platform=iOS Simulator,name=iPhone 17' \
   -configuration Debug build
 ```

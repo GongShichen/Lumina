@@ -14,5 +14,27 @@ enum LuminaTab {
 }
 
 enum LuminaFeatureFlags {
-    static let showTrustTab = true
+    static let showAdvancedTabs = false
+    static let showSettingsTab = showAdvancedTabs
+    static let showRuntimeTab = showAdvancedTabs
+    static let showTrustTab = showAdvancedTabs
+}
+
+extension LuminaTab {
+    var isVisible: Bool {
+        switch self {
+        case .agent, .memory:
+            return true
+        case .settings:
+            return LuminaFeatureFlags.showSettingsTab
+        case .runtimeLab:
+            return LuminaFeatureFlags.showRuntimeTab
+        case .runtime:
+            return LuminaFeatureFlags.showTrustTab
+        }
+    }
+
+    var visibleFallback: LuminaTab {
+        isVisible ? self : .agent
+    }
 }

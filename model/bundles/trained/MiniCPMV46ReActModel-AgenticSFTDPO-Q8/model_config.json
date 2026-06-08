@@ -1,0 +1,12 @@
+{
+  "model_name": "MiniCPM-V 4.6 Agentic SFT+DPO",
+  "architecture": "minicpm-v-4_6",
+  "context_length": 16000,
+  "quantization": "Q8_0",
+  "text_model": "model.gguf",
+  "vision_projector": "mmproj-model-f16.gguf",
+  "source_repo": "openbmb/MiniCPM-V-4.6",
+  "base_model_preserved": true,
+  "training": "BF16 XML ReAct SFT then standard DPO",
+  "runtime": "LuminaModelRuntimeCore native C++"
+}
