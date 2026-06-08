@@ -83,7 +83,10 @@ final class AgentAppServices: ObservableObject {
             permissionGate: LuminaAppRuntimePermissionGate(),
             confirmationCoordinator: confirmationCoordinator ?? confirmation,
             auditLogger: auditLogger,
-            hooks: [LuminaAppMemoryPolicyRuntimeHook()],
+            hooks: [
+                LuminaAppMemoryPolicyRuntimeHook(),
+                LuminaToolRecoveryRuntimeHook()
+            ],
             contextLoadingPlugin: contextLoadingPlugin
         )
     }
@@ -156,12 +159,42 @@ final class AgentAppServices: ObservableObject {
     }
 
     func runEvaluationStream(task: LuminaBenchmarkTask) -> AsyncStream<LuminaAgentRunEvent> {
+        let environment = LuminaBenchmarkTaskEnvironment(
+            runID: UUID(),
+            taskID: task.id,
+            rootDirectory: FileManager.default.temporaryDirectory
+        )
+        return AsyncStream { continuation in
+            let relay = Task {
+                do {
+                    try await environment.prepare(for: task)
+                    for await event in runEvaluationStream(task: task, environment: environment) {
+                        continuation.yield(event)
+                    }
+                    environment.cleanup(keepArtifacts: false)
+                    continuation.finish()
+                } catch {
+                    environment.cleanup(keepArtifacts: true)
+                    continuation.finish()
+                }
+            }
+            continuation.onTermination = { _ in
+                relay.cancel()
+                Task { @MainActor in
+                    environment.cleanup(keepArtifacts: true)
+                }
+            }
+        }
+    }
+
+    func runEvaluationStream(task: LuminaBenchmarkTask, environment taskEnvironment: LuminaBenchmarkTaskEnvironment) -> AsyncStream<LuminaAgentRunEvent> {
         let tools = AppToolFactory.makeEvaluationTools(
             memoryStore: memoryStore,
-            ledgerStore: ledgerStore,
-            subscriptionStore: subscriptionStore,
+            ledgerStore: taskEnvironment.ledgerStore,
+            subscriptionStore: taskEnvironment.subscriptionStore,
             messageDrafts: messageDrafts,
-            calendarStore: evaluationCalendarStore,
+            calendarStore: taskEnvironment.calendarStore,
+            documentsDirectory: taskEnvironment.documentsDirectory,
             enabledToolNames: Self.evaluationToolNames(for: task.text, category: task.category)
                 .union(task.expectedTools)
         )

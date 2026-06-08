@@ -9,12 +9,23 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let completedCount: Int
     let succeededCount: Int
     let failedCount: Int
+    let outcomePassedCount: Int
+    let outcomePassRate: Double
     let passAt1Count: Int
     let passAt1Rate: Double
+    let strictToolPassCount: Int
+    let strictToolPassRate: Double
     let toolExecutionAt1Count: Int
     let toolExecutionAt1Rate: Double
     let semanticPassedCount: Int
     let semanticPassRate: Double
+    let missingToolCount: Int
+    let unexpectedToolCount: Int
+    let failedToolCount: Int
+    let replayedToolCount: Int
+    let toolAttemptCount: Int
+    let toolExecutionCount: Int
+    let toolReplayCount: Int
     let exactToolMatch: Double
     let microPrecision: Double
     let microRecall: Double
@@ -66,6 +77,84 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let jsonReportURL: URL?
     let markdownReportURL: URL?
 
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case generatedAt
+        case localModelSelectionRawValue
+        case localModelDisplayName
+        case modelSource
+        case taskCount
+        case completedCount
+        case succeededCount
+        case failedCount
+        case outcomePassedCount
+        case outcomePassRate
+        case passAt1Count
+        case passAt1Rate
+        case strictToolPassCount
+        case strictToolPassRate
+        case toolExecutionAt1Count
+        case toolExecutionAt1Rate
+        case semanticPassedCount
+        case semanticPassRate
+        case missingToolCount
+        case unexpectedToolCount
+        case failedToolCount
+        case replayedToolCount
+        case toolAttemptCount
+        case toolExecutionCount
+        case toolReplayCount
+        case exactToolMatch
+        case microPrecision
+        case microRecall
+        case microF1
+        case latencyP50Milliseconds
+        case latencyP95Milliseconds
+        case wallClockP95Milliseconds
+        case confirmationWaitP95Milliseconds
+        case systemPermissionWaitP95Milliseconds
+        case stepGenerationP95Milliseconds
+        case toolP95Milliseconds
+        case modelInvocationCount
+        case modelTTFTP50Milliseconds
+        case modelTTFTP95Milliseconds
+        case modelTokensPerSecondP50
+        case modelTokensPerSecondP95
+        case modelPromptTokensP95
+        case modelOutputTokensP95
+        case runtimeContractFailureCount
+        case runtimeContractFailureRate
+        case normalizationFailureCount
+        case schemaValidationFailureCount
+        case modelOwnedObservationRejectCount
+        case unknownToolRejectCount
+        case retryCount
+        case fallbackCount
+        case remoteModelInvocationCount
+        case localModelInvocationCount
+        case runtimeObservationCount
+        case resultGeneratedCount
+        case hookEventCount
+        case toolFailureCount
+        case schemaTokensSavedEstimate
+        case toolDiscoveryHitRate
+        case deferredUnknownToolRate
+        case toolLoadingSearchCount
+        case toolLoadingLoadedCount
+        case toolLoadingLoadFailedCount
+        case contextLoadingCatalogEmittedCount
+        case contextLoadingSearchCount
+        case contextLoadingLoadedCount
+        case contextLoadingRangeLoadedCount
+        case contextLoadingCacheHitCount
+        case contextLoadingLoadFailedCount
+        case contextLoadingHitRate
+        case contextLoadingTokensEstimate
+        case memoryAccessDisabled
+        case results
+        case jsonReportURL
+        case markdownReportURL
+    }
+
     static func make(
         results: [LuminaBenchmarkTaskResult],
         jsonReportURL: URL?,
@@ -77,11 +166,20 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let completed = results.count
         let succeeded = results.filter { $0.status == "succeeded" }.count
         let failed = results.filter { $0.status != "succeeded" }.count
+        let outcomePassed = results.filter(\.outcomePassed).count
         let passAt1 = results.filter(\.passAt1).count
+        let strictToolPass = results.filter(\.strictToolPassed).count
         let toolRequired = results.filter { !$0.expectedTools.isEmpty }.count
         let toolExecutionAt1 = results.filter(\.toolExecutedAt1).count
         let semanticPassed = results.filter(\.semanticPassed).count
         let exact = ratio(results.filter(\.exactMatch).count, completed)
+        let missingToolCount = results.reduce(0) { $0 + $1.missingTools.count }
+        let unexpectedToolCount = results.reduce(0) { $0 + $1.unexpectedTools.count }
+        let failedToolCount = results.reduce(0) { $0 + $1.failedToolCount }
+        let replayedToolCount = results.reduce(0) { $0 + $1.toolReplayCount }
+        let toolAttemptCount = results.reduce(0) { $0 + $1.toolAttemptCount }
+        let toolExecutionCount = results.reduce(0) { $0 + $1.toolExecutionCount }
+        let toolReplayCount = results.reduce(0) { $0 + $1.toolReplayCount }
         let modelMetrics = results.flatMap(\.modelMetrics)
         let ttft = modelMetrics.compactMap(\.timeToFirstTokenMilliseconds)
         let runtimeMetrics = results.reduce(into: LuminaBenchmarkRuntimeMetrics()) { partial, result in
@@ -93,9 +191,10 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         var falseNegative = 0
         for result in results {
             let expected = Set(result.expectedTools)
-            let actual = Set(result.actualTools)
+            let actual = Set(result.successfulTools)
+            let allExecuted = Set(result.actualTools)
             truePositive += expected.intersection(actual).count
-            falsePositive += actual.subtracting(expected).count
+            falsePositive += allExecuted.subtracting(expected).count
             falseNegative += expected.subtracting(actual).count
         }
         let precision = ratio(truePositive, truePositive + falsePositive)
@@ -110,12 +209,23 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             completedCount: completed,
             succeededCount: succeeded,
             failedCount: failed,
+            outcomePassedCount: outcomePassed,
+            outcomePassRate: ratio(outcomePassed, completed),
             passAt1Count: passAt1,
             passAt1Rate: ratio(passAt1, completed),
+            strictToolPassCount: strictToolPass,
+            strictToolPassRate: ratio(strictToolPass, completed),
             toolExecutionAt1Count: toolExecutionAt1,
             toolExecutionAt1Rate: ratio(toolExecutionAt1, toolRequired),
             semanticPassedCount: semanticPassed,
             semanticPassRate: ratio(semanticPassed, completed),
+            missingToolCount: missingToolCount,
+            unexpectedToolCount: unexpectedToolCount,
+            failedToolCount: failedToolCount,
+            replayedToolCount: replayedToolCount,
+            toolAttemptCount: toolAttemptCount,
+            toolExecutionCount: toolExecutionCount,
+            toolReplayCount: toolReplayCount,
             exactToolMatch: exact,
             microPrecision: precision,
             microRecall: recall,

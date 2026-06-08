@@ -9,15 +9,26 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let toolAttempts: [String]
     let actualTools: [String]
     let toolReplays: [String]
+    let successfulTools: [String]
+    let missingTools: [String]
+    let unexpectedTools: [String]
+    let failedTools: [String]
     let toolAttemptCount: Int
     let toolExecutionCount: Int
     let toolReplayCount: Int
+    let failedToolCount: Int
     let status: String
     let passAt1: Bool
+    let outcomePassed: Bool
+    let outcomeFailures: [String]
+    let strictToolPassed: Bool
+    let runtimeStatus: String
+    let terminationReason: String?
     let toolExecutedAt1: Bool
     let exactMatch: Bool
     let semanticPassed: Bool
     let semanticFailures: [String]
+    let toolDiagnosticsSummary: String?
     let recall: Double
     let precision: Double
     let f1: Double
@@ -37,6 +48,11 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         toolAttempts: [String],
         actualTools: [String],
         toolReplays: [String],
+        successfulTools: [String],
+        failedTools: [String],
+        outcomeFailures: [String],
+        runtimeStatus: String,
+        terminationReason: String?,
         semanticFailures: [String],
         status: String,
         totalMilliseconds: Double,
@@ -54,24 +70,41 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.toolAttempts = toolAttempts
         self.actualTools = actualTools
         self.toolReplays = toolReplays
+        self.successfulTools = successfulTools
+        self.failedTools = failedTools
         self.toolAttemptCount = toolAttempts.count
         self.toolExecutionCount = actualTools.count
         self.toolReplayCount = toolReplays.count
+        self.failedToolCount = failedTools.count
         let expected = Set(task.expectedTools)
-        let actual = Set(actualTools)
-        self.exactMatch = expected == actual
+        let actual = Set(successfulTools)
+        let allExecuted = Set(actualTools)
+        self.missingTools = expected.subtracting(actual).sorted()
+        self.unexpectedTools = allExecuted.subtracting(expected).sorted()
+        self.exactMatch = expected == allExecuted && failedTools.isEmpty && toolReplays.isEmpty
         self.semanticFailures = semanticFailures
-        let outcomePassed = status != "cancelled" && semanticFailures.isEmpty
-        self.semanticPassed = outcomePassed
+        self.outcomeFailures = outcomeFailures
+        self.runtimeStatus = runtimeStatus
+        self.terminationReason = terminationReason
+        self.outcomePassed = outcomeFailures.isEmpty
+        self.semanticPassed = self.outcomePassed
         let truePositive = Double(expected.intersection(actual).count)
-        let falsePositive = Double(actual.subtracting(expected).count)
+        let falsePositive = Double(allExecuted.subtracting(expected).count)
         let falseNegative = Double(expected.subtracting(actual).count)
         self.precision = truePositive + falsePositive == 0 ? 0 : truePositive / (truePositive + falsePositive)
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
-        self.passAt1 = outcomePassed && exactMatch
-        self.toolExecutedAt1 = !expected.isEmpty && toolExecutionCount > 0
-        self.status = outcomePassed ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
+        self.strictToolPassed = self.outcomePassed && exactMatch
+        self.passAt1 = self.outcomePassed
+        self.toolExecutedAt1 = !expected.isEmpty && expected.isSubset(of: actual)
+        self.status = self.outcomePassed ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
+        let diagnostics = [
+            self.missingTools.isEmpty ? nil : "missing=\(self.missingTools.joined(separator: ","))",
+            self.unexpectedTools.isEmpty ? nil : "unexpected=\(self.unexpectedTools.joined(separator: ","))",
+            failedTools.isEmpty ? nil : "failed=\(failedTools.joined(separator: ","))",
+            toolReplays.isEmpty ? nil : "replayed=\(toolReplays.joined(separator: ","))"
+        ].compactMap { $0 }
+        self.toolDiagnosticsSummary = diagnostics.isEmpty ? nil : diagnostics.joined(separator: "; ")
         self.totalMilliseconds = totalMilliseconds
         self.activeRuntimeMilliseconds = observedTimings.activeRuntimeMilliseconds
         self.wallClockMilliseconds = observedTimings.wallClockMilliseconds

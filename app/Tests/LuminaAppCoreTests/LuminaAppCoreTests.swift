@@ -657,8 +657,9 @@ final class LuminaAppCoreTests: XCTestCase {
 
         XCTAssertTrue(passed.passAt1)
         XCTAssertTrue(passed.toolExecutedAt1)
-        XCTAssertFalse(toolMismatch.passAt1)
-        XCTAssertTrue(toolMismatch.toolExecutedAt1)
+        XCTAssertTrue(toolMismatch.passAt1)
+        XCTAssertFalse(toolMismatch.strictToolPassed)
+        XCTAssertFalse(toolMismatch.toolExecutedAt1)
         XCTAssertFalse(semanticFailure.passAt1)
         XCTAssertFalse(skippedTool.toolExecutedAt1)
         XCTAssertEqual(toolMismatch.status, "succeeded")
@@ -666,10 +667,33 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(skippedTool.status, "succeeded")
         XCTAssertEqual(report.succeededCount, 3)
         XCTAssertEqual(report.failedCount, 1)
+        XCTAssertEqual(report.passAt1Count, 3)
+        XCTAssertEqual(report.passAt1Rate, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(report.strictToolPassCount, 1)
+        XCTAssertEqual(report.strictToolPassRate, 0.25, accuracy: 0.0001)
+        XCTAssertEqual(report.toolExecutionAt1Count, 2)
+        XCTAssertEqual(report.toolExecutionAt1Rate, 0.5, accuracy: 0.0001)
+    }
+
+    func testBenchmarkPassAt1AllowsCompletedTaskWithFailedExtraToolAttempts() {
+        let result = benchmarkResult(
+            id: "failed-extra",
+            expectedTools: ["calendar.search"],
+            actualTools: ["calendar.search", "summary"],
+            successfulTools: ["calendar.search"],
+            failedTools: ["summary"]
+        )
+        let report = LuminaBenchmarkReport.make(
+            results: [result],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertTrue(result.outcomePassed)
+        XCTAssertTrue(result.passAt1)
+        XCTAssertFalse(result.strictToolPassed)
         XCTAssertEqual(report.passAt1Count, 1)
-        XCTAssertEqual(report.passAt1Rate, 0.25, accuracy: 0.0001)
-        XCTAssertEqual(report.toolExecutionAt1Count, 3)
-        XCTAssertEqual(report.toolExecutionAt1Rate, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(report.strictToolPassCount, 0)
     }
 
     func testBenchmarkRuntimeFailureDoesNotPassSemanticsByDefault() {
@@ -717,6 +741,31 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(report.passAt1Count, 1)
     }
 
+    func testBenchmarkFinalOutcomeCanPassWithRuntimeFailureDiagnostics() {
+        let completed = benchmarkResult(
+            id: "completed-before-tool-budget",
+            expectedTools: ["calendar.search"],
+            actualTools: ["calendar.search", "summary"],
+            successfulTools: ["calendar.search"],
+            failedTools: ["summary"],
+            status: "failed"
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [completed],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertEqual(completed.runtimeStatus, "failed")
+        XCTAssertEqual(completed.status, "succeeded")
+        XCTAssertTrue(completed.outcomePassed)
+        XCTAssertTrue(completed.passAt1)
+        XCTAssertFalse(completed.strictToolPassed)
+        XCTAssertEqual(report.succeededCount, 1)
+        XCTAssertEqual(report.failedCount, 0)
+    }
+
     func testBenchmarkToolExecutionAt1HandlesTasksWithoutExpectedTools() {
         let noToolTask = benchmarkResult(
             id: "no-tool",
@@ -742,6 +791,8 @@ final class LuminaAppCoreTests: XCTestCase {
         id: String,
         expectedTools: [String],
         actualTools: [String],
+        successfulTools: [String]? = nil,
+        failedTools: [String] = [],
         semanticFailures: [String] = [],
         status: String = "succeeded"
     ) -> LuminaBenchmarkTaskResult {
@@ -757,6 +808,11 @@ final class LuminaAppCoreTests: XCTestCase {
             toolAttempts: actualTools,
             actualTools: actualTools,
             toolReplays: [],
+            successfulTools: successfulTools ?? actualTools,
+            failedTools: failedTools,
+            outcomeFailures: semanticFailures,
+            runtimeStatus: status,
+            terminationReason: nil,
             semanticFailures: semanticFailures,
             status: status,
             totalMilliseconds: 1,

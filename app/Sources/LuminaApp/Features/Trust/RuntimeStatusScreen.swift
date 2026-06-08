@@ -123,27 +123,41 @@ struct RuntimeStatusScreen: View {
     }
 
     private func benchmarkReportSummary(_ report: LuminaBenchmarkReport) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        #if DEBUG
+        BenchmarkReportUICoverage.assertAllMetricsMapped()
+        #endif
+
+        return VStack(alignment: .leading, spacing: 12) {
             Text("最近报告")
                 .font(.subheadline.weight(.bold))
                 .foregroundStyle(LuminaTheme.ink)
 
-            benchmarkMetricSection("结果", metrics: [
-                BenchmarkMetric(title: "Succeeded", value: "\(report.succeededCount)/\(report.completedCount)", caption: "任务完成数", tint: LuminaTheme.mint),
-                BenchmarkMetric(title: "Semantic", value: percent(report.semanticPassRate), caption: "\(report.semanticPassedCount)/\(report.completedCount)", tint: LuminaTheme.aqua),
-                BenchmarkMetric(title: "Pass@1", value: percent(report.passAt1Rate), caption: "\(report.passAt1Count)/\(report.completedCount) strict", tint: LuminaTheme.lavender),
-                BenchmarkMetric(title: "Failed", value: "\(report.failedCount)", caption: "语义未完成", tint: LuminaTheme.rose)
+            benchmarkMetricSection("Outcome", metrics: [
+                BenchmarkMetric(title: "Tasks", value: "\(report.completedCount)/\(report.taskCount)", caption: "completed / total", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Succeeded", value: "\(report.outcomePassedCount)", caption: "任务完成数", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Failed", value: "\(report.failedCount)", caption: "outcome status", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Outcome", value: percent(report.outcomePassRate), caption: "\(report.outcomePassedCount)/\(report.completedCount)", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Pass@1", value: percent(report.passAt1Rate), caption: "\(report.passAt1Count)/\(report.completedCount) single sample", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Strict", value: percent(report.strictToolPassRate), caption: "\(report.strictToolPassCount)/\(report.completedCount) exact tools", tint: LuminaTheme.deepInk),
+                BenchmarkMetric(title: "Semantic", value: percent(report.semanticPassRate), caption: "\(report.semanticPassedCount)/\(report.completedCount) compat", tint: LuminaTheme.aqua)
             ])
 
-            benchmarkMetricSection("工具选择", metrics: [
+            benchmarkMetricSection("Tool Discipline", metrics: [
                 BenchmarkMetric(title: "F1", value: percent(report.microF1), caption: "tool micro F1", tint: LuminaTheme.mint),
                 BenchmarkMetric(title: "Precision", value: percent(report.microPrecision), caption: "tool precision", tint: LuminaTheme.aqua),
                 BenchmarkMetric(title: "Recall", value: percent(report.microRecall), caption: "tool recall", tint: LuminaTheme.amber),
                 BenchmarkMetric(title: "Exact", value: percent(report.exactToolMatch), caption: "工具集合完全匹配", tint: LuminaTheme.lavender),
-                BenchmarkMetric(title: "Exec@1", value: percent(report.toolExecutionAt1Rate), caption: "\(report.toolExecutionAt1Count) tool task(s)", tint: LuminaTheme.rose)
+                BenchmarkMetric(title: "Exec@1", value: percent(report.toolExecutionAt1Rate), caption: "\(report.toolExecutionAt1Count) tool task(s)", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Attempts", value: "\(report.toolAttemptCount)", caption: "all observations", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Executions", value: "\(report.toolExecutionCount)", caption: "non-replay", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Replays", value: "\(report.toolReplayCount)", caption: "dedup observations", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Missing", value: "\(report.missingToolCount)", caption: "expected not seen", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Unexpected", value: "\(report.unexpectedToolCount)", caption: "outside expected", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Failed", value: "\(report.failedToolCount)", caption: "failed tools", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Replayed", value: "\(report.replayedToolCount)", caption: "tool replay total", tint: LuminaTheme.aqua)
             ])
 
-            benchmarkMetricSection("运行时诊断", metrics: [
+            benchmarkMetricSection("Runtime Contract", metrics: [
                 BenchmarkMetric(title: "Normalize", value: "\(report.normalizationFailureCount)", caption: "XML/JSON 修复失败", tint: LuminaTheme.amber),
                 BenchmarkMetric(title: "Schema", value: "\(report.schemaValidationFailureCount)", caption: "入参校验失败", tint: LuminaTheme.rose),
                 BenchmarkMetric(title: "Unknown", value: "\(report.unknownToolRejectCount)", caption: "未知工具拒绝", tint: LuminaTheme.lavender),
@@ -151,33 +165,110 @@ struct RuntimeStatusScreen: View {
                 BenchmarkMetric(title: "Retry", value: "\(report.retryCount)", caption: "runtime retry", tint: LuminaTheme.mint),
                 BenchmarkMetric(title: "Fallback", value: "\(report.fallbackCount)", caption: "fallback count", tint: LuminaTheme.rose),
                 BenchmarkMetric(title: "Tool Fail", value: "\(report.toolFailureCount)", caption: "工具执行失败", tint: LuminaTheme.amber),
-                BenchmarkMetric(title: "Contract", value: "\(report.runtimeContractFailureCount)", caption: percent(report.runtimeContractFailureRate), tint: LuminaTheme.lavender)
+                BenchmarkMetric(title: "Contract", value: "\(report.runtimeContractFailureCount)", caption: percent(report.runtimeContractFailureRate), tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Obs", value: "\(report.runtimeObservationCount)", caption: "runtime observations", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Results", value: "\(report.resultGeneratedCount)", caption: "result steps", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Hooks", value: "\(report.hookEventCount)", caption: "hook events", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Schema Saved", value: "\(report.schemaTokensSavedEstimate)", caption: "token estimate", tint: LuminaTheme.deepInk)
             ])
 
-            benchmarkMetricSection("性能", metrics: [
+            benchmarkMetricSection("Performance", metrics: [
+                BenchmarkMetric(title: "Active P50", value: milliseconds(report.latencyP50Milliseconds), caption: "runtime active", tint: LuminaTheme.mint),
                 BenchmarkMetric(title: "Active P95", value: milliseconds(report.latencyP95Milliseconds), caption: "runtime active", tint: LuminaTheme.amber),
                 BenchmarkMetric(title: "Wall P95", value: milliseconds(report.wallClockP95Milliseconds), caption: "wall-clock", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Confirm P95", value: milliseconds(report.confirmationWaitP95Milliseconds), caption: "confirmation wait", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Permission P95", value: milliseconds(report.systemPermissionWaitP95Milliseconds), caption: "system permission", tint: LuminaTheme.deepInk),
                 BenchmarkMetric(title: "Gen P95", value: milliseconds(report.stepGenerationP95Milliseconds), caption: "model step", tint: LuminaTheme.lavender),
-                BenchmarkMetric(title: "Tool P95", value: milliseconds(report.toolP95Milliseconds), caption: "tool latency", tint: LuminaTheme.mint),
-                BenchmarkMetric(title: "TTFT P95", value: milliseconds(report.modelTTFTP95Milliseconds), caption: "time to first token", tint: LuminaTheme.rose),
-                BenchmarkMetric(title: "Tok/s", value: decimal(report.modelTokensPerSecondP50), caption: "model p50", tint: LuminaTheme.amber)
+                BenchmarkMetric(title: "Tool P95", value: milliseconds(report.toolP95Milliseconds), caption: "tool latency", tint: LuminaTheme.mint)
             ])
 
-            benchmarkMetricSection("工具/上下文加载", metrics: [
+            benchmarkMetricSection("Model", metrics: [
+                BenchmarkMetric(title: "Calls", value: "\(report.modelInvocationCount)", caption: "model invocations", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Local", value: "\(report.localModelInvocationCount)", caption: "local calls", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Remote", value: "\(report.remoteModelInvocationCount)", caption: "remote calls", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "TTFT P50", value: milliseconds(report.modelTTFTP50Milliseconds), caption: "time to first token", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "TTFT P95", value: milliseconds(report.modelTTFTP95Milliseconds), caption: "time to first token", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Tok/s P50", value: decimal(report.modelTokensPerSecondP50), caption: "decode speed", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Tok/s P95", value: decimal(report.modelTokensPerSecondP95), caption: "decode speed", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Prompt P95", value: decimal(report.modelPromptTokensP95), caption: "prompt tokens", tint: LuminaTheme.deepInk),
+                BenchmarkMetric(title: "Output P95", value: decimal(report.modelOutputTokensP95), caption: "output tokens", tint: LuminaTheme.mint)
+            ])
+
+            benchmarkMetricSection("Tool Loading", metrics: [
                 BenchmarkMetric(title: "Tool Hit", value: percent(report.toolDiscoveryHitRate), caption: "\(report.toolLoadingSearchCount) search(es)", tint: LuminaTheme.mint),
                 BenchmarkMetric(title: "Deferred Unk", value: percent(report.deferredUnknownToolRate), caption: "deferred unknown rate", tint: LuminaTheme.rose),
-                BenchmarkMetric(title: "Tool Load", value: "\(report.toolLoadingLoadedCount)", caption: "\(report.toolLoadingLoadFailedCount) failed", tint: LuminaTheme.aqua),
-                BenchmarkMetric(title: "Ctx", value: "\(report.contextLoadingCatalogEmittedCount)", caption: "catalog emitted", tint: LuminaTheme.mint),
-                BenchmarkMetric(title: "Ctx Load", value: "\(report.contextLoadingLoadedCount + report.contextLoadingRangeLoadedCount)", caption: "sections loaded", tint: LuminaTheme.aqua),
-                BenchmarkMetric(title: "Ctx Hit", value: percent(report.contextLoadingHitRate), caption: "\(report.contextLoadingSearchCount) search(es)", tint: LuminaTheme.amber),
-                BenchmarkMetric(title: "Ctx Cache", value: "\(report.contextLoadingCacheHitCount)", caption: "\(report.contextLoadingTokensEstimate) token est.", tint: LuminaTheme.lavender)
+                BenchmarkMetric(title: "Tool Search", value: "\(report.toolLoadingSearchCount)", caption: "deferred searches", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Tool Load", value: "\(report.toolLoadingLoadedCount)", caption: "loaded", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Tool Failed", value: "\(report.toolLoadingLoadFailedCount)", caption: "load failed", tint: LuminaTheme.rose)
             ])
 
-            if let url = report.markdownReportURL ?? report.jsonReportURL {
-                Text("已导出：\(url.lastPathComponent)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.secondary)
+            benchmarkMetricSection("Context Loading", metrics: [
+                BenchmarkMetric(title: "Ctx", value: "\(report.contextLoadingCatalogEmittedCount)", caption: "catalog emitted", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Ctx Search", value: "\(report.contextLoadingSearchCount)", caption: "searches", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Ctx Load", value: "\(report.contextLoadingLoadedCount)", caption: "sections loaded", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Range", value: "\(report.contextLoadingRangeLoadedCount)", caption: "ranges loaded", tint: LuminaTheme.deepInk),
+                BenchmarkMetric(title: "Ctx Hit", value: percent(report.contextLoadingHitRate), caption: "\(report.contextLoadingSearchCount) search(es)", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Ctx Cache", value: "\(report.contextLoadingCacheHitCount)", caption: "cache hits", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "Ctx Failed", value: "\(report.contextLoadingLoadFailedCount)", caption: "load failed", tint: LuminaTheme.rose),
+                BenchmarkMetric(title: "Ctx Tokens", value: "\(report.contextLoadingTokensEstimate)", caption: "token estimate", tint: LuminaTheme.mint)
+            ])
+
+            benchmarkMetricSection("Metadata", metrics: [
+                BenchmarkMetric(title: "Generated", value: shortDate(report.generatedAt), caption: "report time", tint: LuminaTheme.amber),
+                BenchmarkMetric(title: "Model", value: report.localModelDisplayName ?? "unknown", caption: report.localModelSelectionRawValue ?? "unknown", tint: LuminaTheme.mint),
+                BenchmarkMetric(title: "Source", value: report.modelSource ?? "unknown", caption: "runtime model", tint: LuminaTheme.aqua),
+                BenchmarkMetric(title: "Memory", value: report.memoryAccessDisabled ? "disabled" : "enabled", caption: "benchmark access", tint: LuminaTheme.lavender),
+                BenchmarkMetric(title: "JSON", value: report.jsonReportURL?.lastPathComponent ?? "n/a", caption: "export", tint: LuminaTheme.deepInk),
+                BenchmarkMetric(title: "Markdown", value: report.markdownReportURL?.lastPathComponent ?? "n/a", caption: "export", tint: LuminaTheme.rose)
+            ])
+
+            benchmarkTaskSummary(report)
+        }
+    }
+
+    private func benchmarkTaskSummary(_ report: LuminaBenchmarkReport) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(report.results.prefix(200)) { result in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(result.taskID)
+                                .font(.caption.weight(.bold))
+                            Text(result.status)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(result.outcomePassed ? LuminaTheme.mint : LuminaTheme.rose)
+                            Spacer()
+                            Text(result.strictToolPassed ? "strict" : "non-strict")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(result.text)
+                            .font(.caption2)
+                            .foregroundStyle(LuminaTheme.ink)
+                            .lineLimit(2)
+                        Text("runtime=\(result.runtimeStatus) termination=\(result.terminationReason ?? "none") latency=\(milliseconds(result.activeRuntimeMilliseconds)) modelCalls=\(result.modelMetrics.count)")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                        let detail = [
+                            result.outcomeFailures.isEmpty ? nil : "outcome: \(result.outcomeFailures.joined(separator: "; "))",
+                            result.toolDiagnosticsSummary.map { "tools: \($0)" }
+                        ].compactMap { $0 }.joined(separator: " | ")
+                        if !detail.isEmpty {
+                            Text(detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.42), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
             }
+        } label: {
+            Text("Task Details (\(report.results.count))")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -210,6 +301,10 @@ struct RuntimeStatusScreen: View {
         guard let value else { return "n/a" }
         return String(format: "%.1f", value)
     }
+
+    private func shortDate(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .shortened)
+    }
 }
 
 private struct BenchmarkMetric: Identifiable {
@@ -219,3 +314,93 @@ private struct BenchmarkMetric: Identifiable {
     let caption: String
     let tint: Color
 }
+
+#if DEBUG
+private enum BenchmarkReportUICoverage {
+    private static let mappedKeys: Set<LuminaBenchmarkReport.CodingKeys> = [
+        .generatedAt,
+        .localModelSelectionRawValue,
+        .localModelDisplayName,
+        .modelSource,
+        .taskCount,
+        .completedCount,
+        .succeededCount,
+        .failedCount,
+        .outcomePassedCount,
+        .outcomePassRate,
+        .passAt1Count,
+        .passAt1Rate,
+        .strictToolPassCount,
+        .strictToolPassRate,
+        .toolExecutionAt1Count,
+        .toolExecutionAt1Rate,
+        .semanticPassedCount,
+        .semanticPassRate,
+        .missingToolCount,
+        .unexpectedToolCount,
+        .failedToolCount,
+        .replayedToolCount,
+        .toolAttemptCount,
+        .toolExecutionCount,
+        .toolReplayCount,
+        .exactToolMatch,
+        .microPrecision,
+        .microRecall,
+        .microF1,
+        .latencyP50Milliseconds,
+        .latencyP95Milliseconds,
+        .wallClockP95Milliseconds,
+        .confirmationWaitP95Milliseconds,
+        .systemPermissionWaitP95Milliseconds,
+        .stepGenerationP95Milliseconds,
+        .toolP95Milliseconds,
+        .modelInvocationCount,
+        .modelTTFTP50Milliseconds,
+        .modelTTFTP95Milliseconds,
+        .modelTokensPerSecondP50,
+        .modelTokensPerSecondP95,
+        .modelPromptTokensP95,
+        .modelOutputTokensP95,
+        .runtimeContractFailureCount,
+        .runtimeContractFailureRate,
+        .normalizationFailureCount,
+        .schemaValidationFailureCount,
+        .modelOwnedObservationRejectCount,
+        .unknownToolRejectCount,
+        .retryCount,
+        .fallbackCount,
+        .remoteModelInvocationCount,
+        .localModelInvocationCount,
+        .runtimeObservationCount,
+        .resultGeneratedCount,
+        .hookEventCount,
+        .toolFailureCount,
+        .schemaTokensSavedEstimate,
+        .toolDiscoveryHitRate,
+        .deferredUnknownToolRate,
+        .toolLoadingSearchCount,
+        .toolLoadingLoadedCount,
+        .toolLoadingLoadFailedCount,
+        .contextLoadingCatalogEmittedCount,
+        .contextLoadingSearchCount,
+        .contextLoadingLoadedCount,
+        .contextLoadingRangeLoadedCount,
+        .contextLoadingCacheHitCount,
+        .contextLoadingLoadFailedCount,
+        .contextLoadingHitRate,
+        .contextLoadingTokensEstimate,
+        .memoryAccessDisabled,
+        .results,
+        .jsonReportURL,
+        .markdownReportURL
+    ]
+
+    static func assertAllMetricsMapped(
+        file: StaticString = #fileID,
+        line: UInt = #line
+    ) {
+        let missing = Set(LuminaBenchmarkReport.CodingKeys.allCases).subtracting(mappedKeys)
+        assert(missing.isEmpty, "Unmapped benchmark report metrics: \(missing.map(\.rawValue).sorted().joined(separator: ", "))", file: file, line: line)
+    }
+}
+#endif

@@ -15,7 +15,11 @@ struct LuminaAppReActPromptBuilder: Sendable {
         let toolBlock = compactToolNameContext(for: context.availableTools, isEvaluation: isEvaluation)
         let focusedToolBlock = focusedToolContext(for: context, isEvaluation: isEvaluation)
         let observationRecoveryToolBlock = observationRecoveryToolContext(for: context, isEvaluation: isEvaluation)
-        let traceBlock = try compactTraceContext(context.trace, isEvaluation: isEvaluation)
+        let traceBlock = try compactTraceContext(
+            context.trace,
+            visibleTools: context.availableTools,
+            isEvaluation: isEvaluation
+        )
         let contextBlock = loadedContextBlock(context.loadedContext, isEvaluation: isEvaluation)
         let hasRuntimeObservation = context.trace.steps.contains { $0.kind == .observation }
         let modalities = context.request.content.modalities.map(\.rawValue).sorted().joined(separator: ", ")
@@ -26,11 +30,14 @@ struct LuminaAppReActPromptBuilder: Sendable {
             Tool step: <thought>why</thought><tool_use name="exact.name" requires_confirmation="false">{}</tool_use>
             Result step: <thought>done</thought><result>markdown answer</result>
             Blocker step: <thought>blocked</thought><cannot_complete>reason</cannot_complete>
+            Final answers are not tools. Never use summary, text.summarize, answer, exact.name, summarize_*, close, done, write, or result as a tool name unless that exact name appears in Available tool names.
             In evaluation, ask_user is unavailable; use <cannot_complete> when required information is missing.
             Before any runtime result, call a relevant tool when it can progress the task; do not output result.
             After a runtime result, output <result> only when the whole user goal is complete. If another read/write/create/update/save/open/share operation is still required, call the next required tool.
             Observation output is authoritative. Use runtime-observed facts in final answers and recover from failed observations with corrected tool calls when possible.
-            If a runtime result failed from permission, cancellation, schema, missing parameters, or a repeated identical call, do not blindly repeat it; recover with corrected parameters, a different valid tool, or cannot_complete.
+            If a runtime result failed from an unknown tool, use the provided full tool schema and choose only an exact tool name from that schema.
+            If a runtime result failed from schema or missing parameters, use the provided tool schema; fill missing parameters from the user goal or previous observations and retry with corrected JSON. Only output cannot_complete when the needed value cannot be inferred.
+            If a runtime result failed from permission, cancellation, or a repeated identical call, do not blindly repeat it; recover with corrected parameters, a different valid tool, or cannot_complete.
             """
             : LuminaReActSchema.compactPromptContract
         let examples = (hasRuntimeObservation && !isEvaluation) ? "" : "\(formatExamples(for: profile, tools: context.availableTools, isEvaluation: isEvaluation))\n"
@@ -38,7 +45,7 @@ struct LuminaAppReActPromptBuilder: Sendable {
         let profileText = profileInstructions(for: profile, metadata: context.request.metadata, isEvaluation: isEvaluation)
         let nextStepDirective = nextStepDirective(for: context, isEvaluation: isEvaluation)
         let rulesText = isEvaluation
-            ? "Use tools to progress. If focused tools contain a relevant tool, call it with the XML tool_use tag. Do not claim success before a real runtime Observation. After any Observation, decide from the full user goal: output result only if all requested operations are complete; otherwise call the next required tool. Observation is authoritative: use runtime-observed facts in final answers. For read-only lookup/availability/status tasks, one successful matching read observation is usually enough: answer directly, do not call summarizer/answer/close tools. For create/new calendar or reminder tasks with relative time, call device.current_time only when no current-time observation exists; once time is observed, create the item. For update/delete/complete/open tasks that identify an item by title or name, first call the matching search/list tool with a query keyword to get the required id, then call the mutation tool with that id. Do not call a tool with empty parameters when required keys exist or when the user gave a specific query keyword."
+            ? "Use tools to progress. If focused tools contain a relevant tool, call it with the XML tool_use tag. Do not claim success before a real runtime Observation. After any Observation, decide from the full user goal: output result only if all requested operations are complete; otherwise call the next required tool. Observation is authoritative: use runtime-observed facts in final answers. Final answer is <result>, not a tool; never call summary, text.summarize, answer, exact.name, summarize_*, close, done, write, or result as a tool unless that exact name is in Available tool names. For read-only lookup/availability/status tasks, one successful matching read observation is usually enough: answer directly, do not call summarizer/answer/close tools. For create/new calendar or reminder tasks with relative time, call device.current_time only when no current-time observation exists; once time is observed, create the item. For update/delete/complete/open tasks that identify an item by title or name, first call the matching search/list tool with a query keyword to get the required id, then call the mutation tool with that id. Do not call a tool with empty parameters when required keys exist or when the user gave a specific query keyword."
             : "Rules: finish tasks end-to-end; if a tool can make progress output the XML tool_use tag; if ask_user is available and required info is missing, use ask_user XML; if ask_user is unavailable, explain the missing info in result; do not claim success before runtime observation; after a useful observation either call the next needed tool or output result only when the goal is complete; never output observation yourself; result content is inside <result>."
         let openAIWarning = isEvaluation
             ? "\nDo not copy focused tool lines into parameters or result. The content inside <tool_use> must be exactly one JSON object and nothing else. Never output <parameters>, <result> inside <tool_use>, <observation>, schema field names, placeholder IDs, JSON ReAct objects, markdown fences, Python dicts, OpenAI tool_call, args, arguments, input keys, or <think> text. The first bytes must be <thought>."
@@ -96,13 +103,13 @@ struct LuminaAppReActPromptBuilder: Sendable {
         case .succeeded:
             if isEvaluation && isTerminalSideEffectTool(lastObservation.toolName) {
                 return """
-                The latest runtime result succeeded for a write/open/send/update/delete/create operation. If that satisfies the full user goal, the next step must be <result>; do not verify by repeating search/update/delete/create. Use only the latest observation when stating dates/ids/details. If another requested operation remains, call only that next distinct required tool.
+                The latest runtime result succeeded for a write/open/send/update/delete/create/share operation. If that satisfies the full user goal, the next step must be <result>; do not verify by repeating search/update/delete/create and do not call summary/text.summarize/answer/exact.name/summarize_* helper tools. Use only the latest observation when stating dates/ids/details. If another requested operation remains, call only that next distinct required tool.
                 \(recentIDHint)
                 """
             }
             if isEvaluation && isReadOnlyTool(lastObservation.toolName) && isReadOnlyAnswerGoal(goal) {
                 return """
-                The latest matching read-only tool succeeded. The next step must be <result> with a concise answer based only on this observation. Do not call text.summarize/text.transform, reminder tools, answer tools, close tools, or repeat the same read unless the observation explicitly says the needed data is missing.
+                The latest matching read-only tool succeeded. The next step must be <result> with a concise answer based only on this observation. Do not call summary/text.summarize/text.transform, answer tools, close tools, or repeat the same read unless the observation explicitly says the needed data is missing.
                 \(recentIDHint)
                 """
             }
@@ -149,18 +156,24 @@ struct LuminaAppReActPromptBuilder: Sendable {
             if failure.localizedCaseInsensitiveContains("tool is not registered") ||
                 failure.localizedCaseInsensitiveContains("unknown tool") {
                 return """
-                The latest tool name is invalid or outside the current tool scope. Do not invent close/answer/summary tools and do not switch to another domain such as reminder for a calendar task. Recover only with a valid listed tool from Focused tools/Available tool names, or output cannot_complete if no listed tool can perform the operation.
+                Unknown Tool: \(lastObservation.toolName). The latest tool name is invalid or outside the current tool scope. Use the complete tool schema in Observation recovery tool catalog. You must choose only an exact tool name from that schema, and pass only parameters declared by that tool. Do not invent close/answer/summary/text.summarize/exact.name tools and do not switch to another domain such as reminder for a calendar task. Output cannot_complete only if no listed tool can perform the operation.
                 \(recentIDHint)
                 """
             }
             if isEvaluation {
+                if failure.localizedCaseInsensitiveContains("missing required parameter") ||
+                    failure.localizedCaseInsensitiveContains("schema") {
+                    return """
+                    Value Error. \(lastObservation.toolName) parameters are available in Observation recovery tool catalog. Fill missing or invalid parameters from the user goal and previous observations, then retry \(lastObservation.toolName) with exactly the listed JSON parameter names and types. Only output cannot_complete when the needed value cannot be inferred from the user request or observations.
+                    \(recentIDHint)
+                    """
+                }
                 if lastObservation.status == .denied || lastObservation.status == .cancelled ||
                     failure.localizedCaseInsensitiveContains("permission") ||
                     failure.contains("权限") ||
-                    failure.localizedCaseInsensitiveContains("missing required parameter") ||
-                    failure.localizedCaseInsensitiveContains("schema") {
+                    failure.localizedCaseInsensitiveContains("cancelled") {
                     return """
-                    The latest runtime result is not retryable in evaluation: permission/cancelled/schema/missing-parameter failures must not repeat the same tool call. Output cannot_complete, or call a different valid tool only if it can recover without repeating the failed parameters.
+                    The latest runtime result is not retryable in evaluation: permission/cancelled failures must not repeat the same tool call. Output cannot_complete, or call a different valid tool only if it can recover without repeating the failed parameters.
                     \(recentIDHint)
                     """
                 }
@@ -460,9 +473,10 @@ struct LuminaAppReActPromptBuilder: Sendable {
             failureText.contains("unknown tool") ||
             failureText.contains("unregistered tool") {
             return """
-            The latest observation failed before any app tool ran because the model selected an unavailable tool name.
-            Use exactly one tool name from this complete available tool catalog, with only the listed parameter names and types:
+            Unknown Tool: \(observation.toolName).
+            All available tools:
             \(fullToolCatalogJSON(for: visibleTools))
+            You must choose only an exact tool name from the schema above, with only the listed parameter names and JSON types.
             """
         }
 
@@ -473,16 +487,15 @@ struct LuminaAppReActPromptBuilder: Sendable {
             failureText.contains("schema") {
             if let schema = visibleTools.first(where: { $0.name == observation.toolName }) {
                 return """
-                The latest observation failed before the app tool ran because parameters did not match the tool schema.
-                Correct schema for \(schema.name):
+                Value Error. \(observation.toolName) parameters are:
                 \(fullToolCatalogJSON(for: [schema]))
-                Available tool names: \(visibleTools.map(\.name).joined(separator: "; "))
+                Fill missing or invalid parameters from the user request and previous observations, then retry with exactly the parameter names and JSON types shown above. Only output cannot_complete when the needed value cannot be inferred.
                 """
             }
             return """
-            The latest observation failed before any app tool ran because the tool name or parameters were invalid.
-            Use exactly one tool name from this complete available tool catalog, with only the listed parameter names and types:
+            Value Error. \(observation.toolName) parameters are:
             \(fullToolCatalogJSON(for: visibleTools))
+            Fill missing or invalid parameters from the user request and previous observations, then retry with exactly the parameter names and JSON types shown above. Only output cannot_complete when the needed value cannot be inferred.
             """
         }
 
@@ -490,7 +503,23 @@ struct LuminaAppReActPromptBuilder: Sendable {
     }
 
     private func fullToolCatalogJSON(for schemas: [LuminaToolSchema]) -> String {
-        let objects: [[String: Any]] = schemas.map { schema in
+        let objects = fullToolCatalogObjects(for: schemas)
+        guard JSONSerialization.isValidJSONObject(objects),
+              let data = try? JSONSerialization.data(withJSONObject: objects, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8) else {
+            return schemas.map { schema in
+                let parameters = schema.parameters
+                    .sorted { $0.name < $1.name }
+                    .map { "\($0.name):\($0.type.rawValue):\($0.required ? "required" : "optional"):\($0.description)" }
+                    .joined(separator: " | ")
+                return "\(schema.name): \(schema.description); parameters \(parameters.isEmpty ? "none" : parameters)"
+            }.joined(separator: "\n")
+        }
+        return json
+    }
+
+    private func fullToolCatalogObjects(for schemas: [LuminaToolSchema]) -> [[String: Any]] {
+        schemas.map { schema in
             [
                 "name": schema.name,
                 "description": schema.description,
@@ -510,18 +539,6 @@ struct LuminaAppReActPromptBuilder: Sendable {
                     }
             ] as [String: Any]
         }
-        guard JSONSerialization.isValidJSONObject(objects),
-              let data = try? JSONSerialization.data(withJSONObject: objects, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8) else {
-            return schemas.map { schema in
-                let parameters = schema.parameters
-                    .sorted { $0.name < $1.name }
-                    .map { "\($0.name):\($0.type.rawValue):\($0.required ? "required" : "optional"):\($0.description)" }
-                    .joined(separator: " | ")
-                return "\(schema.name): \(schema.description); parameters \(parameters.isEmpty ? "none" : parameters)"
-            }.joined(separator: "\n")
-        }
-        return json
     }
 
     private func evaluationToolSchemaLine(for schema: LuminaToolSchema) -> String {
@@ -750,7 +767,11 @@ struct LuminaAppReActPromptBuilder: Sendable {
         return sections.truncated(to: isEvaluation ? 400 : maximumContextCharacters)
     }
 
-    private func compactTraceContext(_ trace: LuminaReActTrace, isEvaluation: Bool) throws -> String {
+    private func compactTraceContext(
+        _ trace: LuminaReActTrace,
+        visibleTools: [LuminaToolSchema],
+        isEvaluation: Bool
+    ) throws -> String {
         let stepLimit = isEvaluation ? max(6, maximumTraceObservations * 2) : maximumTraceObservations * 2
         let compactSteps = trace.steps.suffix(stepLimit)
         let lines = compactSteps.compactMap { step -> String? in
@@ -775,6 +796,13 @@ struct LuminaAppReActPromptBuilder: Sendable {
                 if let error = observation.errorMessage, !error.isEmpty {
                     object["error"] = error.truncated(to: 120)
                 }
+                if let recovery = observationRecoveryPayload(
+                    for: observation,
+                    visibleTools: visibleTools,
+                    isEvaluation: isEvaluation
+                ) {
+                    object["recovery"] = recovery
+                }
                 guard JSONSerialization.isValidJSONObject(object),
                       let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
                       let json = String(data: data, encoding: .utf8) else {
@@ -787,6 +815,50 @@ struct LuminaAppReActPromptBuilder: Sendable {
             }
         }
         let text = lines.joined(separator: "\n")
-        return text.isEmpty ? "none" : text.truncated(to: isEvaluation ? 1_100 : maximumTraceCharacters)
+        return text.isEmpty ? "none" : text.truncated(to: isEvaluation ? 3_000 : maximumTraceCharacters)
+    }
+
+    private func observationRecoveryPayload(
+        for observation: LuminaReActObservation,
+        visibleTools: [LuminaToolSchema],
+        isEvaluation: Bool
+    ) -> [String: Any]? {
+        guard observation.status == .failed || observation.status == .denied || observation.status == .cancelled else {
+            return nil
+        }
+
+        let failureText = [observation.summary, observation.errorMessage ?? ""]
+            .joined(separator: "\n")
+            .lowercased()
+        let tools = visibleTools
+            .filter { !(isEvaluation && $0.name == "ask_user") }
+            .sorted { $0.name < $1.name }
+
+        if failureText.contains("tool is not registered") ||
+            failureText.contains("unknown tool") ||
+            failureText.contains("unregistered tool") {
+            return [
+                "reason": "unknown_tool",
+                "instruction": "Unknown Tool: \(observation.toolName). Choose only an exact tool name from availableTools and pass only parameters declared by that schema. Do not invent summary, text.summarize, answer, exact.name, close, or helper tools.",
+                "availableToolNames": tools.map(\.name),
+                "availableTools": fullToolCatalogObjects(for: tools)
+            ]
+        }
+
+        if failureText.contains("missing required parameter") ||
+            failureText.contains("invalid type") ||
+            failureText.contains("allowed enum") ||
+            failureText.contains("parameters must be a json object") ||
+            failureText.contains("schema") {
+            let schemas = tools.first(where: { $0.name == observation.toolName }).map { [$0] } ?? tools
+            return [
+                "reason": "invalid_tool_parameters",
+                "instruction": "Value Error. \(observation.toolName) parameters are listed in availableTools. Fill missing or invalid parameters from the user request and previous observations, retry with exactly those parameter names and valid JSON types, and output cannot_complete only when the needed value cannot be inferred.",
+                "availableToolNames": tools.map(\.name),
+                "availableTools": fullToolCatalogObjects(for: schemas)
+            ]
+        }
+
+        return nil
     }
 }

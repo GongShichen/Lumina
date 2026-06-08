@@ -35,9 +35,11 @@ enum AppToolFactory {
         subscriptionStore: LuminaSubscriptionStore,
         messageDrafts: LuminaMessageDraftCenter,
         calendarStore: LuminaVolatileCalendarStore,
+        documentsDirectory: URL? = nil,
         enabledToolNames: Set<String>? = nil
     ) -> [AnyLuminaAgentTool] {
-        let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
+        let documentsDirectory = documentsDirectory ??
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
             FileManager.default.temporaryDirectory
         let localTools: [AnyLuminaAgentTool] = [
             LuminaCurrentTimeTool().eraseToAnyTool(),
