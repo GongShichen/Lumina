@@ -3,6 +3,7 @@
 #include <string>
 
 #include "Session.hpp"
+#include "SkillRegistry.hpp"
 #include "ToolRegistry.hpp"
 
 namespace LuminaAgent {
@@ -18,6 +19,7 @@ public:
     // Builds the next model-facing planner input for the ReAct loop.
     std::string plannerInput(
         const ToolRegistry &tools,
+        const SkillRegistry &skills,
         const RuntimeSession &session,
         const std::string &requestJson,
         const std::string &contextJson,

@@ -17,6 +17,9 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
     public var maxResultSize: Int?
     public var alwaysLoad: Bool
     public var deferByDefault: Bool
+    public var aliases: [String]
+    public var deprecatedAliases: [String: String]
+    public var requiresConfirmation: Bool
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -35,6 +38,9 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         case maxResultSize
         case alwaysLoad
         case deferByDefault
+        case aliases
+        case deprecatedAliases
+        case requiresConfirmation
     }
 
     public init(
@@ -51,7 +57,10 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         idempotencyPolicy: String? = nil,
         destructive: Bool = false,
         concurrencySafe: Bool = false,
-        maxResultSize: Int? = nil
+        maxResultSize: Int? = nil,
+        aliases: [String] = [],
+        deprecatedAliases: [String: String] = [:],
+        requiresConfirmation: Bool = false
     ) {
         self.init(
             name: name,
@@ -69,7 +78,10 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
             concurrencySafe: concurrencySafe,
             maxResultSize: maxResultSize,
             alwaysLoad: false,
-            deferByDefault: false
+            deferByDefault: false,
+            aliases: aliases,
+            deprecatedAliases: deprecatedAliases,
+            requiresConfirmation: requiresConfirmation
         )
     }
 
@@ -89,7 +101,10 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         concurrencySafe: Bool = false,
         maxResultSize: Int? = nil,
         alwaysLoad: Bool,
-        deferByDefault: Bool
+        deferByDefault: Bool,
+        aliases: [String] = [],
+        deprecatedAliases: [String: String] = [:],
+        requiresConfirmation: Bool = false
     ) {
         self.name = name
         self.description = description
@@ -107,6 +122,9 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         self.maxResultSize = maxResultSize
         self.alwaysLoad = alwaysLoad
         self.deferByDefault = deferByDefault
+        self.aliases = aliases
+        self.deprecatedAliases = deprecatedAliases
+        self.requiresConfirmation = requiresConfirmation
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,5 +145,8 @@ public struct LuminaToolSchema: Codable, Hashable, Sendable {
         self.maxResultSize = try container.decodeIfPresent(Int.self, forKey: .maxResultSize)
         self.alwaysLoad = try container.decodeIfPresent(Bool.self, forKey: .alwaysLoad) ?? false
         self.deferByDefault = try container.decodeIfPresent(Bool.self, forKey: .deferByDefault) ?? false
+        self.aliases = try container.decodeIfPresent([String].self, forKey: .aliases) ?? []
+        self.deprecatedAliases = try container.decodeIfPresent([String: String].self, forKey: .deprecatedAliases) ?? [:]
+        self.requiresConfirmation = try container.decodeIfPresent(Bool.self, forKey: .requiresConfirmation) ?? false
     }
 }

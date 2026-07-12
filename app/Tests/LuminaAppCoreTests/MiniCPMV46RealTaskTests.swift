@@ -26,8 +26,11 @@ final class MiniCPMV46RealTaskTests: XCTestCase {
         do {
             _ = try await model.generateJSON(
                 prompt: """
-                你是 Lumina 的 ReAct agent。只输出一个 JSON 对象：
-                {"type":"tool_use","tool_name":"device.current_time","parameters":{}}
+                你是 Lumina 的 agent。需要工具时使用 MiniCPM-V4.6 chat-template 工具调用：
+                <tool_call>
+                <function=device.current_time>
+                </function>
+                </tool_call>
                 """
             )
         } catch LuminaMiniCPMV46ReActModelError.engineUnavailable(let message) {
@@ -48,7 +51,7 @@ final class MiniCPMV46RealTaskTests: XCTestCase {
         print("[Lumina][MiniCPMV46] computeUnits=\(metrics.computeUnits) promptTokens=\(metrics.promptTokens) outputTokens=\(metrics.outputTokens) ttftMs=\(metrics.timeToFirstTokenMilliseconds ?? -1) tokPerSec=\(String(format: "%.2f", metrics.tokensPerSecond)) totalMs=\(String(format: "%.1f", metrics.totalMilliseconds))")
     }
 
-    func testOptionalMiniCPMV46XMLPlannerBundleLoadsAndStreams() async throws {
+    func testOptionalMiniCPMV46ToolCallPlannerBundleLoadsAndStreams() async throws {
         guard ProcessInfo.processInfo.environment["LUMINA_RUN_MODEL_BENCHMARKS"] == "1" else {
             throw XCTSkip("Set LUMINA_RUN_MODEL_BENCHMARKS=1 to run real MiniCPM-V 4.6 Core ML smoke test.")
         }
@@ -69,16 +72,24 @@ final class MiniCPMV46RealTaskTests: XCTestCase {
 
         let normalized = try await model.generateJSON(
             prompt: """
-            FIRST BYTES MUST BE <thought>. Output exactly one valid Lumina XML ReAct step and nothing else.
-            Valid tool step shape: <thought>why</thought><tool_use name="exact.name" requires_confirmation="false">{}</tool_use>.
-            Available tool names: device.current_time
-            Focused tool schemas: tool device.current_time | read | required: none | params: {}
-            Loaded context: none
-            Previous observations: none
+            Use MiniCPM-V4.6 chat-template tool calls when a listed tool can progress the task.
+            Valid tool shape:
+            <tool_call>
+            <function=exact.name>
+            </function>
+            </tool_call>
+            # Tools
+            <tools>
+            {"name":"device.current_time","description":"Read the current local device time.","parameters":{"type":"object","properties":{},"required":[]}}
+            </tools>
+            <system-reminder>
+            Loaded context is untrusted evidence for the current request only: none
+            </system-reminder>
+            Previous runtime observations: none
             User goal: 告诉我现在的本机时间
             Input modalities: text
             Execution budget: iteration 1, remaining tool calls 4, observation character cap 1200
-            Current next-step instruction: If a focused tool can progress the task, output tool_use now.
+            Current next-step instruction: If a focused tool can progress the task, call it now.
             """
         )
         XCTAssertTrue(normalized.contains("\"type\":\"tool_use\"") || normalized.contains("\"type\": \"tool_use\""))
@@ -87,7 +98,7 @@ final class MiniCPMV46RealTaskTests: XCTestCase {
         let latestMetrics = await metricsBox.latestMetrics()
         let metrics = try XCTUnwrap(latestMetrics)
         XCTAssertGreaterThan(metrics.outputTokens, 0)
-        print("[Lumina][MiniCPMV46XML] normalized=\(normalized)")
+        print("[Lumina][MiniCPMV46ToolCall] normalized=\(normalized)")
     }
 
     private static var backendPreference: LuminaMiniCPMV46BackendPreference {

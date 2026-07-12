@@ -34,7 +34,7 @@ class MessagePayload(LuminaModel):
 
 
 class TrajectoryStep(LuminaModel):
-    type: Literal["thought", "action", "observation", "final"]
+    type: Literal["reasoning", "tool_use", "observation", "result"]
     content: str | None = None
     tool_name: str | None = Field(default=None, alias="toolName")
     parameters: dict[str, Any] | None = None

@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import torch
+import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 
 DEFAULT_MODEL_ID = "openbmb/MiniCPM-V-4.6"
@@ -183,6 +185,9 @@ def load_processor(model_name_or_path: str):
 
 
 def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None, *, train: bool = True):
+    from .fla_compat import install_fla_causal_conv_compat
+
+    install_fla_causal_conv_compat()
     from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForImageTextToText, BitsAndBytesConfig
 
@@ -192,7 +197,7 @@ def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None
     dtype = torch.bfloat16 if model_cfg.get("torch_dtype", "bfloat16") == "bfloat16" else torch.float16
 
     model_kwargs: dict[str, Any] = {
-        "torch_dtype": dtype,
+        "dtype": dtype,
         "quantization_config": quantization_config,
         "device_map": local_rank_device_map(model_cfg.get("device_map")),
         "trust_remote_code": True,
@@ -203,6 +208,8 @@ def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None
     base_device_map = getattr(model, "hf_device_map", None)
     if hasattr(model, "config"):
         model.config.use_cache = False
+        if hasattr(model.config, "text_config"):
+            model.config.text_config.use_cache = False
     if train and bool(model_cfg.get("gradient_checkpointing", True)) and hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
 
@@ -226,6 +233,8 @@ def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None
         if load_in_8bit:
             model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
         model = PeftModel.from_pretrained(model, adapter_path, is_trainable=True)
+        if bool(model_cfg.get("gradient_checkpointing", True)) and hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
         if base_device_map:
             model.hf_device_map = base_device_map
             model.is_parallelizable = True
@@ -247,6 +256,8 @@ def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None
                 parameter.requires_grad = False
         peft_config = LoraConfig(**lora_cfg)
         model = get_peft_model(model, peft_config)
+        if bool(model_cfg.get("gradient_checkpointing", True)) and hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
         if base_device_map:
             model.hf_device_map = base_device_map
             model.is_parallelizable = True
@@ -256,8 +267,100 @@ def load_q_lora_model(model_cfg: dict[str, Any], lora_cfg: dict[str, Any] | None
     return model
 
 
-def init_swanlab(project: str, run_name: str | None = None, config: dict[str, Any] | None = None) -> None:
-    if not os.environ.get("SWANLAB_API_KEY") or int(os.environ.get("LOCAL_RANK", "0")) != 0:
+def causal_lm_backbone_and_head(model):
+    if hasattr(model, "module"):
+        model = model.module
+    conditional = model.base_model.model if hasattr(model, "base_model") else model
+    backbone = getattr(conditional, "model", None)
+    lm_head = getattr(conditional, "lm_head", None)
+    if backbone is None or lm_head is None:
+        raise TypeError(f"unsupported causal LM wrapper: {type(model)!r}")
+    return backbone, lm_head
+
+
+def _token_nll(hidden_states: torch.Tensor, targets: torch.Tensor, lm_head) -> torch.Tensor:
+    logits = lm_head(hidden_states).float()
+    return F.cross_entropy(logits, targets, reduction="sum")
+
+
+def _token_logps(hidden_states: torch.Tensor, targets: torch.Tensor, lm_head) -> torch.Tensor:
+    logits = lm_head(hidden_states).float()
+    target_logits = torch.gather(logits, dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
+    return target_logits - torch.logsumexp(logits, dim=-1)
+
+
+def _checkpointed(function, hidden_states: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    if torch.is_grad_enabled() and hidden_states.requires_grad:
+        return checkpoint(function, hidden_states, targets, use_reentrant=False)
+    return function(hidden_states, targets)
+
+
+def completion_only_cross_entropy(
+    model,
+    inputs: dict[str, torch.Tensor],
+    labels: torch.Tensor,
+    *,
+    chunk_tokens: int = 4096,
+) -> torch.Tensor:
+    backbone, lm_head = causal_lm_backbone_and_head(model)
+    hidden_states = backbone(**inputs)[0][:, :-1, :]
+    shifted_labels = labels[:, 1:].to(hidden_states.device)
+    mask = shifted_labels.ne(-100)
+    selected_hidden = hidden_states[mask]
+    selected_targets = shifted_labels[mask]
+    if not selected_targets.numel():
+        raise ValueError("batch has no assistant completion tokens")
+    losses = [
+        _checkpointed(
+            lambda hidden, targets: _token_nll(hidden, targets, lm_head),
+            selected_hidden[start : start + chunk_tokens],
+            selected_targets[start : start + chunk_tokens],
+        )
+        for start in range(0, selected_targets.numel(), chunk_tokens)
+    ]
+    return torch.stack(losses).sum() / selected_targets.numel()
+
+
+def completion_sequence_logps(
+    model,
+    inputs: dict[str, torch.Tensor],
+    labels: torch.Tensor,
+    *,
+    chunk_tokens: int = 4096,
+) -> torch.Tensor:
+    backbone, lm_head = causal_lm_backbone_and_head(model)
+    hidden_states = backbone(**inputs)[0][:, :-1, :]
+    shifted_labels = labels[:, 1:].to(hidden_states.device)
+    mask = shifted_labels.ne(-100)
+    batch_ids = torch.arange(labels.shape[0], device=hidden_states.device).unsqueeze(1).expand_as(mask)[mask]
+    selected_hidden = hidden_states[mask]
+    selected_targets = shifted_labels[mask]
+    if not selected_targets.numel():
+        raise ValueError("batch has no assistant completion tokens")
+    sequence_logps = hidden_states.new_zeros(labels.shape[0], dtype=torch.float32)
+    for start in range(0, selected_targets.numel(), chunk_tokens):
+        stop = start + chunk_tokens
+        token_logps = _checkpointed(
+            lambda hidden, targets: _token_logps(hidden, targets, lm_head),
+            selected_hidden[start:stop],
+            selected_targets[start:stop],
+        )
+        sequence_logps = sequence_logps.index_add(0, batch_ids[start:stop], token_logps)
+    return sequence_logps
+
+
+def init_swanlab(
+    project: str,
+    run_name: str | None = None,
+    config: dict[str, Any] | None = None,
+    *,
+    required: bool = False,
+) -> None:
+    if int(os.environ.get("LOCAL_RANK", "0")) != 0:
+        return
+    if not os.environ.get("SWANLAB_API_KEY"):
+        if required:
+            raise RuntimeError("SWANLAB_API_KEY is required for formal training")
         return
     try:
         import swanlab
@@ -265,6 +368,8 @@ def init_swanlab(project: str, run_name: str | None = None, config: dict[str, An
         swanlab.login(api_key=os.environ["SWANLAB_API_KEY"])
         swanlab.init(project=project, experiment_name=run_name, config=config or {})
     except Exception as exc:  # pragma: no cover - training should continue if tracking is unavailable.
+        if required:
+            raise RuntimeError("SwanLab initialization failed") from exc
         if int(os.environ.get("LOCAL_RANK", "0")) == 0:
             print(f"[warn] SwanLab init skipped: {exc}")
 
@@ -325,88 +430,42 @@ class ChatTemplateCollator:
         prompt_len = min(prompt["input_ids"].shape[-1], labels.shape[-1])
         labels[:, :prompt_len] = -100
         full["labels"] = labels
-        return self._left_truncate(full)
+        return self._enforce_max_length(full)
 
-    def _left_truncate(self, encoded: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _enforce_max_length(self, encoded: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         seq_len = encoded["input_ids"].shape[-1]
-        if seq_len <= self.max_length:
-            return encoded
-        image_prefix_len = self._image_prefix_len(encoded["input_ids"])
-        if image_prefix_len > 0:
-            return self._prefix_suffix_truncate(encoded, image_prefix_len)
-        start = seq_len - self.max_length
-        truncated: dict[str, torch.Tensor] = {}
-        for key, value in encoded.items():
-            if isinstance(value, torch.Tensor) and value.ndim >= 2 and value.shape[-1] == seq_len:
-                truncated[key] = value[..., start:]
-            else:
-                truncated[key] = value
-        return truncated
-
-    def _prefix_suffix_truncate(self, encoded: dict[str, torch.Tensor], prefix_len: int) -> dict[str, torch.Tensor]:
-        seq_len = encoded["input_ids"].shape[-1]
-        prefix_len = min(prefix_len, self.max_length // 2)
-        suffix_len = self.max_length - prefix_len
-        suffix_start = max(prefix_len, seq_len - suffix_len)
-        truncated: dict[str, torch.Tensor] = {}
-        for key, value in encoded.items():
-            if isinstance(value, torch.Tensor) and value.ndim >= 2 and value.shape[-1] == seq_len:
-                truncated[key] = torch.cat((value[..., :prefix_len], value[..., suffix_start:]), dim=-1)
-            else:
-                truncated[key] = value
-        return truncated
-
-    def _image_prefix_len(self, input_ids: torch.Tensor) -> int:
-        image_ids = self._image_token_ids()
-        if not image_ids:
-            return 0
-        ids = input_ids[0]
-        mask = torch.zeros_like(ids, dtype=torch.bool)
-        for image_id in image_ids:
-            mask |= ids.eq(image_id)
-        positions = mask.nonzero(as_tuple=False)
-        if positions.numel() == 0:
-            return 0
-        return int(positions[-1].item()) + 1
-
-    def _image_token_ids(self) -> set[int]:
-        ids: set[int] = set()
-        for owner in (self.processor, getattr(self.processor, "tokenizer", None)):
-            if owner is None:
-                continue
-            for attr in ("image_token_id", "image_token_index"):
-                value = getattr(owner, attr, None)
-                if isinstance(value, int):
-                    ids.add(value)
-            token = getattr(owner, "image_token", None)
-            if isinstance(token, str) and getattr(self.processor, "tokenizer", None) is not None:
-                token_id = self.processor.tokenizer.convert_tokens_to_ids(token)
-                if isinstance(token_id, int) and token_id >= 0:
-                    ids.add(token_id)
-        tokenizer = getattr(self.processor, "tokenizer", None)
-        for token in ("<image>", "<|image|>", "<image_id>", "<|image_pad|>"):
-            if tokenizer is None:
-                continue
-            token_id = tokenizer.convert_tokens_to_ids(token)
-            if isinstance(token_id, int) and token_id >= 0:
-                ids.add(token_id)
-        return ids
+        if seq_len > self.max_length:
+            raise ValueError(
+                f"encoded sequence has {seq_len} tokens, exceeding max_length={self.max_length}; "
+                "drop the complete record during data QA instead of truncating it"
+            )
+        return encoded
 
     def __call__(self, records: list[SFTRecord]) -> dict[str, torch.Tensor]:
         encoded = []
         for record in records:
             encoded.append(self.encode_pair(record.messages[:-1], record.messages[-1:]))
-        return collate_encoded(encoded, self.pad_token_id)
+        return collate_encoded(encoded, self.pad_token_id, pad_to_length=self.max_length)
 
 
-def collate_encoded(encoded: list[dict[str, torch.Tensor]], pad_token_id: int) -> dict[str, torch.Tensor]:
+def collate_encoded(
+    encoded: list[dict[str, torch.Tensor]],
+    pad_token_id: int,
+    *,
+    pad_to_length: int | None = None,
+) -> dict[str, torch.Tensor]:
     batch: dict[str, torch.Tensor] = {}
     for key in ("input_ids", "attention_mask", "labels"):
         if key not in encoded[0]:
             continue
         pad = -100 if key == "labels" else (0 if key == "attention_mask" else pad_token_id)
         values = [item[key].squeeze(0) for item in encoded]
-        batch[key] = torch.nn.utils.rnn.pad_sequence(values, batch_first=True, padding_value=pad)
+        padded = torch.nn.utils.rnn.pad_sequence(values, batch_first=True, padding_value=pad)
+        if pad_to_length is not None:
+            if padded.shape[1] > pad_to_length:
+                raise ValueError(f"batch sequence length {padded.shape[1]} exceeds pad_to_length={pad_to_length}")
+            padded = F.pad(padded, (0, pad_to_length - padded.shape[1]), value=pad)
+        batch[key] = padded
 
     for key in encoded[0]:
         if key in batch or key in {"input_ids", "attention_mask", "labels"}:

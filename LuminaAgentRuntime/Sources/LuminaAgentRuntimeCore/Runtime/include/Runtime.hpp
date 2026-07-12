@@ -6,6 +6,7 @@
 #include "Hooks.hpp"
 #include "PlannerInputBuilder.hpp"
 #include "Session.hpp"
+#include "SkillRegistry.hpp"
 #include "ToolExecutor.hpp"
 #include "ToolRegistry.hpp"
 
@@ -20,6 +21,9 @@ public:
     std::string registerToolSchema(const char *toolSchemaJson);
     std::string registerDeferredToolMetadata(const char *metadataJson);
     std::string registerExternalToolProvider(const char *providerJson);
+    std::string registerSkillMetadata(const char *skillMetadataJson);
+    std::string discoverSkills(const char *queryJson) const;
+    std::string discoverMCPTools(const char *queryJson) const;
 
     // Callback setters store function pointers and caller-owned contexts.
     void setModelCallback(LuminaAgentModelCallback callback, void *context);
@@ -62,6 +66,8 @@ public:
     std::string resumeSession(RuntimeSession &session, const char *resumeJson);
     std::string setSessionState(RuntimeSession &session, const char *scope, const char *key, const char *valueJson);
     std::string deleteSessionState(RuntimeSession &session, const char *scope, const char *key);
+    std::string setYoloMode(bool enabled);
+    bool yoloMode() const;
 
     // Marks the current runtime execution as cancelled.
     std::string cancel(const char *requestId);
@@ -74,10 +80,12 @@ private:
     std::string configurationError_;
     bool cancelled_ = false;
     ToolRegistry tools_;
+    SkillRegistry skills_;
     RuntimeCallbacks callbacks_;
 
     std::string discoverAndMaybeLoadTools(RuntimeSession &session, const std::string &stepJson);
     std::string loadDeferredToolsByName(RuntimeSession &session, const std::vector<std::string> &names);
+    void registerRuntimeDiscoveryTools();
 };
 
 } // namespace LuminaAgent

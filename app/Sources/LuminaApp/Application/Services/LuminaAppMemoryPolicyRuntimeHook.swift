@@ -18,7 +18,7 @@ struct LuminaAppMemoryPolicyRuntimeHook: LuminaAgentRuntimeHook {
                 title: "Persistent memory policy",
                 summary: "Agent may save durable user memory only when it is useful beyond this task.",
                 content: """
-                You may call memory.ingest_text only when a fact, preference, durable plan, or user instruction is likely to be useful in future sessions. Do not save transient tool observations, temporary reasoning, one-off task progress, raw sensitive content, or anything the user did not ask you to remember unless it is clearly reusable. Include reason, memoryType, retentionHint, source, and sensitivity in parameters. Use sensitive or privateData for contact, health, location, communication, clipboard, or document-body content.
+                You may call memory.ingest_text only when a fact, preference, durable plan, or user instruction is likely to be useful in future sessions. Transient tool observations, temporary reasoning, one-off task progress, raw sensitive content, and unstated user preferences are outside durable memory unless clearly reusable. Include reason, memoryType, retentionHint, source, and sensitivity in parameters. Use sensitive or privateData for contact, health, location, communication, clipboard, or document-body content.
                 """,
                 source: "app/policy",
                 sensitivity: .normal,
@@ -56,7 +56,7 @@ struct LuminaToolRecoveryRuntimeHook: LuminaMatchingAgentRuntimeHook {
             Unknown Tool: \(observation.toolName).
             All available tools:
             \(toolCatalogJSON(for: availableTools))
-            You must choose only an exact tool name from the schema above and pass only parameters declared by that tool schema.
+            Choose an exact tool name from the schema above and pass only parameters declared by that tool schema.
             """
             return directives(
                 id: "app.tool_recovery.unknown_tool.\(stableIDComponent(observation.toolName))",
@@ -77,7 +77,7 @@ struct LuminaToolRecoveryRuntimeHook: LuminaMatchingAgentRuntimeHook {
             let content = """
             Value Error. \(observation.toolName) parameters are:
             \(toolCatalogJSON(for: schemaTools))
-            Fill missing or invalid parameters from the user request and previous observations, then retry with exactly the parameter names and JSON types shown above. Only output cannot_complete when the needed value cannot be inferred. Do not repeat the invalid parameters.
+            Fill missing or invalid parameters from the user request and previous observations, then retry with exactly the parameter names and JSON types shown above. Explain the blocker only when the needed value cannot be inferred. Use corrected parameters.
             """
             return directives(
                 id: "app.tool_recovery.value_error.\(stableIDComponent(observation.toolName))",
@@ -144,21 +144,21 @@ struct LuminaToolRecoveryRuntimeHook: LuminaMatchingAgentRuntimeHook {
     }
 
     private func toolSchemaPayload(for schema: LuminaToolSchema) -> [String: Any] {
-        [
+        var properties: [String: Any] = [:]
+        for parameter in schema.parameters.sorted(by: { $0.name < $1.name }) {
+            properties[parameter.name] = [
+                "type": parameter.type.rawValue,
+                "description": parameter.description
+            ]
+        }
+        return [
             "name": schema.name,
             "description": schema.description,
-            "requires_confirmation": schema.sideEffect != .readOnly,
-            "side_effect": schema.sideEffect.rawValue,
-            "sensitivity": schema.sensitivity.rawValue,
-            "parameters": schema.parameters.sorted { $0.name < $1.name }.map { parameter in
-                [
-                    "name": parameter.name,
-                    "type": parameter.type.rawValue,
-                    "required": parameter.required,
-                    "description": parameter.description,
-                    "sensitive": parameter.sensitive
-                ] as [String: Any]
-            }
+            "parameters": [
+                "type": "object",
+                "properties": properties,
+                "required": schema.parameters.filter(\.required).map(\.name).sorted()
+            ]
         ] as [String: Any]
     }
 

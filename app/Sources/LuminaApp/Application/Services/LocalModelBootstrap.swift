@@ -218,32 +218,9 @@ enum LocalModelBootstrap {
 
     private static func miniCPMV46ModelURL(selection: LuminaLocalModelSelection) -> URL? {
         print("[Lumina][Bootstrap] Resolving URL for selection: \(selection.rawValue)")
-        let environmentKeys: [String]
-        let bundleCandidates: [String]
-        switch selection {
-        case .original:
-            environmentKeys = ["LUMINA_MINICPMV46_ORIGINAL_MODEL", "LUMINA_MINICPMV46_MODEL"]
-            bundleCandidates = ["MiniCPMV46ReActModel", "MiniCPMV46Model"]
-        case .agenticDPO:
-            environmentKeys = ["LUMINA_MINICPMV46_AGENTIC_DPO_MODEL"]
-            bundleCandidates = ["MiniCPMV46ReActModel-AgenticSFTDPO-Q8", "MiniCPMV46AgenticDPOReActModel", "MiniCPMV46AgenticDPOModel"]
-        }
-
-        for key in environmentKeys {
-            guard let value = ProcessInfo.processInfo.environment[key], !value.isEmpty else { continue }
-            let url = URL(fileURLWithPath: value)
-            if FileManager.default.fileExists(atPath: url.path) {
-                print("[Lumina][Bootstrap] Found model via ENV (\(key)): \(url.path)")
-                return url
-            }
-        }
-
-        for candidate in bundleCandidates {
-            if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/\(candidate)"),
-               FileManager.default.fileExists(atPath: url.path) {
-                print("[Lumina][Bootstrap] Found model via Bundle (\(candidate)): \(url.path)")
-                return url
-            }
+        if let url = selection.resolvedMiniCPMV46ModelURL() {
+            print("[Lumina][Bootstrap] Found model for \(selection.rawValue): \(url.path)")
+            return url
         }
         print("[Lumina][Bootstrap] ERROR: No model found for selection: \(selection.rawValue)")
         return nil
@@ -461,7 +438,7 @@ struct LuminaRemoteFallbackReActStepGenerator: LuminaReActStepGenerator {
             let step = try await generator.nextStep(context: context)
             await readinessStore?.markModelReady(
                 source: "OpenAI-compatible API · \(configuration.model)",
-                message: "本次由远程 API 流式生成标准 ReAct action/result。"
+                message: "本次由远程 API 流式生成 MiniCPM special-token 工具调用或普通回复。"
             )
             return step
         } catch {
@@ -518,7 +495,10 @@ struct LuminaOpenAICompatibleStreamingModel: LuminaLocalDynamicOutputStreamingSt
             loadMilliseconds: 0,
             tokenizerMilliseconds: 0
         ))
-        return result.text
+        if let normalized = LuminaReActTransport.normalizeMiniCPMV46ToolCalls(from: result.text) {
+            return normalized
+        }
+        throw LuminaReActParserError.invalidSchema("model output could not be normalized by MiniCPM-V4.6 special-token extraction")
     }
 
     func generateJSON(

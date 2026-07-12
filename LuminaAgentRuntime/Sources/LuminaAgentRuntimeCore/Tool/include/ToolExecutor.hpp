@@ -22,7 +22,8 @@ public:
         bool requiresConfirmation
     ) const;
 
-    // Executes a model-declared batch after verifying every tool is read-only.
+    // Executes a model-declared batch serially. Each call still goes through the
+    // normal validation, permission, confirmation, guardrail, and replay path.
     std::string runMultiToolCall(RuntimeSession &session, const std::string &toolCallsJson) const;
 
 private:

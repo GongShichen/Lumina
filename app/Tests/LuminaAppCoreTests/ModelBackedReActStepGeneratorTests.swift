@@ -5,13 +5,17 @@ import XCTest
 final class ModelBackedReActStepGeneratorTests: XCTestCase {
     func testModelBackedReActModelParsesActionStep() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Search first",
-          "tool_name": "local.search",
-          "parameters": {"query": "coffee", "limit": 3},
-          "requires_confirmation": false
-        }
+        <think>Search first</think>
+        <tool_call>
+        <function=local.search>
+        <parameter=query>
+        coffee
+        </parameter>
+        <parameter=limit>
+        3
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -69,10 +73,10 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
         XCTAssertEqual(captured, [.text, .image])
     }
 
-    func testModelBackedReActModelRetriesGenerationNormalizationOnceInEvaluation() async throws {
+    func testModelBackedReActModelDoesNotRepairGenerationNormalizationFailureInEvaluation() async throws {
         let model = FailingThenValidMultimodalModel()
         let stepGenerator = LuminaModelBackedReActStepGenerator(multimodalModel: model) { _ in
-            "FIRST BYTES MUST BE <thought>."
+            "Use MiniCPM-V4.6 <tool_call> transport."
         }
         let schema = LuminaToolSchema(
             name: "device.current_time",
@@ -81,38 +85,38 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
             sideEffect: .readOnly
         )
 
-        let step = try await stepGenerator.nextStep(context: LuminaReActStepContext(
-            request: LuminaAgentRequest(
-                text: "现在几点",
-                metadata: [
-                    "lumina.evaluation.memory_access_disabled": .bool(true),
-                    "lumina.evaluation.ask_user_disabled": .bool(true)
-                ]
-            ),
-            availableTools: [schema],
-            trace: LuminaReActTrace(),
-            iteration: 0,
-            remainingToolCalls: 6,
-            maximumObservationCharacters: 2_000
-        ))
+        do {
+            _ = try await stepGenerator.nextStep(context: LuminaReActStepContext(
+                request: LuminaAgentRequest(
+                    text: "现在几点",
+                    metadata: [
+                        "lumina.evaluation.memory_access_disabled": .bool(true),
+                        "lumina.evaluation.ask_user_disabled": .bool(true)
+                    ]
+                ),
+                availableTools: [schema],
+                trace: LuminaReActTrace(),
+                iteration: 0,
+                remainingToolCalls: 6,
+                maximumObservationCharacters: 2_000
+            ))
+            XCTFail("Expected generation normalization failure to propagate without model repair.")
+        } catch {
+            XCTAssertEqual((error as? TestGenerationError), .invalidTransport)
+        }
 
         let inputs = await model.inputs()
-        XCTAssertEqual(inputs.count, 2)
+        XCTAssertEqual(inputs.count, 1)
         XCTAssertEqual(inputs.first?.maxOutputTokensHint, 224)
-        XCTAssertEqual(inputs.last?.maxOutputTokensHint, 192)
-        XCTAssertTrue(inputs.last?.prompt.contains("Repair the previous model response into exactly one valid Lumina XML ReAct step") == true)
-        XCTAssertEqual(step.action?.toolName, "device.current_time")
     }
 
     func testEvaluationPreservesRepeatedSuccessfulReadActionForRuntimeBudget() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Read current time again",
-          "tool_name": "device.current_time",
-          "parameters": {},
-          "requires_confirmation": false
-        }
+        <think>Read current time again</think>
+        <tool_call>
+        <function=device.current_time>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -153,13 +157,17 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesMissingFileSaveNoteBodyForToolObservation() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Save note",
-          "tool_name": "file.save_note",
-          "parameters": {"filename": "lumina-test-benchmark.md", "title": "LuminaTest benchmark"},
-          "requires_confirmation": true
-        }
+        <think>Save note</think>
+        <tool_call>
+        <function=file.save_note>
+        <parameter=filename>
+        lumina-test-benchmark.md
+        </parameter>
+        <parameter=title>
+        LuminaTest benchmark
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -197,13 +205,17 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesDifferentToolForMultiStepReadTask() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Summarize clipboard content",
-          "tool_name": "text.transform",
-          "parameters": {"text": "LuminaTest benchmark clipboard content", "operation": "summary"},
-          "requires_confirmation": false
-        }
+        <think>Summarize clipboard content</think>
+        <tool_call>
+        <function=text.transform>
+        <parameter=operation>
+        summary
+        </parameter>
+        <parameter=text>
+        LuminaTest benchmark clipboard content
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -250,13 +262,14 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesInvalidPostSuccessToolForRuntimeObservation() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Need final summary",
-          "tool_name": "summary",
-          "parameters": {"text": "done"},
-          "requires_confirmation": false
-        }
+        <think>Need final summary</think>
+        <tool_call>
+        <function=summary>
+        <parameter=text>
+        done
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -298,13 +311,14 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationDoesNotAutoCompleteAfterSuccessfulTerminalTool() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Search again",
-          "tool_name": "calendar.search",
-          "parameters": {"query": "LuminaTest"},
-          "requires_confirmation": false
-        }
+        <think>Search again</think>
+        <tool_call>
+        <function=calendar.search>
+        <parameter=query>
+        LuminaTest
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -347,13 +361,17 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesTextSummarizeToolNameForRuntimeObservation() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Summarize the text",
-          "tool_name": "text.summarize",
-          "parameters": {"text": "LuminaTest report", "operation": "summary"},
-          "requires_confirmation": false
-        }
+        <think>Summarize the text</think>
+        <tool_call>
+        <function=text.summarize>
+        <parameter=operation>
+        summary
+        </parameter>
+        <parameter=text>
+        LuminaTest report
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -390,13 +408,14 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesWriteAfterTextTransformForRuntimeObservation() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Write final answer",
-          "tool_name": "write",
-          "parameters": {"text": "Example Domain"},
-          "requires_confirmation": false
-        }
+        <think>Write final answer</think>
+        <tool_call>
+        <function=write>
+        <parameter=text>
+        Example Domain
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -438,13 +457,14 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
 
     func testEvaluationPreservesInvalidToolAfterReplayedReadObservation() async throws {
         let model = MockStructuredInferenceModel(json: """
-        {
-          "type": "tool_use",
-          "thought": "Summarize ledger search results",
-          "tool_name": "summarize_ledger",
-          "parameters": {"amounts": [42.0]},
-          "requires_confirmation": false
-        }
+        <think>Summarize ledger search results</think>
+        <tool_call>
+        <function=summarize_ledger>
+        <parameter=amounts>
+        [42.0]
+        </parameter>
+        </function>
+        </tool_call>
         """)
         let stepGenerator = LuminaModelBackedReActStepGenerator(model: model) { context in
             context.request.text
@@ -489,9 +509,13 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
         }
     }
 
-    func testMiniCPMV46ExtractorStripsCompleteThinkBlockBeforeXMLToolUse() throws {
+    func testMiniCPMV46ExtractorParsesCompleteThinkBlockBeforeToolCall() throws {
         let json = try LuminaMiniCPMV46ReActModel.extractJSONObject(from: """
-        <think>private scratchpad</think><thought>Need current time.</thought><tool_use name="device.current_time" requires_confirmation="false">{}</tool_use>
+        <think>Need current time.</think>
+        <tool_call>
+        <function=device.current_time>
+        </function>
+        </tool_call>
         """)
 
         XCTAssertTrue(json.contains(#""type":"tool_use""#))
@@ -499,16 +523,13 @@ final class ModelBackedReActStepGeneratorTests: XCTestCase {
         XCTAssertTrue(json.contains(#""parameters":{}"#))
     }
 
-    func testMiniCPMV46ExtractorStripsUnclosedLeadingThinkBeforeXMLToolUse() throws {
+    func testMiniCPMV46ExtractorDoesNotParseLegacyToolUseAsAction() throws {
         let json = try LuminaMiniCPMV46ReActModel.extractJSONObject(from: """
-        <think>
-
         <tool_use name="device.current_time" requires_confirmation="false">{}</tool_use>
         """)
 
-        XCTAssertTrue(json.contains(#""type":"tool_use""#))
-        XCTAssertTrue(json.contains(#""tool_name":"device.current_time""#))
-        XCTAssertTrue(json.contains(#""parameters":{}"#))
+        XCTAssertTrue(json.contains(#""type":"result""#))
+        XCTAssertFalse(json.contains(#""tool_name":"device.current_time""#))
     }
 }
 
@@ -516,7 +537,10 @@ private struct MockStructuredInferenceModel: LuminaLocalStructuredInferenceModel
     var json: String
 
     func generateJSON(prompt: String) async throws -> String {
-        json
+        guard let normalized = LuminaReActTransport.normalizeMiniCPMV46ToolCalls(from: json) else {
+            throw TestGenerationError.invalidTransport
+        }
+        return normalized
     }
 }
 
@@ -525,15 +549,17 @@ private actor CapturingMultimodalModel: LuminaLocalMultimodalStructuredInference
 
     func generateJSON(input: LuminaStructuredStepGenerationInput) async throws -> String {
         modalities = input.content.modalities
-        return """
-        {
-          "type": "tool_use",
-          "thought": "Scan receipt",
-          "tool_name": "receipt.scan",
-          "parameters": {},
-          "requires_confirmation": false
-        }
+        let output = """
+        <think>Scan receipt</think>
+        <tool_call>
+        <function=receipt.scan>
+        </function>
+        </tool_call>
         """
+        guard let normalized = LuminaReActTransport.normalizeMiniCPMV46ToolCalls(from: output) else {
+            throw TestGenerationError.invalidTransport
+        }
+        return normalized
     }
 
     func capturedModalities() -> Set<LuminaAgentModality> {
@@ -541,11 +567,11 @@ private actor CapturingMultimodalModel: LuminaLocalMultimodalStructuredInference
     }
 }
 
-private enum TestGenerationError: LocalizedError {
-    case invalidXML
+private enum TestGenerationError: LocalizedError, Equatable {
+    case invalidTransport
 
     var errorDescription: String? {
-        "model did not produce valid XML"
+        "model output could not be normalized by MiniCPM transport extraction"
     }
 }
 
@@ -555,17 +581,19 @@ private actor FailingThenValidMultimodalModel: LuminaLocalMultimodalStructuredIn
     func generateJSON(input: LuminaStructuredStepGenerationInput) async throws -> String {
         capturedInputs.append(input)
         if capturedInputs.count == 1 {
-            throw TestGenerationError.invalidXML
+            throw TestGenerationError.invalidTransport
         }
-        return """
-        {
-          "type": "tool_use",
-          "thought": "Read current time",
-          "tool_name": "device.current_time",
-          "parameters": {},
-          "requires_confirmation": false
-        }
+        let output = """
+        <think>Read current time</think>
+        <tool_call>
+        <function=device.current_time>
+        </function>
+        </tool_call>
         """
+        guard let normalized = LuminaReActTransport.normalizeMiniCPMV46ToolCalls(from: output) else {
+            throw TestGenerationError.invalidTransport
+        }
+        return normalized
     }
 
     func inputs() -> [LuminaStructuredStepGenerationInput] {

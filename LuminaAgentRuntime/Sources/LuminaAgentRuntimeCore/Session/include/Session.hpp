@@ -23,6 +23,15 @@ struct ToolCallLedgerEntry {
     bool replayable = false;
 };
 
+struct RuntimePermissionState {
+    std::set<std::string> confirmedTools;
+    std::set<std::string> confirmedPaths;
+    std::set<std::string> confirmedCommandRules;
+    bool yoloMode = false;
+
+    std::string json() const;
+};
+
 class RuntimeSession {
 public:
     // Creates a per-task state container. Sessions are intentionally not shared across tasks.
@@ -98,6 +107,18 @@ public:
     std::string deleteStateJson(const std::string &scope, const std::string &key);
     std::string stateSnapshotJson(const std::string &scope = "") const;
 
+    // Backend-aligned permission state. Permission is a runtime policy decision
+    // point, not a model-callable tool.
+    const RuntimePermissionState &permissionState() const;
+    std::string permissionStateJson() const;
+    bool yoloMode() const;
+    void setYoloMode(bool enabled);
+    bool isToolPermissionConfirmed(const std::string &toolName) const;
+    void confirmToolPermission(const std::string &toolName);
+    void clearPermissionGrants();
+    int recordPermissionDenied(const std::string &toolName);
+    void clearPermissionDenials(const std::string &toolName);
+
     // Pauses/resumes a session for external user input, confirmation, or context.
     void pause(const std::string &kind, const std::string &payloadJson);
     void resumeWithObservation(const std::string &observationJson);
@@ -130,6 +151,9 @@ public:
     int consecutiveReasoningCount() const;
     int maximumConsecutiveReasoningSteps() const;
     int maximumConsecutiveReplayObservations() const;
+    bool multiToolUseEnabled() const;
+    bool continueReadOnlyMultiToolFailures() const;
+    bool ignoreInternalToolCalls() const;
     int compactFailureCount() const;
     void setContextTokenUsageEstimate(int usedTokens);
     void recordCompactFailure();
@@ -181,6 +205,8 @@ private:
     std::set<std::string> loadedContextKeys_;
     std::map<std::string, ToolCallLedgerEntry> toolCallLedger_;
     std::map<std::string, std::map<std::string, std::string>> state_;
+    RuntimePermissionState permissionState_;
+    std::map<std::string, int> deniedToolCalls_;
     TraceRecorder trace_;
 };
 

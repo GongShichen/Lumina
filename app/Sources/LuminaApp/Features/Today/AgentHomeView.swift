@@ -765,7 +765,7 @@ private struct RuntimeLabSuite {
                 "schema_version":"1.0",
                 "step_id":"runtime-lab-tool",
                 "type":"tool_use",
-                "thought":"Exercise a live app tool through the runtime.",
+                "thinking":"Exercise a live app tool through the runtime.",
                 "tool_name":"runtime.echo",
                 "parameters":{"message":"hello from runtime lab"},
                 "requires_confirmation":false,
@@ -777,7 +777,7 @@ private struct RuntimeLabSuite {
                 "schema_version":"1.0",
                 "step_id":"runtime-lab-result",
                 "type":"result",
-                "thought":"The tool returned successfully.",
+                "thinking":"The tool returned successfully.",
                 "content":"## Runtime lab complete",
                 "completed":true,
                 "requires_followup":false

@@ -120,7 +120,7 @@ final class LuminaBenchmarkTaskEnvironment {
             )
         }
         if text.contains("LuminaTest-report.md") {
-            try "# LuminaTest Report\n\nBenchmark covers XML ReAct, tool choice, and local runtime execution.\n".write(
+            try "# LuminaTest Report\n\nBenchmark covers MiniCPM tool-call extraction, tool choice, and local runtime execution.\n".write(
                 to: documentsDirectory.appendingPathComponent("LuminaTest-report.md"),
                 atomically: true,
                 encoding: .utf8

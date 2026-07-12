@@ -17,7 +17,7 @@ enum LuminaFeatureFlags {
     static let showAdvancedTabs = false
     static let showSettingsTab = showAdvancedTabs
     static let showRuntimeTab = showAdvancedTabs
-    static let showTrustTab = showAdvancedTabs
+    static let showTrustTab = true
 }
 
 extension LuminaTab {

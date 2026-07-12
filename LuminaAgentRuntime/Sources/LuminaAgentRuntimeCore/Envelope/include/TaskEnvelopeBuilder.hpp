@@ -3,6 +3,7 @@
 #include <string>
 
 #include "Session.hpp"
+#include "SkillRegistry.hpp"
 #include "ToolRegistry.hpp"
 
 namespace LuminaAgent {
@@ -10,7 +11,7 @@ namespace LuminaAgent {
 class TaskEnvelopeBuilder {
 public:
     // Creates a model-facing envelope builder for one session turn.
-    TaskEnvelopeBuilder(const ToolRegistry &tools, const RuntimeSession &session);
+    TaskEnvelopeBuilder(const ToolRegistry &tools, const SkillRegistry &skills, const RuntimeSession &session);
 
     // Builds the semantic task envelope consumed by the external model callback.
     std::string build(
@@ -21,6 +22,7 @@ public:
 
 private:
     const ToolRegistry &tools_;
+    const SkillRegistry &skills_;
     const RuntimeSession &session_;
 
     // Converts raw request JSON into normalized task fields.
@@ -38,6 +40,10 @@ private:
 
     // Encodes remaining iteration/tool/context budgets in model-friendly terms.
     std::string executionBudgetJson() const;
+
+    // LuminaCode-aligned default system prompt used when the caller does not
+    // provide request-level system instructions.
+    std::string defaultSystemPrompt() const;
 };
 
 } // namespace LuminaAgent

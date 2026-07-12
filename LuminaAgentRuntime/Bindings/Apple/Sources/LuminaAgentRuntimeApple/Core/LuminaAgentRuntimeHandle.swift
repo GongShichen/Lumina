@@ -84,6 +84,47 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         }
     }
 
+    func registerSkillMetadata(_ metadataJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return metadataJSON.withCString { metadataPointer in
+            consumeRuntimeString(LuminaAgentRuntimeRegisterSkillMetadata(handle, metadataPointer))
+        }
+    }
+
+    func discoverSkills(_ queryJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return queryJSON.withCString { queryPointer in
+            consumeRuntimeString(LuminaAgentRuntimeDiscoverSkills(handle, queryPointer))
+        }
+    }
+
+    func discoverMCPTools(_ queryJSON: String) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return queryJSON.withCString { queryPointer in
+            consumeRuntimeString(LuminaAgentRuntimeDiscoverMCPTools(handle, queryPointer))
+        }
+    }
+
+    func setYoloMode(_ enabled: Bool) -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return consumeRuntimeString(LuminaAgentRuntimeSetYoloMode(handle, enabled))
+    }
+
+    func yoloModeStatus() -> String {
+        guard let handle = currentHandle() else {
+            return #"{"ok":false,"error":"runtime handle unavailable"}"#
+        }
+        return consumeRuntimeString(LuminaAgentRuntimeGetYoloMode(handle))
+    }
+
     func run(requestJSON: String) -> String {
         guard let handle = currentHandle() else {
             return "{\"ok\":false,\"status\":\"failed\",\"resultMarkdown\":\"### Runtime unavailable\"}"
@@ -207,6 +248,18 @@ final class LuminaAgentRuntimeHandle: @unchecked Sendable {
         consumeRuntimeString(LuminaAgentRuntimeSessionStateSnapshot(session))
     }
 
+    func setYoloMode(session: OpaquePointer, enabled: Bool) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeSessionSetYoloMode(session, enabled))
+    }
+
+    func permissionStateSnapshot(session: OpaquePointer) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeSessionPermissionStateSnapshot(session))
+    }
+
+    func clearPermissionGrants(session: OpaquePointer) -> String {
+        consumeRuntimeString(LuminaAgentRuntimeSessionClearPermissionGrants(session))
+    }
+
     func setState(session: OpaquePointer, scope: String, key: String, valueJSON: String) -> String {
         guard let handle = currentHandle() else {
             return #"{"ok":false,"error":"runtime handle unavailable"}"#
@@ -322,6 +375,18 @@ public final class LuminaAgentRuntimeSession: @unchecked Sendable {
         handle.stateSnapshot()
     }
 
+    public func setYoloMode(_ enabled: Bool) -> String {
+        handle.setYoloMode(enabled)
+    }
+
+    public func permissionStateSnapshot() -> String {
+        handle.permissionStateSnapshot()
+    }
+
+    public func clearPermissionGrants() -> String {
+        handle.clearPermissionGrants()
+    }
+
     public func setState(scope: String, key: String, valueJSON: String) -> String {
         handle.setState(scope: scope, key: key, valueJSON: valueJSON)
     }
@@ -403,6 +468,21 @@ final class LuminaAgentRuntimeSessionHandle: @unchecked Sendable {
     func stateSnapshot() -> String {
         guard let session = currentSession() else { return "{}" }
         return runtime.stateSnapshot(session: session)
+    }
+
+    func setYoloMode(_ enabled: Bool) -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.setYoloMode(session: session, enabled: enabled)
+    }
+
+    func permissionStateSnapshot() -> String {
+        guard let session = currentSession() else { return "{}" }
+        return runtime.permissionStateSnapshot(session: session)
+    }
+
+    func clearPermissionGrants() -> String {
+        guard let session = currentSession() else { return #"{"ok":false,"error":"session unavailable"}"# }
+        return runtime.clearPermissionGrants(session: session)
     }
 
     func setState(scope: String, key: String, valueJSON: String) -> String {

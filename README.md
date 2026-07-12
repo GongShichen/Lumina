@@ -8,7 +8,7 @@ Lumina Agent Runtime 是一个面向端侧 Agent 的 Runtime。它把模型输�
 
 Runtime Core 是跨端的 C/C++ 执行核心。宿主提供模型、工具、上下文和 UI 策略；Runtime 负责把用户请求组织成 planner input，循环调用模型、校验 ReAct step、执行工具、写入 observation，并在 `result`、`cannot_complete`、失败、暂停或取消时结束。
 
-Canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi_tool_use`、`ask_user`、`result`、`cannot_complete`。最终产物统一是 `result`，不接受 `final_answer`。
+Runtime canonical ReAct step 使用 `reasoning`、`tool_discovery`、`tool_use`、`multi_tool_use`、`ask_user`、`result`、`cannot_complete`。模型侧不输出 `result` 标签；最终回答是普通 assistant text，Runtime 在内部归一化为 `result`。旧 `final_answer` schema 不兼容。
 
 ## 核心能力
 
@@ -95,11 +95,10 @@ MiniCPM-V 4.6 的 GGUF 推理走 app 内的 C++ native engine，需要把
 训练方式：
 
 - Base model：MiniCPM-V 4.6。
-- 流程：XML ReAct SFT -> holdout 检查 -> standard DPO -> LoRA 合并回 base model -> GGUF Q8 转换。
+- 流程：MiniCPM-V4.6 special-token/tool-call transport SFT -> holdout 检查 -> standard DPO -> LoRA 合并回 base model -> GGUF Q8 转换。
 - LoRA 微调 language modules，冻结 vision / visual / projector / resampler。
-- SFT train/test：`16,673 / 1,867`。
-- DPO train/test：`16,673 / 1,867`。
-- Holdout evaluation：SFT `1,680`，DPO `1,680`。
+- SFT train/test/evaluation：`50,844 / 6,351 / 6,351`。
+- DPO train/test/evaluation：`41,126 / 5,139 / 5,139`。
 
 ## App
 

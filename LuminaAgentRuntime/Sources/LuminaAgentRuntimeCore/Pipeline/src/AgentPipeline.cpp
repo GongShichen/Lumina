@@ -12,12 +12,13 @@ std::string Distiller::distill(const std::string &requestJson, const std::string
 
 std::string Executor::plannerInput(
     const ToolRegistry &tools,
+    const SkillRegistry &skills,
     const RuntimeSession &session,
     const std::string &requestJson,
     const std::string &contextJson,
     const std::string &lastObservationJson
 ) const {
-    return PlannerInputBuilder(tools, session).build(requestJson, contextJson, lastObservationJson);
+    return PlannerInputBuilder(tools, skills, session).build(requestJson, contextJson, lastObservationJson);
 }
 
 std::string Responder::finalize(RuntimeSession &session) const {

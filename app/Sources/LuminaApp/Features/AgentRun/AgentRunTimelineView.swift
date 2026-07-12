@@ -79,7 +79,7 @@ struct AgentRunTimelineView: View {
     }
 
     private func displayTitle(for title: String) -> String {
-        if title.localizedCaseInsensitiveContains("thought") || title.contains("模型") || title.contains("准备") {
+        if title.localizedCaseInsensitiveContains("thinking") || title.contains("模型") || title.contains("准备") {
             return "Thinking"
         }
         if title.localizedCaseInsensitiveContains("tool") || title.contains("工具") || title.contains("Action") {

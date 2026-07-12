@@ -17,6 +17,7 @@ struct StreamingModelResult {
     int outputTokenCount = 0;
     long long timeToFirstTokenMilliseconds = -1;
     long long chunkCount = 0;
+    bool streamContainsSpecialTokens = false;
 };
 
 struct RuntimeHookRoute {

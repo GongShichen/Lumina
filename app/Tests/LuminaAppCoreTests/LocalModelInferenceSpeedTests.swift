@@ -98,7 +98,7 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
 
     private static var miniCPMV46SpeedPrompt: String {
         """
-        You are Lumina. Output exactly one standard ReAct JSON object.
+        You are Lumina. Use MiniCPM-V4.6 chat-template tool calls when a tool is needed.
         \(LuminaReActSchema.promptContract)
 
         User request: 现在几点？
@@ -106,7 +106,11 @@ final class LocalModelInferenceSpeedTests: XCTestCase {
         Available tools:
         - device.current_time: read the current local device time. parameters={}
 
-        Return the next JSON object now. If a tool is needed, use tool_use.
+        Return the next step now. If a tool is needed, use:
+        <tool_call>
+        <function=device.current_time>
+        </function>
+        </tool_call>
         """
     }
 

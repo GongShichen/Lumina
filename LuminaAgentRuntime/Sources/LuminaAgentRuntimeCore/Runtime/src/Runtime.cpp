@@ -91,6 +91,110 @@ static bool applyTerminalGuardrailDecision(
     return true;
 }
 
+static bool preflightRuntimeBuiltinTool(
+    RuntimeSession &session,
+    RuntimeCallbacks &callbacks,
+    const ToolRegistry &tools,
+    const std::string &toolName,
+    std::string &parameters
+) {
+    auto recordBlockedObservation = [&](const std::string &status, const std::string &message) {
+        const std::string observation = session.recordObservation(toolName, status, "", message, false, false);
+        callbacks.emitEvent("observation_created", observation);
+        callbacks.recordHistory("observation_created", observation);
+    };
+
+    if (!tools.contains(toolName) || !tools.isCallable(toolName, session.loadedToolNames())) {
+        recordBlockedObservation("failed", "tool is not registered");
+        return false;
+    }
+
+    std::map<std::string, JsonField> validationFields;
+    if (parseFieldsOrEmpty(tools.validateCallJson(toolName, parameters.empty() ? "{}" : parameters), validationFields) &&
+        !boolField(validationFields, "ok", false)) {
+        const std::string error = stringField(validationFields, "error", "tool parameters failed validation");
+        callbacks.emitEvent("tool_parameter_validation_failed", "{\"tool_name\":" + jsonString(toolName) + ",\"error\":" + jsonString(error) + "}");
+        recordBlockedObservation("failed", error);
+        return false;
+    }
+
+    const std::string payload = "{\"tool_name\":" + jsonString(toolName) +
+        ",\"parameters\":" + (parameters.empty() ? "{}" : parameters) +
+        ",\"requires_confirmation\":false" +
+        ",\"side_effect\":" + jsonString(tools.sideEffect(toolName)) +
+        ",\"sensitivity\":" + jsonString(tools.sensitivity(toolName)) +
+        ",\"destructive\":" + jsonBool(tools.isDestructive(toolName)) + "}";
+    const RuntimeGuardrailDecision inputGuardrail = callbacks.evaluateGuardrail("tool_input", payload);
+    if (inputGuardrail.decision == "tripwire_failure") {
+        const std::string message = inputGuardrail.message.empty() ? "tool guardrail tripwire failure" : inputGuardrail.message;
+        session.failWithResult("guardrail-tripwire", "### 已终止\n\n" + message);
+        callbacks.emitEvent("guardrail_tripwire", "{\"stage\":\"tool\",\"tool_name\":" + jsonString(toolName) + ",\"message\":" + jsonString(message) + "}");
+        recordBlockedObservation("failed", message);
+        return false;
+    }
+    if (inputGuardrail.decision == "reject") {
+        const std::string message = inputGuardrail.message.empty() ? "tool guardrail rejected payload" : inputGuardrail.message;
+        callbacks.emitEvent("guardrail_rejected", "{\"stage\":\"tool\",\"tool_name\":" + jsonString(toolName) + ",\"message\":" + jsonString(message) + "}");
+        recordBlockedObservation("denied", message);
+        return false;
+    }
+    if (inputGuardrail.decision == "rewrite" && !trim(inputGuardrail.payloadJson).empty()) {
+        std::string rewrittenObject = inputGuardrail.payloadJson;
+        std::map<std::string, JsonField> envelopeFields;
+        if (parseFieldsOrEmpty(inputGuardrail.payloadJson, envelopeFields) && !rawField(envelopeFields, "call", "").empty()) {
+            rewrittenObject = rawField(envelopeFields, "call", "{}");
+        }
+        std::map<std::string, JsonField> rewrittenFields;
+        if (parseFieldsOrEmpty(rewrittenObject, rewrittenFields)) {
+            const std::string rewrittenToolName = stringField(rewrittenFields, "tool_name", stringField(rewrittenFields, "toolName", toolName));
+            if (!rewrittenToolName.empty() && rewrittenToolName != toolName) {
+                recordBlockedObservation("denied", "runtime builtin discovery tool cannot be rewritten to a different tool");
+                return false;
+            }
+            parameters = rawField(rewrittenFields, "parameters", rawField(rewrittenFields, "arguments", parameters.empty() ? "{}" : parameters));
+            callbacks.emitEvent("guardrail_rewritten", "{\"stage\":\"tool_input\",\"tool_name\":" + jsonString(toolName) + "}");
+        }
+        if (parseFieldsOrEmpty(tools.validateCallJson(toolName, parameters.empty() ? "{}" : parameters), validationFields) &&
+            !boolField(validationFields, "ok", false)) {
+            const std::string error = stringField(validationFields, "error", "tool parameters failed validation");
+            recordBlockedObservation("failed", error);
+            return false;
+        }
+    }
+
+    const RuntimeHookDirectives beforeToolDirectives = parseRuntimeHookDirectives(
+        HookDispatcher(callbacks).dispatch("before_tool", payload)
+    );
+    if (beforeToolDirectives.hasFail) {
+        session.failWithResult(
+            beforeToolDirectives.reason.empty() ? "hook failed tool call" : beforeToolDirectives.reason,
+            beforeToolDirectives.markdown.empty() ? "### 已终止\n\nRuntime hook stopped this tool call." : beforeToolDirectives.markdown
+        );
+        return false;
+    }
+    if (beforeToolDirectives.hasPause) {
+        session.pause(
+            beforeToolDirectives.pauseKind.empty() ? "hook" : beforeToolDirectives.pauseKind,
+            beforeToolDirectives.pausePayloadJson.empty() ? "{}" : beforeToolDirectives.pausePayloadJson
+        );
+        return false;
+    }
+    if (beforeToolDirectives.hasRejectToolCall) {
+        recordBlockedObservation("denied", beforeToolDirectives.reason.empty() ? "tool call rejected by hook" : beforeToolDirectives.reason);
+        return false;
+    }
+    if (beforeToolDirectives.hasRewriteToolCall) {
+        if (!beforeToolDirectives.rewrittenToolName.empty() && beforeToolDirectives.rewrittenToolName != toolName) {
+            recordBlockedObservation("denied", "runtime builtin discovery tool cannot be rewritten to a different tool");
+            return false;
+        }
+        if (!beforeToolDirectives.rewrittenParametersJson.empty()) {
+            parameters = beforeToolDirectives.rewrittenParametersJson;
+        }
+    }
+    return true;
+}
+
 static std::string retryRequestJson(
     const RuntimeSession &session,
     const std::string &stage,
@@ -279,6 +383,10 @@ static bool stringVectorContains(const std::vector<std::string> &values, const s
     return false;
 }
 
+static bool isInternalRuntimeToolName(const std::string &toolName) {
+    return toolName.rfind("runtime.", 0) == 0;
+}
+
 static std::string schemaWithProviderNamespace(
     const std::string &schema,
     const std::string &providerNamespace,
@@ -308,6 +416,7 @@ static std::string schemaWithProviderNamespace(
            << "\"destructive\":" << rawField(fields, "destructive", "false") << ","
            << "\"concurrencySafe\":" << rawField(fields, "concurrencySafe", rawField(fields, "concurrency_safe", "false")) << ","
            << "\"requiresUserInteraction\":" << rawField(fields, "requiresUserInteraction", rawField(fields, "requires_user_interaction", "false")) << ","
+           << "\"requiresConfirmation\":" << rawField(fields, "requiresConfirmation", rawField(fields, "requires_confirmation", "false")) << ","
            << "\"parameters\":" << rawField(fields, "parameters", "[]") << ","
            << "\"deferByDefault\":true,"
            << "\"alwaysLoad\":" << rawField(fields, "alwaysLoad", rawField(fields, "always_load", "false"));
@@ -382,6 +491,10 @@ Runtime::Runtime(const char *configurationJson) {
     requireInt({"maximumConsecutiveReplayObservations", "maxReplayObservations"}, "maxReplayObservations", 1, sessionConfig_.maximumConsecutiveReplayObservations);
     if (!configurationError_.empty()) { sessionConfig_.configurationError = configurationError_; return; }
     sessionConfig_.stopOnToolFailure = boolField(fields, "stopOnToolFailure", sessionConfig_.stopOnToolFailure);
+    sessionConfig_.multiToolUseEnabled = boolField(fields, "multiToolUseEnabled", sessionConfig_.multiToolUseEnabled);
+    sessionConfig_.continueReadOnlyMultiToolFailures = boolField(fields, "continueReadOnlyMultiToolFailures", sessionConfig_.continueReadOnlyMultiToolFailures);
+    sessionConfig_.ignoreInternalToolCalls = boolField(fields, "ignoreInternalToolCalls", sessionConfig_.ignoreInternalToolCalls);
+    sessionConfig_.yoloMode = boolField(fields, "yoloMode", boolField(fields, "yolo_mode", sessionConfig_.yoloMode));
     const std::string profile = lowercased(stringField(fields, "toolSchemaProfile", sessionConfig_.toolSchemaProfile));
     sessionConfig_.toolSchemaProfile =
         (profile == "full" || profile == "compact" || profile == "name-only") ? profile : "compact";
@@ -400,6 +513,23 @@ Runtime::Runtime(const char *configurationJson) {
     );
     sessionConfig_.isConfigured = true;
     sessionConfig_.configurationError.clear();
+    registerRuntimeDiscoveryTools();
+}
+
+std::string Runtime::setYoloMode(bool enabled) {
+    sessionConfig_.yoloMode = enabled;
+    return "{\"ok\":true,\"yolo_mode\":" + jsonBool(enabled) + "}";
+}
+
+bool Runtime::yoloMode() const {
+    return sessionConfig_.yoloMode;
+}
+
+void Runtime::registerRuntimeDiscoveryTools() {
+    const char *skillDiscoverySchema = R"({"name":"runtime.skill_discovery","description":"Discover available local skills. Use this before invoking Skill when the task may match a skill but the exact canonical skill name is uncertain.","category":"skill","sideEffect":"readOnly","readOnly":true,"sensitivity":"normal","concurrencySafe":true,"destructive":false,"requiresUserInteraction":false,"requiresConfirmation":false,"idempotencyPolicy":"replay_identical","alwaysLoad":true,"parameters":[{"name":"query","type":"string","description":"Skill search query or select:canonical-skill-name.","required":false},{"name":"max_results","type":"integer","description":"Maximum number of skill matches.","required":false}]})";
+    const char *mcpDiscoverySchema = R"({"name":"runtime.mcp_discovery","description":"Discover MCP tools already registered with this runtime. Use this to find namespaced MCP tool schemas before calling an MCP tool.","category":"mcp","sideEffect":"readOnly","readOnly":true,"sensitivity":"normal","concurrencySafe":true,"destructive":false,"requiresUserInteraction":false,"requiresConfirmation":false,"idempotencyPolicy":"replay_identical","alwaysLoad":true,"parameters":[{"name":"query","type":"string","description":"MCP tool search query or select:mcp__server__tool.","required":false},{"name":"max_results","type":"integer","description":"Maximum number of MCP tool matches.","required":false},{"name":"include_schemas","type":"boolean","description":"Whether to include full schemas and load matching deferred MCP tools into this session.","required":false}]})";
+    tools_.registerSchema(skillDiscoverySchema);
+    tools_.registerSchema(mcpDiscoverySchema);
 }
 
 std::string Runtime::registerToolSchema(const char *toolSchemaJson) {
@@ -412,6 +542,39 @@ std::string Runtime::registerDeferredToolMetadata(const char *metadataJson) {
     return result;
 }
 
+std::string Runtime::registerSkillMetadata(const char *skillMetadataJson) {
+    const std::string result = skills_.registerMetadata(skillMetadataJson);
+    if (result.find("\"ok\":true") != std::string::npos) {
+        const char *skillToolSchema = R"({"name":"Skill","description":"Invoke a local skill by canonical name. Use this when a listed skill matches the task better than continuing unaided. Skill shell/file side effects are mediated by the host skill executor, not by Runtime permission for this wrapper.","category":"skill","sideEffect":"readOnly","readOnly":true,"sensitivity":"normal","concurrencySafe":true,"destructive":false,"requiresUserInteraction":false,"requiresConfirmation":false,"idempotencyPolicy":"always_execute","alwaysLoad":true,"parameters":[{"name":"skill","type":"string","description":"Canonical skill name to invoke.","required":true},{"name":"args","type":"string","description":"Optional raw argument string for the skill.","required":false}]})";
+        tools_.registerSchema(skillToolSchema);
+    }
+    callbacks_.emitEvent("skill.catalog_registered", "{\"result\":" + result + "}");
+    return result;
+}
+
+std::string Runtime::discoverSkills(const char *queryJson) const {
+    std::map<std::string, JsonField> fields;
+    const std::string text = queryJson == nullptr ? "{}" : trim(queryJson);
+    parseFieldsOrEmpty(text.empty() ? "{}" : text, fields);
+    return skills_.discoverSkillsJson(
+        stringField(fields, "query"),
+        intField(fields, "max_results", intField(fields, "maxResults", 0)),
+        sessionConfig_.maxContextTokens > 0 ? sessionConfig_.maxContextTokens : sessionConfig_.contextWindowTokens,
+        stringField(fields, "cwd")
+    );
+}
+
+std::string Runtime::discoverMCPTools(const char *queryJson) const {
+    std::map<std::string, JsonField> fields;
+    const std::string text = queryJson == nullptr ? "{}" : trim(queryJson);
+    parseFieldsOrEmpty(text.empty() ? "{}" : text, fields);
+    return tools_.discoverMCPToolsJson(
+        stringField(fields, "query"),
+        intField(fields, "max_results", intField(fields, "maxResults", 0)),
+        boolField(fields, "include_schemas", boolField(fields, "includeSchemas", true))
+    );
+}
+
 std::string Runtime::registerExternalToolProvider(const char *providerJson) {
     if (providerJson == nullptr || trim(providerJson).empty()) {
         return "{\"ok\":false,\"error\":\"missing external provider JSON\"}";
@@ -422,6 +585,27 @@ std::string Runtime::registerExternalToolProvider(const char *providerJson) {
     }
     const std::string providerId = stringField(fields, "provider_id", stringField(fields, "id", "external"));
     const std::string providerNamespace = stringField(fields, "namespace");
+    const bool requiresTrust = boolField(fields, "requiresTrust", boolField(fields, "requires_trust", false)) ||
+        !trim(rawField(fields, "trustRequest", rawField(fields, "trust_request", ""))).empty();
+    const bool trusted = boolField(fields, "trusted", boolField(fields, "is_trusted", false));
+    if (requiresTrust && !trusted && !sessionConfig_.yoloMode) {
+        callbacks_.emitEvent(
+            "external_tool_provider_trust_required",
+            "{\"provider_id\":" + jsonString(providerId) +
+                ",\"namespace\":" + jsonString(providerNamespace) + "}"
+        );
+        return "{\"ok\":false,\"provider_id\":" + jsonString(providerId) +
+            ",\"namespace\":" + jsonString(providerNamespace) +
+            ",\"error\":\"external provider trust required\"}";
+    }
+    const bool trustedByYolo = requiresTrust && !trusted && sessionConfig_.yoloMode;
+    if (trustedByYolo) {
+        callbacks_.emitEvent(
+            "external_tool_provider_trust_yolo_allowed",
+            "{\"provider_id\":" + jsonString(providerId) +
+                ",\"namespace\":" + jsonString(providerNamespace) + "}"
+        );
+    }
     const std::vector<std::string> allowedTools = stringArrayFromRaw(rawField(fields, "allowed_tools", rawField(fields, "allowedTools", "[]")));
     const std::string schemasRaw = rawField(fields, "schemas", rawField(fields, "tools", "[]"));
     int registered = 0;
@@ -442,6 +626,7 @@ std::string Runtime::registerExternalToolProvider(const char *providerJson) {
         "external_tool_provider_registered",
         "{\"provider_id\":" + jsonString(providerId) +
             ",\"namespace\":" + jsonString(providerNamespace) +
+            ",\"trusted_by_yolo\":" + jsonBool(trustedByYolo) +
             ",\"registered_tools\":" + std::to_string(registered) + "}"
     );
     if (registered == 0 && !lastError.empty()) {
@@ -450,6 +635,7 @@ std::string Runtime::registerExternalToolProvider(const char *providerJson) {
     }
     return "{\"ok\":true,\"provider_id\":" + jsonString(providerId) +
         ",\"namespace\":" + jsonString(providerNamespace) +
+        ",\"trusted_by_yolo\":" + jsonBool(trustedByYolo) +
         ",\"registered_tools\":" + std::to_string(registered) + "}";
 }
 
@@ -888,7 +1074,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 }
             }
         }
-        std::string plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+        std::string plannerInput = Executor().plannerInput(tools_, skills_, session, request, contextJson, lastObservation);
         events.emitEvent(
             "planner_input_ready",
             "{\"tokens_estimate\":" + std::to_string(static_cast<int>(plannerInput.size() / 4)) +
@@ -902,14 +1088,14 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             break;
         }
         if (contextJson != contextBeforeHook) {
-            plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+            plannerInput = Executor().plannerInput(tools_, skills_, session, request, contextJson, lastObservation);
         }
         contextBeforeHook = contextJson;
         if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("before_model", "{\"characters\":" + std::to_string(plannerInput.size()) + "}"), &contextJson, request)) {
             break;
         }
         if (contextJson != contextBeforeHook) {
-            plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+            plannerInput = Executor().plannerInput(tools_, skills_, session, request, contextJson, lastObservation);
         }
         std::string stepJson;
         std::string error;
@@ -935,7 +1121,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             const auto modelElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - modelStartedAt
             ).count();
-            if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"output_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
+            if (applyHookDirective(session, HookDispatcher(callbacks_).dispatch("after_model", "{\"characters\":" + std::to_string(stepJson.size()) + ",\"canonical_step_excerpt\":" + jsonString(excerpt(stepJson, 1200)) + "}"), &contextJson, request)) {
                 break;
             }
             if (isPromptTooLongSignal(stepJson) && !reactivePromptTooLongRecoveryUsed && modelAttempt < maxModelAttempts) {
@@ -952,7 +1138,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 if (compactedContext != contextJson) {
                     contextJson = compactedContext;
                     execution.setContextJson(contextJson);
-                    plannerInput = Executor().plannerInput(tools_, session, request, contextJson, lastObservation);
+                    plannerInput = Executor().plannerInput(tools_, skills_, session, request, contextJson, lastObservation);
                     callbacks_.emitEvent(
                         "runtime.context.compaction.prompt_too_long_recovered",
                         "{\"attempt\":" + std::to_string(modelAttempt) +
@@ -1071,9 +1257,66 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             continue;
         }
         if (type == "tool_use") {
+            const std::string toolName = stringField(fields, "tool_name");
+            if (session.ignoreInternalToolCalls() && isInternalRuntimeToolName(toolName)) {
+                callbacks_.emitEvent(
+                    "internal_tool_ignored",
+                    "{\"tool_name\":" + jsonString(toolName) +
+                        ",\"step_index\":" + std::to_string(session.stepCount()) +
+                        ",\"reason\":\"evaluation_internal_tool\"}"
+                );
+                lastObservation = session.lastObservationJson();
+                execution.setLastObservationJson(lastObservation);
+                continue;
+            }
+            if (toolName == "runtime.skill_discovery") {
+                std::string parameters = rawField(fields, "parameters", "{}");
+                if (!preflightRuntimeBuiltinTool(session, callbacks_, tools_, toolName, parameters)) {
+                    lastObservation = session.lastObservationJson();
+                    execution.setLastObservationJson(lastObservation);
+                    if (session.isTerminated() || session.isPaused()) {
+                        break;
+                    }
+                    continue;
+                }
+                const std::string discovery = discoverSkills(parameters.c_str());
+                lastObservation = session.recordObservation("runtime.skill_discovery", "succeeded", discovery, "", false, true);
+                execution.setLastObservationJson(lastObservation);
+                events.emitControl("skill_discovery_completed", lastObservation);
+                callbacks_.recordHistory("observation_created", lastObservation);
+                continue;
+            }
+            if (toolName == "runtime.mcp_discovery") {
+                std::string parameters = rawField(fields, "parameters", "{}");
+                if (!preflightRuntimeBuiltinTool(session, callbacks_, tools_, toolName, parameters)) {
+                    lastObservation = session.lastObservationJson();
+                    execution.setLastObservationJson(lastObservation);
+                    if (session.isTerminated() || session.isPaused()) {
+                        break;
+                    }
+                    continue;
+                }
+                std::map<std::string, JsonField> parameterFields;
+                parseFieldsOrEmpty(parameters.empty() ? "{}" : parameters, parameterFields);
+                const std::string discovery = discoverMCPTools(parameters.c_str());
+                const bool includeSchemas = boolField(parameterFields, "include_schemas", boolField(parameterFields, "includeSchemas", true));
+                const bool explicitSelect = lowercased(stringField(parameterFields, "query")).rfind("select:", 0) == 0;
+                if (includeSchemas || explicitSelect) {
+                    std::map<std::string, JsonField> discoveryFields;
+                    if (parseFieldsOrEmpty(discovery, discoveryFields)) {
+                        const std::vector<std::string> names = namesFromMatchesJson(rawField(discoveryFields, "matches", "[]"));
+                        callbacks_.trace("mcp_loading.loaded", loadDeferredToolsByName(session, names));
+                    }
+                }
+                lastObservation = session.recordObservation("runtime.mcp_discovery", "succeeded", discovery, "", false, true);
+                execution.setLastObservationJson(lastObservation);
+                events.emitControl("mcp_discovery_completed", lastObservation);
+                callbacks_.recordHistory("observation_created", lastObservation);
+                continue;
+            }
             ToolExecutor(tools_, callbacks_, replayController).runToolCall(
                 session,
-                stringField(fields, "tool_name"),
+                toolName,
                 rawField(fields, "parameters", "{}"),
                 boolField(fields, "requires_confirmation", false)
             );
@@ -1105,6 +1348,13 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
             continue;
         }
         if (type == "multi_tool_use") {
+            if (!session.multiToolUseEnabled()) {
+                const std::string error = "multi_tool_use is disabled by runtime configuration";
+                lastObservation = session.recordObservation("multi_tool_use", "failed", "", error, false, false);
+                callbacks_.emitEvent("multi_tool_use_call_failed", "{\"error\":" + jsonString(error) + "}");
+                execution.setLastObservationJson(lastObservation);
+                continue;
+            }
             ToolExecutor(tools_, callbacks_, replayController).runMultiToolCall(session, rawField(fields, "tool_calls", "[]"));
             lastObservation = session.lastObservationJson();
             execution.setLastObservationJson(lastObservation);

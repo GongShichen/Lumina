@@ -70,6 +70,7 @@ final class LuminaInAppBenchmarkRunner {
             let (result, observedTimings) = await runSingleTask(task, environment: taskEnvironment, completed: results.count, total: tasks.count, traceLogger: traceLogger, progress: progress)
             let modelMetrics = services.modelMetrics.metrics(after: metricsMark)
             let observedToolResults = benchmarkToolResults(from: result)
+                .filter { !Self.isInternalRuntimeTool($0.toolName) }
             let toolAttempts = observedToolResults.map(\.toolName)
             let toolReplays = observedToolResults.filter { $0.output["replayed"]?.boolValue == true }.map(\.toolName)
             let executedResults = observedToolResults.filter { $0.output["replayed"]?.boolValue != true }
@@ -131,6 +132,7 @@ final class LuminaInAppBenchmarkRunner {
                 "status": taskResult.status,
                 "outcomePassed": "\(taskResult.outcomePassed)",
                 "strictToolPassed": "\(taskResult.strictToolPassed)",
+                "orderedToolMatch": "\(taskResult.orderedToolMatch)",
                 "expectedToolsEffective": task.expectedTools.joined(separator: ","),
                 "missingTools": missingTools.joined(separator: ","),
                 "unexpectedTools": unexpectedTools.joined(separator: ","),
@@ -205,6 +207,10 @@ final class LuminaInAppBenchmarkRunner {
         return diagnostics.joined(separator: "; ")
     }
 
+    private static func isInternalRuntimeTool(_ toolName: String) -> Bool {
+        toolName.hasPrefix("runtime.")
+    }
+
     private static let runtimeFailureTerminationReasons: Set<String> = [
         "cannot-complete",
         "budget",
@@ -265,6 +271,17 @@ final class LuminaInAppBenchmarkRunner {
                     completed: completed,
                     total: total,
                     latestTool: call.toolName
+                ))
+            }
+            if case let .multiActionProposed(calls) = event {
+                let names = calls.map(\.toolName).joined(separator: " -> ")
+                latestActivity = names
+                progress(LuminaBenchmarkSnapshot(
+                    state: .running,
+                    currentTask: "\(task.text) · multi-action \(names)",
+                    completed: completed,
+                    total: total,
+                    latestTool: names
                 ))
             }
             if case let .confirmationRequired(call) = event {
@@ -328,6 +345,10 @@ final class LuminaInAppBenchmarkRunner {
             fields["toolName"] = call.toolName
             fields["arguments"] = call.arguments.compactModelTraceValue.truncated(to: 1_200)
             await traceLogger.record("action_proposed", fields: fields)
+        case let .multiActionProposed(calls):
+            fields["toolNames"] = calls.map(\.toolName).joined(separator: ",")
+            fields["callCount"] = "\(calls.count)"
+            await traceLogger.record("multi_action_proposed", fields: fields)
         case let .toolStarted(call):
             fields["toolName"] = call.toolName
             fields["arguments"] = call.arguments.compactModelTraceValue.truncated(to: 1_200)
@@ -396,31 +417,7 @@ final class LuminaInAppBenchmarkRunner {
     }
 
     private func selectedModelURL(for selection: LuminaLocalModelSelection) -> URL? {
-        let environmentKeys: [String]
-        let bundleCandidates: [String]
-        switch selection {
-        case .original:
-            environmentKeys = ["LUMINA_MINICPMV46_ORIGINAL_MODEL", "LUMINA_MINICPMV46_MODEL"]
-            bundleCandidates = ["MiniCPMV46ReActModel", "MiniCPMV46Model"]
-        case .agenticDPO:
-            environmentKeys = ["LUMINA_MINICPMV46_AGENTIC_DPO_MODEL"]
-            bundleCandidates = ["MiniCPMV46ReActModel-AgenticSFTDPO-Q8", "MiniCPMV46AgenticDPOReActModel", "MiniCPMV46AgenticDPOModel"]
-        }
-
-        for key in environmentKeys {
-            guard let value = ProcessInfo.processInfo.environment[key], !value.isEmpty else { continue }
-            let url = URL(fileURLWithPath: value)
-            if FileManager.default.fileExists(atPath: url.path) {
-                return url
-            }
-        }
-        for candidate in bundleCandidates {
-            if let url = Bundle.main.resourceURL?.appendingPathComponent("Models/\(candidate)"),
-               FileManager.default.fileExists(atPath: url.path) {
-                return url
-            }
-        }
-        return nil
+        selection.resolvedMiniCPMV46ModelURL()
     }
 
     private func writeReport(
@@ -455,7 +452,7 @@ final class LuminaInAppBenchmarkRunner {
     private func markdown(_ report: LuminaBenchmarkReport) -> String {
         let rows = report.results.prefix(200).map { result in
             let outcome = result.outcomePassed ? "pass" : result.outcomeFailures.joined(separator: "; ").truncated(to: 120)
-            let contract = result.runtimeMetrics.contractFailureCount == 0 ? "pass" : "\(result.runtimeMetrics.contractFailureCount)"
+            let contract = Self.contractSummary(result.runtimeMetrics)
             return "| \(result.taskID) | \(result.status) | \(result.outcomePassed ? "yes" : "no") | \(result.strictToolPassed ? "yes" : "no") | \(result.runtimeStatus) | \(result.terminationReason ?? "") | \(outcome) | \(contract) | \(format(result.f1)) | \(Int(result.activeRuntimeMilliseconds))ms | \(Int(result.wallClockMilliseconds))ms | \(result.toolAttemptCount) | \(result.toolExecutionCount) | \(result.toolReplayCount) | \(result.successfulTools.joined(separator: ", ")) | \(result.missingTools.joined(separator: ", ")) | \(result.unexpectedTools.joined(separator: ", ")) | \(result.failedTools.joined(separator: ", ")) | \(result.modelMetrics.count) |"
         }.joined(separator: "\n")
         return """
@@ -471,7 +468,8 @@ final class LuminaInAppBenchmarkRunner {
         - Succeeded: \(report.succeededCount)
         - Failed: \(report.failedCount)
         - Pass@1: \(report.passAt1Count)/\(report.completedCount) (\(format(report.passAt1Rate))) single-sample outcome pass
-        - Strict tool pass: \(report.strictToolPassCount)/\(report.completedCount) (\(format(report.strictToolPassRate))) exact tools with no failed/replayed calls
+        - Strict tool pass: \(report.strictToolPassCount)/\(report.completedCount) (\(format(report.strictToolPassRate))) ordered expected tools with no unexpected/failed/replayed calls
+        - Ordered tool match: \(report.orderedToolMatchCount)/\(report.completedCount) (\(format(report.orderedToolMatchRate)))
         - Tool execution@1: \(report.toolExecutionAt1Count)/\(toolRequiredTaskCount(report)) (\(format(report.toolExecutionAt1Rate)))
         - Semantic pass: \(report.semanticPassedCount)/\(report.completedCount) (\(format(report.semanticPassRate)))
         - Exact tool match: \(format(report.exactToolMatch))
@@ -494,9 +492,19 @@ final class LuminaInAppBenchmarkRunner {
         - Schema validation failures: \(report.schemaValidationFailureCount)
         - Model-owned observation rejects: \(report.modelOwnedObservationRejectCount)
         - Unknown tool rejects: \(report.unknownToolRejectCount)
+        - MiniCPM validated generations: \(report.modelGenerationValidatedCount)
+        - MiniCPM special-token streams: \(report.modelStreamContainsSpecialTokensCount)
+        - Host canonical steps: \(report.hostReturnedCanonicalStepCount)
+        - Core special-token extracted steps: \(report.coreExtractedSpecialTokenStepCount)
+        - Canonical tool/result steps: \(report.canonicalToolUseStepCount) / \(report.canonicalResultStepCount)
+        - Legacy thought/tool_response schema observed: \(report.legacyOutputSchemaObservedCount)
         - Retry / fallback count: \(report.retryCount) / \(report.fallbackCount)
         - Runtime observations / results / hook events: \(report.runtimeObservationCount) / \(report.resultGeneratedCount) / \(report.hookEventCount)
         - Tool failures: \(report.toolFailureCount)
+        - Multi-tool generations / calls: \(report.multiToolGenerationCount) / \(report.multiToolCallCount)
+        - Multi-tool partial failures: \(report.multiToolPartialFailureCount)
+        - Internal runtime calls ignored: \(report.internalToolIgnoredCount)
+        - Side-effect batch stops: \(report.sideEffectBatchStopCount)
         - Deferred tool schema tokens saved estimate: \(report.schemaTokensSavedEstimate)
         - Tool discovery hit rate: \(format(report.toolDiscoveryHitRate))
         - Deferred unknown tool rate: \(format(report.deferredUnknownToolRate))
@@ -526,6 +534,25 @@ final class LuminaInAppBenchmarkRunner {
 
     private func toolRequiredTaskCount(_ report: LuminaBenchmarkReport) -> Int {
         report.results.filter { !$0.expectedTools.isEmpty }.count
+    }
+
+    private static func contractSummary(_ metrics: LuminaBenchmarkRuntimeMetrics) -> String {
+        var parts: [String] = []
+        if metrics.contractFailureCount == 0 {
+            parts.append("pass")
+        } else {
+            parts.append("fail=\(metrics.contractFailureCount)")
+        }
+        if metrics.modelStreamContainsSpecialTokensCount > 0 {
+            parts.append("special=\(metrics.modelStreamContainsSpecialTokensCount)")
+        }
+        if metrics.hostReturnedCanonicalStepCount > 0 {
+            parts.append("canonical=\(metrics.hostReturnedCanonicalStepCount)")
+        }
+        if metrics.legacyOutputSchemaObservedCount > 0 {
+            parts.append("legacy=\(metrics.legacyOutputSchemaObservedCount)")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private func optionalMilliseconds(_ value: Double?) -> String {
@@ -591,8 +618,7 @@ private enum LuminaBenchmarkOutcomeEvaluator {
             "无法完成",
             "无法继续",
             "执行预算",
-            "没有生成result",
-            "没有生成 result",
+            "没有生成最终回答",
             "不能重复",
             "缺少",
             "未找到",

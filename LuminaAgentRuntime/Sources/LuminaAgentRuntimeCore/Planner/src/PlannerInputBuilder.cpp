@@ -8,15 +8,15 @@
 
 namespace LuminaAgent {
 
-PlannerInputBuilder::PlannerInputBuilder(const ToolRegistry &tools, const RuntimeSession &session)
-    : tools_(tools), session_(session) {}
+PlannerInputBuilder::PlannerInputBuilder(const ToolRegistry &tools, const SkillRegistry &skills, const RuntimeSession &session)
+    : tools_(tools), skills_(skills), session_(session) {}
 
 std::string PlannerInputBuilder::build(
     const std::string &request,
     const std::string &context,
     const std::string &lastObservation
 ) const {
-    return TaskEnvelopeBuilder(tools_, session_).build(request, context, lastObservation);
+    return TaskEnvelopeBuilder(tools_, skills_, session_).build(request, context, lastObservation);
 }
 
 } // namespace LuminaAgent

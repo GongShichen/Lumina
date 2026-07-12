@@ -5,6 +5,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
     public var kind: LuminaReActStepKind
     public var thought: String?
     public var action: LuminaToolCall?
+    public var toolCalls: [LuminaToolCall]
     public var observation: LuminaReActObservation?
     public var resultMarkdown: String?
     public var elapsedMilliseconds: Double
@@ -14,6 +15,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
         kind: LuminaReActStepKind,
         thought: String? = nil,
         action: LuminaToolCall? = nil,
+        toolCalls: [LuminaToolCall] = [],
         observation: LuminaReActObservation? = nil,
         resultMarkdown: String? = nil,
         elapsedMilliseconds: Double = 0
@@ -22,6 +24,7 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
         self.kind = kind
         self.thought = thought
         self.action = action
+        self.toolCalls = toolCalls
         self.observation = observation
         self.resultMarkdown = resultMarkdown
         self.elapsedMilliseconds = elapsedMilliseconds
@@ -33,6 +36,10 @@ public struct LuminaReActStep: Codable, Hashable, Identifiable, Sendable {
 
     public static func action(thought: String, call: LuminaToolCall, elapsedMilliseconds: Double = 0) -> LuminaReActStep {
         LuminaReActStep(kind: .action, thought: thought, action: call, elapsedMilliseconds: elapsedMilliseconds)
+    }
+
+    public static func multiAction(thought: String, calls: [LuminaToolCall], elapsedMilliseconds: Double = 0) -> LuminaReActStep {
+        LuminaReActStep(kind: .multiAction, thought: thought, toolCalls: calls, elapsedMilliseconds: elapsedMilliseconds)
     }
 
     public static func observation(_ value: LuminaReActObservation, elapsedMilliseconds: Double = 0) -> LuminaReActStep {

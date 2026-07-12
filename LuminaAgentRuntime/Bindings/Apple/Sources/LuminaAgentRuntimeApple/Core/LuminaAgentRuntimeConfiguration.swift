@@ -22,6 +22,10 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
     public var toolLoadingMode: String
     public var toolLoadingThresholdRatio: Double
     public var checkpointPolicy: LuminaRuntimeCheckpointPolicy
+    public var yoloMode: Bool
+    public var multiToolUseEnabled: Bool
+    public var continueReadOnlyMultiToolFailures: Bool
+    public var ignoreInternalToolCalls: Bool
 
     public init(
         maximumToolCalls: Int,
@@ -44,7 +48,11 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         toolSchemaDisclosureProfile: LuminaToolSchemaDisclosureProfile = .compact,
         toolLoadingMode: String = "auto",
         toolLoadingThresholdRatio: Double = 0.10,
-        checkpointPolicy: LuminaRuntimeCheckpointPolicy = .none
+        checkpointPolicy: LuminaRuntimeCheckpointPolicy = .none,
+        yoloMode: Bool = false,
+        multiToolUseEnabled: Bool = true,
+        continueReadOnlyMultiToolFailures: Bool = true,
+        ignoreInternalToolCalls: Bool = false
     ) {
         self.maximumToolCalls = maximumToolCalls
         self.maximumReActIterations = maximumReActIterations
@@ -67,5 +75,9 @@ public struct LuminaAgentRuntimeConfiguration: Codable, Hashable, Sendable {
         self.toolLoadingMode = toolLoadingMode
         self.toolLoadingThresholdRatio = toolLoadingThresholdRatio
         self.checkpointPolicy = checkpointPolicy
+        self.yoloMode = yoloMode
+        self.multiToolUseEnabled = multiToolUseEnabled
+        self.continueReadOnlyMultiToolFailures = continueReadOnlyMultiToolFailures
+        self.ignoreInternalToolCalls = ignoreInternalToolCalls
     }
 }

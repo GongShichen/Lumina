@@ -378,7 +378,7 @@ enum AppToolFactory {
             try cancellation.checkCancellation()
             let requested = arguments.string("path") ?? arguments.string("filename") ?? "LuminaTest-report.md"
             let text = requested.localizedCaseInsensitiveContains("report")
-                ? "LuminaTest report: benchmark covers real tool selection, XML ReAct formatting, and local runtime execution."
+                ? "LuminaTest report: benchmark covers real tool selection, MiniCPM tool-call extraction, and local runtime execution."
                 : "LuminaTest daily note: today completed isolated benchmark fixture validation."
             return LuminaToolResult(
                 callID: UUID(),

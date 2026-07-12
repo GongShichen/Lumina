@@ -93,10 +93,14 @@ final class AgentAppServices: ObservableObject {
 
     private func evaluationRuntimeConfiguration() -> LuminaAgentRuntimeConfiguration {
         var configuration = environment.runtimeConfiguration
+        configuration.yoloMode = true
         configuration.stopOnToolFailure = false
         configuration.maximumConsecutiveReplayObservations = 3
         configuration.toolSchemaDisclosureProfile = .full
         configuration.toolLoadingMode = "direct"
+        configuration.multiToolUseEnabled = true
+        configuration.continueReadOnlyMultiToolFailures = true
+        configuration.ignoreInternalToolCalls = true
         return configuration
     }
 

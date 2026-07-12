@@ -151,7 +151,7 @@ std::string ContextManager::loadProgressiveFollowUpContext(
 ) const {
     std::map<std::string, JsonField> reasoningFields;
     parseFieldsOrEmpty(reasoningStepJson, reasoningFields);
-    const std::string query = stringField(reasoningFields, "thought", requestTextForQuery(requestJson));
+    const std::string query = stringField(reasoningFields, "thinking", requestTextForQuery(requestJson));
     const std::string searchRequest = contextLoadingRequestJson(session_, "search", requestJson, query, reasoningStepJson);
     const std::string searchResponse = callbacks.callContextLoadingPlugin(searchRequest);
     std::map<std::string, JsonField> searchFields;

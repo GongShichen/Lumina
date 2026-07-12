@@ -7,14 +7,14 @@ public enum LuminaReActStepParser {
         let dto = try JSONDecoder().decode(ReActStepDTO.self, from: data)
         let schemasByName = Dictionary(uniqueKeysWithValues: availableTools.map { ($0.name, $0) })
         let stepType = dto.type.lowercased()
-        let thought = dto.thought ?? ""
+        let thinking = dto.thinking ?? ""
 
         switch stepType {
-        case "thought", "reasoning":
-            guard dto.thought != nil else {
-                throw LuminaReActParserError.invalidSchema("thought steps require a thought string.")
+        case "reasoning":
+            guard dto.thinking != nil else {
+                throw LuminaReActParserError.invalidSchema("reasoning steps require a thinking string.")
             }
-            return .thought(thought)
+            return .thought(thinking)
         case "tool_use":
             guard let toolName = dto.toolName,
                   !toolName.isEmpty
@@ -23,18 +23,31 @@ public enum LuminaReActStepParser {
             }
             let schemaRequiresConfirmation = schemasByName[toolName].map { $0.sideEffect != .readOnly } ?? false
             return .action(
-                thought: thought,
+                thought: thinking,
                 call: LuminaToolCall(
                     toolName: toolName,
                     arguments: dto.parameters ?? [:],
                     requiresConfirmation: (dto.requiresConfirmation ?? false) || schemaRequiresConfirmation
                 )
             )
+        case "multi_tool_use":
+            guard let toolCalls = dto.toolCalls, !toolCalls.isEmpty else {
+                throw LuminaReActParserError.invalidSchema("multi_tool_use requires a non-empty tool_calls array.")
+            }
+            let calls = toolCalls.map { toolCall in
+                let schemaRequiresConfirmation = schemasByName[toolCall.toolName].map { $0.sideEffect != .readOnly } ?? false
+                return LuminaToolCall(
+                    toolName: toolCall.toolName,
+                    arguments: toolCall.parameters ?? [:],
+                    requiresConfirmation: (toolCall.requiresConfirmation ?? false) || schemaRequiresConfirmation
+                )
+            }
+            return .multiAction(thought: thinking, calls: calls)
         case "result":
             guard let content = dto.content else {
                 throw LuminaReActParserError.invalidSchema("result steps require a content string.")
             }
-            return .result(content, thought: thought)
+            return .result(content, thought: thinking)
         case "ask_user":
             guard schemasByName["ask_user"] != nil else {
                 throw LuminaReActParserError.invalidAction
@@ -48,11 +61,11 @@ public enum LuminaReActStepParser {
                 "allow_custom_answer": (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["allow_custom_answer"] as? Bool ?? true
             ])
             let value = (try? JSONDecoder().decode([String: LuminaJSONValue].self, from: questionData)) ?? [:]
-            return .action(thought: thought, call: LuminaToolCall(toolName: "ask_user", arguments: value))
+            return .action(thought: thinking, call: LuminaToolCall(toolName: "ask_user", arguments: value))
         case "cannot_complete":
             let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             let reason = object?["reason"] as? String ?? "无法完成。"
-            return .result("### 无法完成\n\n\(reason)", thought: thought)
+            return .result("### 无法完成\n\n\(reason)", thought: thinking)
         default:
             throw LuminaReActParserError.invalidStepType(stepType)
         }
@@ -68,7 +81,7 @@ public enum LuminaReActStepParser {
 
         let topLevelKeys = Set(object.keys)
         let allowedTopLevelKeys = Set([
-            "schema_version", "step_id", "type", "thought", "requires_followup",
+            "schema_version", "step_id", "type", "thinking", "requires_followup",
             "confidence", "needs_more_context", "tool_name", "parameters",
             "expected_observation", "requires_confirmation", "tool_calls",
             "query", "category", "max_results", "include_schemas",
@@ -82,9 +95,9 @@ public enum LuminaReActStepParser {
         }
 
         switch type.lowercased() {
-        case "thought", "reasoning":
-            guard object["thought"] is String else {
-                throw LuminaReActParserError.invalidSchema("thought requires a string thought field.")
+        case "reasoning":
+            guard object["thinking"] is String else {
+                throw LuminaReActParserError.invalidSchema("reasoning requires a string thinking field.")
             }
         case "tool_use":
             guard object["tool_name"] is String else {
@@ -95,6 +108,21 @@ public enum LuminaReActStepParser {
             }
             if let value = object["requires_confirmation"], !(value is Bool) {
                 throw LuminaReActParserError.invalidSchema("requires_confirmation must be a boolean when present.")
+            }
+        case "multi_tool_use":
+            guard let toolCalls = object["tool_calls"] as? [Any], !toolCalls.isEmpty else {
+                throw LuminaReActParserError.invalidSchema("multi_tool_use requires a non-empty tool_calls array.")
+            }
+            for toolCall in toolCalls {
+                guard let object = toolCall as? [String: Any], object["tool_name"] is String else {
+                    throw LuminaReActParserError.invalidSchema("multi_tool_use tool_calls require tool_name strings.")
+                }
+                if let parameters = object["parameters"], !(parameters is [String: Any]) {
+                    throw LuminaReActParserError.invalidSchema("multi_tool_use parameters must be objects.")
+                }
+                if let value = object["requires_confirmation"], !(value is Bool) {
+                    throw LuminaReActParserError.invalidSchema("multi_tool_use requires_confirmation must be boolean.")
+                }
             }
         case "result":
             guard object["content"] is String else {

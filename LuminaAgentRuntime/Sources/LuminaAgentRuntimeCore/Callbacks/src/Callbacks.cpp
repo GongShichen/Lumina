@@ -255,15 +255,24 @@ struct StreamingEmissionState {
     int outputTokenCount = 0;
     long long timeToFirstTokenMilliseconds = -1;
     long long chunkCount = 0;
+    bool streamContainsSpecialTokens = false;
 };
 
 static bool emitStreamingModelChunk(const char *chunkJson, void *context) {
     auto state = static_cast<StreamingEmissionState *>(context);
     if (state != nullptr && state->callbacks != nullptr && chunkJson != nullptr) {
         state->chunkCount += 1;
+        const std::string chunkText(chunkJson);
+        if (chunkText.find("<think") != std::string::npos || chunkText.find("<tool_call") != std::string::npos || chunkText.find("<function=") != std::string::npos) {
+            state->streamContainsSpecialTokens = true;
+        }
         std::map<std::string, JsonField> fields;
-        if (parseFieldsOrEmpty(chunkJson, fields)) {
-            state->outputTokenCount += std::max(0, intField(fields, "tokenCount", intField(fields, "outputTokens", 0)));
+        if (parseFieldsOrEmpty(chunkText, fields)) {
+            if (fields.find("tokenCount") != fields.end()) {
+                state->outputTokenCount += std::max(0, intField(fields, "tokenCount", 0));
+            } else if (fields.find("outputTokens") != fields.end()) {
+                state->outputTokenCount = std::max(state->outputTokenCount, intField(fields, "outputTokens", 0));
+            }
         }
         if (!state->sawFirstToken) {
             state->sawFirstToken = true;
@@ -288,7 +297,8 @@ StreamingModelResult RuntimeCallbacks::callStreamingModelWithMetrics(const std::
             text,
             static_cast<int>(std::max<size_t>(1, text.size() / 4)),
             -1,
-            text.empty() ? 0 : 1
+            text.empty() ? 0 : 1,
+            text.find("<think") != std::string::npos || text.find("<tool_call") != std::string::npos || text.find("<function=") != std::string::npos
         };
     }
     StreamingEmissionState state{
@@ -297,7 +307,8 @@ StreamingModelResult RuntimeCallbacks::callStreamingModelWithMetrics(const std::
         false,
         0,
         -1,
-        0
+        0,
+        false
     };
     const std::string text = consumeCString(callback(
         plannerInput.c_str(),
@@ -309,7 +320,8 @@ StreamingModelResult RuntimeCallbacks::callStreamingModelWithMetrics(const std::
         text,
         state.outputTokenCount > 0 ? state.outputTokenCount : static_cast<int>(std::max<size_t>(1, text.size() / 4)),
         state.timeToFirstTokenMilliseconds,
-        state.chunkCount
+        state.chunkCount,
+        state.streamContainsSpecialTokens || text.find("<think") != std::string::npos || text.find("<tool_call") != std::string::npos || text.find("<function=") != std::string::npos
     };
 }
 
@@ -502,7 +514,7 @@ static RuntimeRetryDecision defaultRetryDecision(const std::string &retryRequest
         return decision;
     }
     if (stage == "tool_execution" && !toolRetryAllowed(fields)) {
-        decision.reason = "tool retry is not allowed by idempotency policy";
+        decision.reason = "idempotency policy prevents tool retry";
         return decision;
     }
     decision.action = "retry";

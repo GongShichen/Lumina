@@ -164,35 +164,11 @@ bool ensure_model_loaded(const std::string & model_path, std::string & error) {
     return true;
 }
 
-bool prompt_requests_xml_react(const std::string & prompt) {
-    return prompt.find("Lumina XML ReAct step") != std::string::npos ||
-           prompt.find("XML ReAct step") != std::string::npos ||
-           prompt.find("XML-tag ReAct step") != std::string::npos ||
-           prompt.find("FIRST BYTES MUST BE <thought>") != std::string::npos ||
-           prompt.find("CRITICAL OUTPUT CONTRACT") != std::string::npos ||
-           prompt.find("xml_tags") != std::string::npos ||
-           prompt.find("<tool_use") != std::string::npos ||
-           prompt.find("<result>") != std::string::npos ||
-           prompt.find("<ask_user>") != std::string::npos ||
-           prompt.find("<cannot_complete>") != std::string::npos;
-}
-
 std::string chat_wrapped_prompt(const std::string & prompt) {
     if (prompt.find("<|im_start|>") != std::string::npos) {
         return prompt;
     }
-    if (prompt_requests_xml_react(prompt)) {
-        return "<|im_start|>system\n"
-               "You are Lumina, an on-device XML ReAct agent. FIRST BYTES MUST BE <thought>. "
-               "Output exactly one valid Lumina XML ReAct step and no prose, markdown, JSON object, or <think> block.\n"
-               "<|im_end|>\n"
-               "<|im_start|>user\n" + prompt + "\n<|im_end|>\n"
-               "<|im_start|>assistant\n";
-    }
-    return "<|im_start|>system\n"
-           "You are Lumina, an on-device ReAct agent. Output exactly one compact JSON object and no prose.\n"
-           "<|im_end|>\n"
-           "<|im_start|>user\n" + prompt + "\n<|im_end|>\n"
+    return "<|im_start|>user\n" + prompt + "\n<|im_end|>\n"
            "<|im_start|>assistant\n";
 }
 
@@ -224,182 +200,15 @@ std::string token_piece(const llama_vocab * vocab, llama_token token) {
     return std::string(buffer, static_cast<size_t>(n));
 }
 
-bool probably_complete_json(const std::string & text) {
-    int depth = 0;
-    bool in_string = false;
-    bool escaped = false;
-    bool saw_open = false;
-    for (char c : text) {
-        if (escaped) {
-            escaped = false;
-            continue;
-        }
-        if (c == '\\' && in_string) {
-            escaped = true;
-            continue;
-        }
-        if (c == '"') {
-            in_string = !in_string;
-            continue;
-        }
-        if (in_string) {
-            continue;
-        }
-        if (c == '{') {
-            saw_open = true;
-            depth += 1;
-        } else if (c == '}') {
-            depth -= 1;
-            if (saw_open && depth == 0) {
-                return true;
-            }
-        }
-    }
-    return false;
+bool is_minicpm_react_generation(const std::string & prompt) {
+    return prompt.find("minicpm_v46_tool_calls") != std::string::npos ||
+           prompt.find("<tool_call>") != std::string::npos ||
+           prompt.find("<function=") != std::string::npos;
 }
 
-bool likely_json_started(const std::string & text) {
-    return text.find('{') != std::string::npos;
-}
-
-bool is_schema_step_generation(const std::string & prompt) {
-    return prompt.find("ReAct step schema") != std::string::npos ||
-           prompt.find("\"type\":\"tool_use\"") != std::string::npos ||
-           prompt.find("\"type\":\"result\"") != std::string::npos;
-}
-
-bool is_xml_step_generation(const std::string & prompt) {
-    return prompt_requests_xml_react(prompt);
-}
-
-bool starts_with_json_object(const std::string & text) {
-    const auto first = std::find_if_not(text.begin(), text.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    return first != text.end() && *first == '{';
-}
-
-bool starts_with_prefix(const std::string & text, const std::string & prefix) {
-    return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
-}
-
-std::string trim_left_copy(const std::string & text) {
-    const auto first = std::find_if_not(text.begin(), text.end(), [](unsigned char c) {
-        return std::isspace(c);
-    });
-    return first == text.end() ? "" : std::string(first, text.end());
-}
-
-std::string xml_step_search_region(const std::string & text) {
-    const std::string trimmed = trim_left_copy(text);
-    if (starts_with_prefix(trimmed, "<think") ||
-        trimmed.find("<tool_call") != std::string::npos ||
-        trimmed.find("<observation") != std::string::npos) {
-        return "";
-    }
-    return trimmed;
-}
-
-bool contains_complete_xml_step(const std::string & text) {
-    const std::string region = xml_step_search_region(text);
-    if (region.empty()) {
-        return false;
-    }
-    const std::pair<const char *, const char *> step_tags[] = {
-        {"<tool_use", "</tool_use>"},
-        {"<result>", "</result>"},
-        {"<ask_user>", "</ask_user>"},
-        {"<cannot_complete>", "</cannot_complete>"}
-    };
-    for (const auto & tag : step_tags) {
-        const size_t open = region.find(tag.first);
-        if (open == std::string::npos) {
-            continue;
-        }
-        const size_t close = region.find(tag.second, open);
-        if (close != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::string expected_unclosed_xml_step_close(const std::string & text) {
-    const std::string region = xml_step_search_region(text);
-    if (region.empty()) {
-        return "";
-    }
-    const std::pair<const char *, const char *> step_tags[] = {
-        {"<tool_use", "</tool_use>"},
-        {"<result>", "</result>"},
-        {"<ask_user>", "</ask_user>"},
-        {"<cannot_complete>", "</cannot_complete>"}
-    };
-    size_t best_open = std::string::npos;
-    const char * best_close = nullptr;
-    for (const auto & tag : step_tags) {
-        const size_t open = region.rfind(tag.first);
-        if (open == std::string::npos) {
-            continue;
-        }
-        if (region.find(tag.second, open) != std::string::npos) {
-            continue;
-        }
-        if (best_open == std::string::npos || open > best_open) {
-            best_open = open;
-            best_close = tag.second;
-        }
-    }
-    return best_close == nullptr ? "" : std::string(best_close);
-}
-
-bool append_xml_eog_closing_repair(std::string & text) {
-    const std::string close = expected_unclosed_xml_step_close(text);
-    if (close.empty()) {
-        return false;
-    }
-    for (size_t prefix = close.size(); prefix > 0; --prefix) {
-        if (text.size() >= prefix && text.compare(text.size() - prefix, prefix, close, 0, prefix) == 0) {
-            text += close.substr(prefix);
-            return true;
-        }
-    }
-    return false;
-}
-
-std::string lowercase_ascii(std::string text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return text;
-}
-
-bool ends_with_forbidden_xml_prefix(const std::string & lowered) {
-    static const std::vector<std::string> forbidden = {
-        "<think", "</think", "<tool_call", "</tool_call", "<observation", "</observation"
-    };
-    for (const std::string & tag : forbidden) {
-        for (size_t length = 4; length < tag.size(); ++length) {
-            if (lowered.size() >= length &&
-                lowered.compare(lowered.size() - length, length, tag, 0, length) == 0) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-bool violates_forbidden_xml_contract(const std::string & candidate) {
-    const std::string lowered = lowercase_ascii(candidate);
-    static const std::vector<std::string> forbidden = {
-        "<think", "</think>", "<tool_call", "</tool_call>", "<observation", "</observation>"
-    };
-    for (const std::string & tag : forbidden) {
-        if (lowered.find(tag) != std::string::npos) {
-            return true;
-        }
-    }
-    return ends_with_forbidden_xml_prefix(lowered);
+bool contains_complete_minicpm_tool_call(const std::string & text) {
+    const size_t open = text.find("<tool_call>");
+    return open != std::string::npos && text.find("</tool_call>", open) != std::string::npos;
 }
 
 } // namespace
@@ -443,8 +252,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     }
     printf("[Lumina][C++] Tokens count: %zu\n", prompt_tokens.size());
 
-    const bool xml_step = is_xml_step_generation(raw_prompt);
-    const bool schema_step = xml_step || is_schema_step_generation(raw_prompt);
+    const bool react_transport_step = is_minicpm_react_generation(raw_prompt);
     const int requested_max_output_tokens = max_output_tokens;
     if (static_cast<int>(prompt_tokens.size()) >= context_length) {
         return copy_c_string(make_response(
@@ -459,10 +267,10 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
             0,
             "",
             "MiniCPM-V prompt tokens exceed the configured context window; compact context before decoding.",
-            schema_step
+            react_transport_step
         ));
     }
-    const int effective_max_output_tokens = schema_step
+    const int effective_max_output_tokens = react_transport_step
         ? std::min(std::max(max_output_tokens, 128), 768)
         : std::min(max_output_tokens, std::max(256, context_length - static_cast<int>(prompt_tokens.size()) - safety_margin_tokens));
     const int active_context_length = std::min(
@@ -490,7 +298,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     llama_context * ctx = llama_init_from_model(g_model, ctx_params);
     if (ctx == nullptr) {
         printf("[Lumina][C++] Failed to create llama context.\n");
-        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context.", schema_step));
+        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context.", react_transport_step));
     }
     printf("[Lumina][C++] Llama context created with n_ctx: %u\n", ctx_params.n_ctx);
 
@@ -515,13 +323,9 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     double ttft_ms = -1;
     auto generation_start = std::chrono::steady_clock::now();
 
-    int tokens_after_first_json_char = 0;
     for (int i = 0; i < effective_max_output_tokens; ++i) {
         llama_token token = llama_sampler_sample(sampler, ctx, -1);
         if (llama_vocab_is_eog(vocab, token)) {
-            if (xml_step && append_xml_eog_closing_repair(output) && contains_complete_xml_step(output)) {
-                break;
-            }
             break;
         }
         llama_sampler_accept(sampler, token);
@@ -531,26 +335,11 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
         }
         output += token_piece(vocab, token);
         output_tokens += 1;
-        if (likely_json_started(output)) {
-            tokens_after_first_json_char += 1;
+        if (react_transport_step && contains_complete_minicpm_tool_call(output)) {
+            break;
         }
-        if (xml_step) {
-            if (contains_complete_xml_step(output)) {
-                break;
-            }
-            if (starts_with_json_object(output) && probably_complete_json(output)) {
-                break;
-            }
-        } else {
-            if (probably_complete_json(output)) {
-                break;
-            }
-            if (schema_step && !likely_json_started(output) && output_tokens >= 96) {
-                break;
-            }
-            if (schema_step && likely_json_started(output) && tokens_after_first_json_char >= 512) {
-                break;
-            }
+        if (output.find("<|im_end|>") != std::string::npos) {
+            break;
         }
         batch = llama_batch_get_one(&token, 1);
         decode_result = llama_decode(ctx, batch);
@@ -566,7 +355,7 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     llama_sampler_free(sampler);
     llama_free(ctx);
 
-    return copy_c_string(make_response(true, backend, static_cast<int>(prompt_tokens.size()), output_tokens, requested_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, "", schema_step));
+    return copy_c_string(make_response(true, backend, static_cast<int>(prompt_tokens.size()), output_tokens, requested_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, "", react_transport_step));
 }
 
 extern "C" void LuminaMiniCPMV46ExternalFreeCString(char * value) {

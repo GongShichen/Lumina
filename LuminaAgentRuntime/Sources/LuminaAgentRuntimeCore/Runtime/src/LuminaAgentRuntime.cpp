@@ -56,6 +56,41 @@ extern "C" char *LuminaAgentRuntimeRegisterDeferredToolMetadata(LuminaAgentRunti
     return LuminaAgent::copyCString(runtime->runtime.registerDeferredToolMetadata(metadata_json));
 }
 
+extern "C" char *LuminaAgentRuntimeRegisterSkillMetadata(LuminaAgentRuntimeRef *runtime, const char *skill_metadata_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.registerSkillMetadata(skill_metadata_json));
+}
+
+extern "C" char *LuminaAgentRuntimeDiscoverSkills(LuminaAgentRuntimeRef *runtime, const char *query_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.discoverSkills(query_json));
+}
+
+extern "C" char *LuminaAgentRuntimeDiscoverMCPTools(LuminaAgentRuntimeRef *runtime, const char *query_json) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.discoverMCPTools(query_json));
+}
+
+extern "C" char *LuminaAgentRuntimeSetYoloMode(LuminaAgentRuntimeRef *runtime, bool enabled) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(runtime->runtime.setYoloMode(enabled));
+}
+
+extern "C" char *LuminaAgentRuntimeGetYoloMode(LuminaAgentRuntimeRef *runtime) {
+    if (runtime == nullptr) {
+        return LuminaAgent::failureResponse("missing runtime.");
+    }
+    return LuminaAgent::copyCString(std::string("{\"ok\":true,\"yolo_mode\":") + (runtime->runtime.yoloMode() ? "true" : "false") + "}");
+}
+
 extern "C" void LuminaAgentRuntimeSetModelCallback(
     LuminaAgentRuntimeRef *runtime,
     LuminaAgentModelCallback callback,
@@ -479,6 +514,29 @@ extern "C" char *LuminaAgentRuntimeSessionStateSnapshot(LuminaAgentRuntimeSessio
     return LuminaAgent::copyCString(session->session.stateSnapshotJson());
 }
 
+extern "C" char *LuminaAgentRuntimeSessionSetYoloMode(LuminaAgentRuntimeSessionRef *session, bool enabled) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    session->session.setYoloMode(enabled);
+    return LuminaAgent::copyCString(std::string("{\"ok\":true,\"yolo_mode\":") + (enabled ? "true" : "false") + "}");
+}
+
+extern "C" char *LuminaAgentRuntimeSessionPermissionStateSnapshot(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    return LuminaAgent::copyCString(session->session.permissionStateJson());
+}
+
+extern "C" char *LuminaAgentRuntimeSessionClearPermissionGrants(LuminaAgentRuntimeSessionRef *session) {
+    if (session == nullptr) {
+        return LuminaAgent::failureResponse("missing session.");
+    }
+    session->session.clearPermissionGrants();
+    return LuminaAgent::copyCString("{\"ok\":true}");
+}
+
 extern "C" void LuminaAgentRuntimeDestroySession(LuminaAgentRuntimeSessionRef *session) {
     delete session;
 }
@@ -510,9 +568,12 @@ extern "C" char *LuminaReActExtractFirstStandardObject(const char *text) {
     if (text == nullptr) {
         return LuminaAgent::failureResponse("missing text input.");
     }
-    const std::string object = LuminaAgent::firstValidReActStepObject(std::string(text));
-    if (object.empty()) {
-        return LuminaAgent::failureResponse("no standard ReAct JSON object found.");
+    const std::string object = LuminaAgent::trim(std::string(text));
+    std::string error;
+    if (!LuminaAgent::validateReActStepObject(object, true, error)) {
+        return LuminaAgent::failureResponse(
+            "canonical runtime step validation requires one complete internal ReAct object; model text must be normalized through MiniCPM-V4.6 special-token extraction or a trusted provider adapter first. " + error
+        );
     }
     return LuminaAgent::successResponse(object);
 }
@@ -524,7 +585,7 @@ extern "C" char *LuminaReActNormalizeStepText(const char *text, const char *dial
     std::string error;
     const std::string normalized = LuminaAgent::normalizeReActStepText(
         std::string(text),
-        dialect == nullptr ? "canonical_json" : std::string(dialect),
+        dialect == nullptr ? "minicpm_v46_tool_calls" : std::string(dialect),
         error
     );
     if (normalized.empty()) {

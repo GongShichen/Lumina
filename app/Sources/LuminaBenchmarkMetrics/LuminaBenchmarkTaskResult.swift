@@ -22,6 +22,7 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
     let outcomePassed: Bool
     let outcomeFailures: [String]
     let strictToolPassed: Bool
+    let orderedToolMatch: Bool
     let runtimeStatus: String
     let terminationReason: String?
     let toolExecutedAt1: Bool
@@ -81,7 +82,8 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         let allExecuted = Set(actualTools)
         self.missingTools = expected.subtracting(actual).sorted()
         self.unexpectedTools = allExecuted.subtracting(expected).sorted()
-        self.exactMatch = expected == allExecuted && failedTools.isEmpty && toolReplays.isEmpty
+        self.orderedToolMatch = Self.isOrderedSubsequence(task.expectedTools, of: successfulTools)
+        self.exactMatch = successfulTools == task.expectedTools && actualTools == task.expectedTools && failedTools.isEmpty && toolReplays.isEmpty
         self.semanticFailures = semanticFailures
         self.outcomeFailures = outcomeFailures
         self.runtimeStatus = runtimeStatus
@@ -94,9 +96,9 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.precision = truePositive + falsePositive == 0 ? 0 : truePositive / (truePositive + falsePositive)
         self.recall = truePositive + falseNegative == 0 ? 0 : truePositive / (truePositive + falseNegative)
         self.f1 = precision + recall == 0 ? 0 : 2 * precision * recall / (precision + recall)
-        self.strictToolPassed = self.outcomePassed && exactMatch
+        self.strictToolPassed = self.outcomePassed && orderedToolMatch && self.unexpectedTools.isEmpty && failedTools.isEmpty && toolReplays.isEmpty
         self.passAt1 = self.outcomePassed
-        self.toolExecutedAt1 = !expected.isEmpty && expected.isSubset(of: actual)
+        self.toolExecutedAt1 = !task.expectedTools.isEmpty && orderedToolMatch
         self.status = self.outcomePassed ? "succeeded" : status == "cancelled" ? "cancelled" : "failed"
         let diagnostics = [
             self.missingTools.isEmpty ? nil : "missing=\(self.missingTools.joined(separator: ","))",
@@ -115,5 +117,16 @@ struct LuminaBenchmarkTaskResult: Identifiable, Codable, Hashable {
         self.modelMetrics = modelMetrics
         self.runtimeMetrics = runtimeMetrics
         self.failureSummary = failureSummary
+    }
+
+    private static func isOrderedSubsequence(_ expected: [String], of actual: [String]) -> Bool {
+        guard !expected.isEmpty else { return true }
+        var expectedIndex = 0
+        for tool in actual where expectedIndex < expected.count {
+            if tool == expected[expectedIndex] {
+                expectedIndex += 1
+            }
+        }
+        return expectedIndex == expected.count
     }
 }

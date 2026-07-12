@@ -1,0 +1,26 @@
+{
+  "assistantDialect": "minicpm_v46_tool_calls",
+  "assistantEnvelope": "minicpm_v46_special_tokens",
+  "benchmarkTraceUsedForTraining": false,
+  "files": {
+    "dpo_evaluation_test.jsonl": {
+      "records": 5125
+    },
+    "dpo_general_test.jsonl": {
+      "records": 5126
+    },
+    "dpo_general_train.jsonl": {
+      "records": 41069
+    },
+    "sft_evaluation_test.jsonl": {
+      "records": 6351
+    },
+    "sft_general_test.jsonl": {
+      "records": 6351
+    },
+    "sft_general_train.jsonl": {
+      "records": 50844
+    }
+  },
+  "maxJsonChars": 60000
+}

@@ -17,11 +17,14 @@ public:
 
     // Looks up registered capabilities by their stable tool name.
     bool contains(const std::string &toolName) const;
+    std::string resolveName(const std::string &toolName) const;
+    std::string aliasWarning(const std::string &toolName) const;
     bool isDeferred(const std::string &toolName) const;
     bool isCallable(const std::string &toolName, const std::set<std::string> &loadedToolNames) const;
     bool isReadOnly(const std::string &toolName) const;
     bool isConcurrencySafe(const std::string &toolName) const;
     bool requiresUserInteraction(const std::string &toolName) const;
+    bool requiresConfirmation(const std::string &toolName) const;
     std::string sideEffect(const std::string &toolName) const;
     std::string sensitivity(const std::string &toolName) const;
     bool isDestructive(const std::string &toolName) const;
@@ -37,6 +40,8 @@ public:
     std::string nameOnlyListJson(const std::set<std::string> &loadedToolNames = {}) const;
     std::string deferredCatalogJson(const std::set<std::string> &loadedToolNames = {}) const;
     std::string discoverToolsJson(const std::string &query, const std::string &category, int maxResults, bool includeSchemas) const;
+    std::string mcpCatalogJson(const std::set<std::string> &loadedToolNames = {}) const;
+    std::string discoverMCPToolsJson(const std::string &query, int maxResults, bool includeSchemas, const std::set<std::string> &loadedToolNames = {}) const;
     std::vector<std::string> deferredToolNames() const;
     int estimatedDeferredSchemaTokens() const;
 
@@ -80,8 +85,10 @@ private:
         bool alwaysLoad = false;
         bool deferByDefault = false;
         bool metadataOnly = false;
+        bool requiresConfirmation = false;
         int maxResultSize = 0;
         std::vector<std::string> aliases;
+        std::map<std::string, std::string> deprecatedAliases;
         std::vector<Parameter> parameters;
     };
 
@@ -92,10 +99,13 @@ private:
     bool parameterEnumMatches(const Parameter &parameter, const JsonField &value) const;
     std::string compactRecordJson(const ToolSchemaRecord &record, bool includeSchema) const;
     bool recordMatches(const ToolSchemaRecord &record, const std::string &query, const std::string &category) const;
+    bool isMCPRecord(const ToolSchemaRecord &record) const;
 
     std::vector<std::string> schemas_;
     std::map<std::string, ToolSchemaRecord> records_;
     std::set<std::string> names_;
+    std::map<std::string, std::string> aliases_;
+    std::map<std::string, std::string> aliasWarnings_;
     std::map<std::string, bool> readOnly_;
 };
 

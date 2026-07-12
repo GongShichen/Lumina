@@ -2,7 +2,7 @@ import Foundation
 import LuminaAgentRuntimeCore
 
 public enum LuminaReActTransport {
-    public static func extractFirstStandardJSONObject(from text: String) -> String? {
+    public static func validateCanonicalRuntimeStep(from text: String) -> String? {
         let pointer = text.withCString { LuminaReActExtractFirstStandardObject($0) }
         defer {
             if let pointer { LuminaAgentRuntimeReleaseString(pointer) }
@@ -17,9 +17,9 @@ public enum LuminaReActTransport {
         return value
     }
 
-    public static func normalizeXMLTags(from text: String) -> String? {
+    public static func normalizeMiniCPMV46ToolCalls(from text: String) -> String? {
         let pointer = text.withCString { textPointer in
-            "xml_tags".withCString { dialectPointer in
+            "minicpm_v46_tool_calls".withCString { dialectPointer in
                 LuminaReActNormalizeStepText(textPointer, dialectPointer)
             }
         }
@@ -35,4 +35,5 @@ public enum LuminaReActTransport {
         else { return nil }
         return value
     }
+
 }

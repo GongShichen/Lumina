@@ -188,7 +188,7 @@ private let luminaInvalidThenFinalModelCallback: LuminaAgentModelCallback = { pl
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-bad","type":"tool_use","thought":"missing tool name","parameters":{},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"<think>missing closing transport</think><tool_call><function=device.current_time>"#)
     }
     return luminaRuntimeCString("{\"schema_version\":\"1.0\",\"step_id\":\"s-final\",\"type\":\"result\",\"thought\":\"normalized\",\"content\":\"## 完成\\n\\n修复后完成。\",\"completed\":true,\"requires_followup\":false}")
 }
@@ -212,7 +212,7 @@ private let luminaAskUserModelCallback: LuminaAgentModelCallback = { plannerInpu
     if let plannerInput {
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
-    return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
+    return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thinking":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
 }
 
 private let luminaAskThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -221,9 +221,9 @@ private let luminaAskThenFinalModelCallback: LuminaAgentModelCallback = { planne
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thought":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-ask","type":"ask_user","thinking":"Need preference.","questions":[{"id":"time","question":"几点？","options":[{"label":"上午","description":"安排在上午"},{"label":"下午","description":"安排在下午"}]}],"allow_custom_answer":true,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"User answered.","content":"## 已继续\n\n收到你的回答，继续完成。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"User answered.","content":"## 已继续\n\n收到你的回答，继续完成。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaNeedsContextThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -232,9 +232,9 @@ private let luminaNeedsContextThenFinalModelCallback: LuminaAgentModelCallback =
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-context","type":"reasoning","thought":"Need deeper context.","needs_more_context":true,"confidence":0.7,"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-context","type":"reasoning","thinking":"Need deeper context.","needs_more_context":true,"confidence":0.7,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Context loaded.","content":"## 完成\n\n已使用更深层上下文。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -243,9 +243,9 @@ private let luminaToolDiscoveryThenFinalModelCallback: LuminaAgentModelCallback 
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Need focused calendar schema.","query":"calendar","category":"pim","max_results":2,"include_schemas":true,"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thinking":"Need focused calendar schema.","query":"calendar","category":"pim","max_results":2,"include_schemas":true,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Saw focused schema.","content":"## 完成\n\n已查看工具 schema。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDeferredToolDirectThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -254,9 +254,9 @@ private let luminaDeferredToolDirectThenFinalModelCallback: LuminaAgentModelCall
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-direct","type":"tool_use","thought":"Try the deferred tool immediately.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-direct","type":"tool_use","thinking":"Try the deferred tool immediately.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled contract failure.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Handled contract failure.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDeferredDiscoveryUseThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -265,12 +265,12 @@ private let luminaDeferredDiscoveryUseThenFinalModelCallback: LuminaAgentModelCa
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thought":"Load the focused deferred schema.","query":"select:deferred.search","category":"search","max_results":1,"include_schemas":true,"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-discover","type":"tool_discovery","thinking":"Load the focused deferred schema.","query":"select:deferred.search","category":"search","max_results":1,"include_schemas":true,"requires_followup":true}"#)
     }
     if call == 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-use","type":"tool_use","thought":"Use the now-loaded tool.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-use","type":"tool_use","thinking":"Use the now-loaded tool.","tool_name":"deferred.search","parameters":{"query":"demo"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Tool ran.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Tool ran.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaPluginDeferredDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -279,9 +279,9 @@ private let luminaPluginDeferredDiscoveryThenFinalModelCallback: LuminaAgentMode
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-plugin-discover","type":"tool_discovery","thought":"Ask host plugin to load schema.","query":"select:plugin.lazy","category":"plugin","max_results":1,"include_schemas":true,"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-plugin-discover","type":"tool_discovery","thinking":"Ask host plugin to load schema.","query":"select:plugin.lazy","category":"plugin","max_results":1,"include_schemas":true,"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Loaded by plugin.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Loaded by plugin.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -290,9 +290,9 @@ private let luminaRepeatedIdenticalToolThenFinalModelCallback: LuminaAgentModelC
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call <= 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-open","type":"tool_use","thought":"Open the external surface once.","tool_name":"external.open","parameters":{"target":"compose","payload":"Hello"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-open","type":"tool_use","thinking":"Open the external surface once.","tool_name":"external.open","parameters":{"target":"compose","payload":"Hello"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Handled.","content":"## 完成\n\n工具结果已处理。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaReadToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -301,9 +301,9 @@ private let luminaReadToolThenFinalModelCallback: LuminaAgentModelCallback = { p
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-read","type":"tool_use","thought":"Read retryable status.","tool_name":"status.read","parameters":{"scope":"cached"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-read","type":"tool_use","thinking":"Read retryable status.","tool_name":"status.read","parameters":{"scope":"cached"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Handled retry result.","content":"## 完成\n\n工具重试后完成。","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Handled retry result.","content":"## 完成\n\n工具重试后完成。","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -312,12 +312,12 @@ private let luminaDifferentParametersThenFinalModelCallback: LuminaAgentModelCal
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-a","type":"tool_use","thought":"Lookup A.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-a","type":"tool_use","thinking":"Lookup A.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}"#)
     }
     if call == 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-b","type":"tool_use","thought":"Lookup B.","tool_name":"data.lookup","parameters":{"query":"B"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-b","type":"tool_use","thinking":"Lookup B.","tool_name":"data.lookup","parameters":{"query":"B"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaDifferentIdempotencyKeysThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -326,12 +326,12 @@ private let luminaDifferentIdempotencyKeysThenFinalModelCallback: LuminaAgentMod
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-one","type":"tool_use","thought":"Create first instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"one"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-one","type":"tool_use","thinking":"Create first instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"one"},"requires_followup":true}"#)
     }
     if call == 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-two","type":"tool_use","thought":"Create second instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"two"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-two","type":"tool_use","thinking":"Create second instance.","tool_name":"record.create","parameters":{"title":"same","idempotency_key":"two"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaAlwaysExecuteThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -340,9 +340,9 @@ private let luminaAlwaysExecuteThenFinalModelCallback: LuminaAgentModelCallback 
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call <= 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-status","type":"tool_use","thought":"Read fresh status.","tool_name":"status.read","parameters":{"scope":"live"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-status","type":"tool_use","thinking":"Read fresh status.","tool_name":"status.read","parameters":{"scope":"live"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -351,12 +351,12 @@ private let luminaReorderedParametersThenFinalModelCallback: LuminaAgentModelCal
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-first","type":"tool_use","thought":"Call once.","tool_name":"canonical.action","parameters":{"b":"2","a":"1"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-first","type":"tool_use","thinking":"Call once.","tool_name":"canonical.action","parameters":{"b":"2","a":"1"},"requires_followup":true}"#)
     }
     if call == 2 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-second","type":"tool_use","thought":"Call duplicate with reordered parameters.","tool_name":"canonical.action","parameters":{"a":"1","b":"2"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-second","type":"tool_use","thinking":"Call duplicate with reordered parameters.","tool_name":"canonical.action","parameters":{"a":"1","b":"2"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaUnsafeToolThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -365,9 +365,9 @@ private let luminaUnsafeToolThenFinalModelCallback: LuminaAgentModelCallback = {
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-unsafe","type":"tool_use","thought":"Use proposed tool.","tool_name":"unsafe.write","parameters":{"query":"secret"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-unsafe","type":"tool_use","thinking":"Use proposed tool.","tool_name":"unsafe.write","parameters":{"query":"secret"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## 完成","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaExternalProviderThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
@@ -376,9 +376,31 @@ private let luminaExternalProviderThenFinalModelCallback: LuminaAgentModelCallba
     }
     let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
     if call == 1 {
-        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-provider","type":"tool_use","thought":"Use provider tool.","tool_name":"mcp.echo","parameters":{"text":"hello"},"requires_followup":true}"#)
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-provider","type":"tool_use","thinking":"Use provider tool.","tool_name":"mcp.echo","parameters":{"text":"hello"},"requires_followup":true}"#)
     }
-    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thought":"Done.","content":"## Provider done","completed":true,"requires_followup":false}"###)
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Done.","content":"## Provider done","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaSkillDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-skill-discover","type":"tool_use","thinking":"Find a matching local skill.","tool_name":"runtime.skill_discovery","parameters":{"query":"ios","max_results":3},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"Skill catalog observed.","content":"## Skill discovery done","completed":true,"requires_followup":false}"###)
+}
+
+private let luminaMCPDiscoveryThenFinalModelCallback: LuminaAgentModelCallback = { plannerInput, _ in
+    if let plannerInput {
+        LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
+    }
+    let call = LuminaRuntimeCaptureStore.shared.incrementModelCallCount()
+    if call == 1 {
+        return luminaRuntimeCString(#"{"schema_version":"1.0","step_id":"s-mcp-discover","type":"tool_use","thinking":"Load the selected MCP schema.","tool_name":"runtime.mcp_discovery","parameters":{"query":"select:mcp.echo","max_results":1,"include_schemas":true},"requires_followup":true}"#)
+    }
+    return luminaRuntimeCString(###"{"schema_version":"1.0","step_id":"s-final","type":"result","thinking":"MCP schema loaded.","content":"## MCP discovery done","completed":true,"requires_followup":false}"###)
 }
 
 private let luminaContextCallback: LuminaAgentContextCallback = { contextRequest, _ in
@@ -427,9 +449,9 @@ private let luminaStreamingModelCallback: LuminaAgentStreamingModelCallback = { 
     if let plannerInput {
         LuminaRuntimeCaptureStore.shared.appendPlannerInput(String(cString: plannerInput))
     }
-    _ = emit?(#"{"delta":"{\"type\":\"result\"","tokenCount":3}"#, emitContext)
-    _ = emit?(#"{"delta":",\"content\":\"done\"}","tokenCount":2}"#, emitContext)
-    return luminaRuntimeCString(#"model said: {"schema_version":"1.0","step_id":"s-stream","type":"result","thought":"done","content":"done","completed":true,"requires_followup":false}"#)
+    _ = emit?(#"{"delta":"<think>done</think>","tokenCount":3}"#, emitContext)
+    _ = emit?(#"{"delta":"done","tokenCount":1}"#, emitContext)
+    return luminaRuntimeCString(#"<think>done</think>done"#)
 }
 
 private let luminaEventCallback: LuminaAgentEventCallback = { event, _ in
@@ -564,10 +586,10 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(text.contains("unknown ReAct step type"))
     }
 
-    func testXMLTagDialectNormalizesToCanonicalResultAndToolUse() {
-        let resultOutput = "<thought>done</thought><result>完成</result>"
+    func testMiniCPMV46DialectExtractsResultAndToolUse() {
+        let resultOutput = "<think>done</think>完成"
         let normalizedResult = resultOutput.withCString { text in
-            "xml_tags".withCString { dialect in
+            "minicpm_v46_tool_calls".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
@@ -576,9 +598,15 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(resultText.contains(#""ok":true"#))
         XCTAssertTrue(resultText.contains(#"\"type\":\"result\""#))
 
-        let toolOutput = #"<thought>need time</thought><tool_use name="device.current_time">{}</tool_use>"#
+        let toolOutput = """
+        <think>need time</think>
+        <tool_call>
+        <function=device.current_time>
+        </function>
+        </tool_call>
+        """
         let normalizedTool = toolOutput.withCString { text in
-            "xml_tags".withCString { dialect in
+            "minicpm_v46_tool_calls".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
@@ -589,22 +617,54 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(toolText.contains(#"\"tool_name\":\"device.current_time\""#))
         XCTAssertTrue(toolText.contains(#"\"parameters\":{}"#))
 
-        let sideEffectToolOutput = #"<thought>create it</thought><tool_use name="calendar.create" requires_confirmation="true">{"title":"Demo","startDateISO":"2026-05-31T12:00:00+08:00"}</tool_use>"#
+        let sideEffectToolOutput = """
+        <think>create it</think>
+        <tool_call>
+        <function=calendar.create>
+        <parameter=startDateISO>
+        2026-05-31T12:00:00+08:00
+        </parameter>
+        <parameter=title>
+        Demo
+        </parameter>
+        </function>
+        </tool_call>
+        """
         let normalizedSideEffectTool = sideEffectToolOutput.withCString { text in
-            "xml_tags".withCString { dialect in
+            "minicpm_v46_tool_calls".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
         defer { LuminaAgentRuntimeReleaseString(normalizedSideEffectTool) }
         let sideEffectToolText = normalizedSideEffectTool.map { String(cString: $0) } ?? ""
         XCTAssertTrue(sideEffectToolText.contains(#""ok":true"#))
-        XCTAssertTrue(sideEffectToolText.contains(#"\"requires_confirmation\":true"#))
         XCTAssertTrue(sideEffectToolText.contains(#"\"title\":\"Demo\""#))
         XCTAssertTrue(sideEffectToolText.contains(#"\"startDateISO\":\"2026-05-31T12:00:00+08:00\""#))
 
-        let askUserOutput = #"<thought>need preference</thought><ask_user>{"reason":"缺少偏好","questions":[{"id":"p","question":"选哪个？"}],"sensitivity":"normal","timeout_seconds":120,"allow_custom_answer":true}</ask_user>"#
+        let askUserOutput = """
+        <think>need preference</think>
+        <tool_call>
+        <function=ask_user>
+        <parameter=reason>
+        缺少偏好
+        </parameter>
+        <parameter=questions>
+        [{"id":"p","question":"选哪个？"}]
+        </parameter>
+        <parameter=sensitivity>
+        normal
+        </parameter>
+        <parameter=timeout_seconds>
+        120
+        </parameter>
+        <parameter=allow_custom_answer>
+        true
+        </parameter>
+        </function>
+        </tool_call>
+        """
         let normalizedAskUser = askUserOutput.withCString { text in
-            "xml_tags".withCString { dialect in
+            "minicpm_v46_tool_calls".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
@@ -614,36 +674,22 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(askUserText.contains(#"\"type\":\"ask_user\""#))
     }
 
-    func testXMLTagDialectRejectsIncompleteToolUseWithoutDroppingParameters() {
-        let incompleteToolOutput = #"<thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"LuminaTest"}</"#
-        let normalizedTool = incompleteToolOutput.withCString { text in
-            "xml_tags".withCString { dialect in
+    func testMiniCPMV46DialectDoesNotParseLegacyToolUseAsAction() {
+        let legacyToolOutput = #"<thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"LuminaTest"}</tool_use>"#
+        let normalizedTool = legacyToolOutput.withCString { text in
+            "minicpm_v46_tool_calls".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
         defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
         let toolText = normalizedTool.map { String(cString: $0) } ?? ""
-        XCTAssertTrue(toolText.contains(#""ok":false"#))
-        XCTAssertTrue(toolText.contains("missing closing </tool_use>"))
-        XCTAssertFalse(toolText.contains(#"\"parameters\":{}"#))
-    }
-
-    func testXMLTagDialectRejectsCompleteLeadingThink() {
-        let output = #"<think>private scratch</think><thought>search first</thought><tool_use name="calendar.search" requires_confirmation="false">{"query":"Project"}</tool_use>"#
-        let normalizedTool = output.withCString { text in
-            "xml_tags".withCString { dialect in
-                LuminaReActNormalizeStepText(text, dialect)
-            }
-        }
-        defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
-        let toolText = normalizedTool.map { String(cString: $0) } ?? ""
-        XCTAssertTrue(toolText.contains(#""ok":false"#))
-        XCTAssertTrue(toolText.contains("<think> tags"))
+        XCTAssertTrue(toolText.contains(#""ok":true"#))
+        XCTAssertTrue(toolText.contains(#"\"type\":\"result\""#))
         XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
     }
 
-    func testXMLTagDialectRejectsUnclosedThinkWithInnerToolUse() {
-        let output = #"<think><thought>bad</thought><tool_use name="calendar.search">{"query":"Project"}</tool_use>"#
+    func testXMLTagDialectIsNotSupported() {
+        let output = #"<thought>bad</thought><tool_use name="calendar.search">{"query":"Project"}</tool_use>"#
         let normalizedTool = output.withCString { text in
             "xml_tags".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
@@ -652,21 +698,22 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
         let toolText = normalizedTool.map { String(cString: $0) } ?? ""
         XCTAssertTrue(toolText.contains(#""ok":false"#))
-        XCTAssertTrue(toolText.contains("<think> tags"))
+        XCTAssertTrue(toolText.contains("xml_tags is no longer a supported model-facing dialect"))
         XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
     }
 
-    func testXMLTagDialectRejectsNonLeadingThink() {
-        let output = #"<thought>bad</thought><think>private</think><tool_use name="calendar.search">{"query":"Project"}</tool_use>"#
+    func testCanonicalJSONDialectIsNotModelFacing() {
+        let output = #"{"type":"tool_use","tool_name":"calendar.search","parameters":{"query":"Project"}}"#
         let normalizedTool = output.withCString { text in
-            "xml_tags".withCString { dialect in
+            "canonical_json".withCString { dialect in
                 LuminaReActNormalizeStepText(text, dialect)
             }
         }
         defer { LuminaAgentRuntimeReleaseString(normalizedTool) }
         let toolText = normalizedTool.map { String(cString: $0) } ?? ""
         XCTAssertTrue(toolText.contains(#""ok":false"#))
-        XCTAssertTrue(toolText.contains("<think> tags"))
+        XCTAssertTrue(toolText.contains("canonical_json is not a model-facing dialect"))
+        XCTAssertFalse(toolText.contains(#"\"tool_name\":\"calendar.search\""#))
     }
 
     func testObservabilitySinksAreOptionalAndIndependentlyRegistered() throws {
@@ -808,7 +855,39 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(input.contains(#""attachments_summary""#))
         XCTAssertTrue(input.contains(#""transcript":"下午三点提醒我""#))
         XCTAssertTrue(input.contains(#""output_contract""#))
+        XCTAssertTrue(input.contains(#""dialect":"minicpm_v46_tool_calls""#))
+        XCTAssertTrue(input.contains(#"<think>"#))
+        XCTAssertTrue(input.contains(#"<tool_call>"#))
+        XCTAssertTrue(input.contains(#""observation_token_budget":"#))
+        XCTAssertFalse(input.contains(#"tool_response"#))
+        XCTAssertFalse(input.contains(#"tool_result_token_budget"#))
+        XCTAssertFalse(input.contains(#"provider-native"#))
+        XCTAssertFalse(input.contains(#"OpenAI-style"#))
+        XCTAssertFalse(input.contains(#"role/content"#))
+        XCTAssertFalse(input.contains(#"canonical ReAct step JSON"#))
         XCTAssertFalse(input.contains(#""raw_request":"#))
+    }
+
+    func testTaskEnvelopeUsesLuminaCodeStyleDefaultSystemPromptWhenCallerOmitsOne() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaFinalModelCallback, nil)
+
+        let result = LuminaAgentRuntimeRun(runtime, #"{"id":"default-system","text":"hello","content":[{"modality":"text","text":"hello"}]}"#)
+        if let result {
+            LuminaAgentRuntimeReleaseString(result)
+        }
+
+        let input = LuminaRuntimeCaptureStore.shared.snapshot().plannerInputs.first ?? ""
+        XCTAssertTrue(input.contains(#""system_prompt_source":"lumina_code_default""#))
+        XCTAssertTrue(input.contains("[SECTION: instruction-priority]"))
+        XCTAssertTrue(input.contains("[SECTION: trust-and-external-context]"))
+        XCTAssertTrue(input.contains("permission_and_confirmation_are_not_tools"))
+        XCTAssertTrue(input.contains("skill_policy"))
+        XCTAssertTrue(input.contains("Runtime observations are authoritative evidence"))
     }
 
     func testStreamingModelCallbackEmitsGenerationEvents() throws {
@@ -831,7 +910,11 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(events.contains(#""type":"model_generation_validated""#))
         XCTAssertTrue(events.contains(#""ttft_ms":"#))
         XCTAssertTrue(events.contains(#""tokens_per_second":"#))
-        XCTAssertTrue(events.contains(#""extracted_standard_step":true"#))
+        XCTAssertTrue(events.contains(#""core_extracted_special_token_step":true"#))
+        XCTAssertTrue(events.contains(#""model_stream_contains_special_tokens":true"#))
+        XCTAssertFalse(events.contains(#""host_returned_canonical_step":true"#))
+        XCTAssertTrue(events.contains(#""canonical_step_excerpt":"#))
+        XCTAssertFalse(events.contains(#""raw_output_excerpt":"#))
     }
 
     func testExplicitSessionPausesForAskUserAndExportsTrace() throws {
@@ -987,8 +1070,94 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""mode":"direct""#) == true)
         XCTAssertTrue(snapshot.plannerInputs.first?.contains("All callable tools are already listed") == true)
         XCTAssertTrue(snapshot.plannerInputs.first?.contains(#""focused_schemas":[{"name":"calendar.search""#) == true)
-        XCTAssertTrue(snapshot.plannerInputs.first?.contains("tool_name MUST exactly equal") == true)
+        XCTAssertTrue(snapshot.plannerInputs.first?.contains("Choose an exact listed tool_name") == true)
         XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""calendar.search""#))
+    }
+
+    func testSkillDiscoveryUsesLuminaCodeListingAndDoesNotExposePermissionAsTool() throws {
+        guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 3)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaSkillDiscoveryThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let skillPointer = LuminaAgentRuntimeRegisterSkillMetadata(
+            runtime,
+            #"{"canonicalName":"build-ios","description":"Build and run iOS apps with the local Xcode simulator.","whenToUse":"Use when an iOS app needs to be built, launched, tested, or inspected.","source":"project","directory":"/tmp/project","skillFile":"/tmp/project/SKILL.md"}"#
+        )
+        let skillResult = skillPointer.map { String(cString: $0) } ?? "{}"
+        if let skillPointer { LuminaAgentRuntimeReleaseString(skillPointer) }
+        XCTAssertTrue(skillResult.contains(#""ok":true"#), skillResult)
+
+        let directPointer = LuminaAgentRuntimeDiscoverSkills(runtime, #"{"query":"ios","max_results":2}"#)
+        let directDiscovery = directPointer.map { String(cString: $0) } ?? "{}"
+        if let directPointer { LuminaAgentRuntimeReleaseString(directPointer) }
+        XCTAssertTrue(directDiscovery.contains("<system-reminder>"))
+        XCTAssertTrue(directDiscovery.contains("The following skills are available through the Skill tool"))
+        XCTAssertTrue(directDiscovery.contains("build-ios"))
+        XCTAssertTrue(directDiscovery.contains(#""when_to_use":"#))
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"skill-discovery","text":"帮我构建 iOS app","content":[{"modality":"text","text":"帮我构建 iOS app"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        let firstInput = snapshot.plannerInputs.first ?? ""
+        XCTAssertTrue(result.contains(#""status":"succeeded""#), result)
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue(firstInput.contains(#""skills""#))
+        XCTAssertTrue(firstInput.contains(#""discovery_tool":"runtime.skill_discovery""#))
+        XCTAssertTrue(firstInput.contains(#""execution_tool":"Skill""#))
+        XCTAssertTrue(firstInput.contains("<system-reminder>"))
+        XCTAssertTrue(firstInput.contains(#""name":"Skill""#))
+        XCTAssertTrue(firstInput.contains(#""side_effect":"readOnly""#))
+        XCTAssertTrue(firstInput.contains(#""read_only":true"#))
+        XCTAssertTrue(firstInput.contains(#""name":"runtime.skill_discovery""#))
+        XCTAssertFalse(firstInput.contains(#""name":"permission_request""#))
+        XCTAssertFalse(firstInput.contains(#""name":"confirmation_request""#))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("skill_discovery_completed"))
+    }
+
+    func testMCPDiscoveryFindsProviderToolsAndLoadsDeferredSchema() throws {
+        let config = """
+        {"maxIterations":3,"maxToolCalls":8,"contextWindowTokens":12000,"maxContextTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false,"toolLoadingMode":"enabled"}
+        """
+        guard let runtime = LuminaAgentRuntimeCreate(config) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaMCPDiscoveryThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetEventCallback(runtime, luminaEventCallback, nil)
+
+        let providerPointer = LuminaAgentRuntimeRegisterExternalToolProvider(
+            runtime,
+            #"{"provider_id":"mcp-test","namespace":"mcp","allowed_tools":["echo"],"schemas":[{"name":"echo","description":"Echo input from an MCP server.","category":"mcp","sideEffect":"readOnly","readOnly":true,"deferByDefault":true,"parameters":[{"name":"text","type":"string","required":true}],"sensitivity":"normal"}]}"#
+        )
+        let providerResult = providerPointer.map { String(cString: $0) } ?? "{}"
+        if let providerPointer { LuminaAgentRuntimeReleaseString(providerPointer) }
+        XCTAssertTrue(providerResult.contains(#""registered_tools":1"#), providerResult)
+
+        let directPointer = LuminaAgentRuntimeDiscoverMCPTools(runtime, #"{"query":"echo","include_schemas":true,"max_results":2}"#)
+        let directDiscovery = directPointer.map { String(cString: $0) } ?? "{}"
+        if let directPointer { LuminaAgentRuntimeReleaseString(directPointer) }
+        XCTAssertTrue(directDiscovery.contains(#""mcp.echo""#))
+        XCTAssertTrue(directDiscovery.contains("Echo input"))
+
+        let resultPointer = LuminaAgentRuntimeRun(runtime, #"{"id":"mcp-discovery","text":"找 MCP echo 工具","content":[{"modality":"text","text":"找 MCP echo 工具"}]}"#)
+        let result = resultPointer.map { String(cString: $0) } ?? "{}"
+        if let resultPointer { LuminaAgentRuntimeReleaseString(resultPointer) }
+
+        let snapshot = LuminaRuntimeCaptureStore.shared.snapshot()
+        XCTAssertTrue(result.contains(#""status":"succeeded""#), result)
+        XCTAssertEqual(snapshot.toolCallCount, 0)
+        XCTAssertTrue((snapshot.plannerInputs.first ?? "").contains(#""mcp_tools""#))
+        XCTAssertTrue((snapshot.plannerInputs.first ?? "").contains(#""discovery_tool":"runtime.mcp_discovery""#))
+        XCTAssertTrue((snapshot.plannerInputs.first ?? "").contains(#""name":"runtime.mcp_discovery""#))
+        XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""loaded_tool_set":["mcp.echo"]"#))
+        XCTAssertTrue(snapshot.events.joined(separator: "\n").contains("mcp_discovery_completed"))
     }
 
     func testDeferredToolIsListedButNotCallableUntilLoaded() throws {
@@ -1560,8 +1729,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         {
           "mode":"all",
           "model_outputs":[
-            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}},
-            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Replay complete","completed":true,"requires_followup":false}}
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thinking":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"A"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thinking":"Done.","content":"## Replay complete","completed":true,"requires_followup":false}}
           ],
           "tool_observations":[
             {"tool_name":"data.lookup","parameters":{"query":"A"},"result":{"status":"succeeded","content":"from replay"}}
@@ -1615,8 +1784,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         {
           "mode":"replay_strict",
           "model_outputs":[
-            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"missing"},"requires_followup":true}},
-            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Should not reach","completed":true,"requires_followup":false}}
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thinking":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"missing"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thinking":"Done.","content":"## Should not reach","completed":true,"requires_followup":false}}
           ],
           "tool_observations":[]
         }
@@ -1650,8 +1819,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
           "artifact_type":"lumina_replay_artifact",
           "request":{"id":"mixed","text":"mixed"},
           "model_outputs":[
-            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"live"},"requires_followup":true}},
-            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Mixed replay complete","completed":true,"requires_followup":false}}
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thinking":"Replay lookup.","tool_name":"data.lookup","parameters":{"query":"live"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thinking":"Done.","content":"## Mixed replay complete","completed":true,"requires_followup":false}}
           ],
           "tool_observations":[]
         }
@@ -1691,8 +1860,8 @@ final class LuminaRuntimeKernelTests: XCTestCase {
           "artifact_type":"lumina_replay_artifact",
           "request":{"id":"write","text":"write"},
           "model_outputs":[
-            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thought":"Write.","tool_name":"unsafe.write","parameters":{"query":"create"},"requires_followup":true}},
-            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thought":"Done.","content":"## Write replay complete","completed":true,"requires_followup":false}}
+            {"step":{"schema_version":"1.0","step_id":"s-tool","type":"tool_use","thinking":"Write.","tool_name":"unsafe.write","parameters":{"query":"create"},"requires_followup":true}},
+            {"step":{"schema_version":"1.0","step_id":"s-result","type":"result","thinking":"Done.","content":"## Write replay complete","completed":true,"requires_followup":false}}
           ],
           "tool_observations":[]
         }
@@ -1822,6 +1991,40 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertEqual(snapshot.toolCallCount, 1)
         XCTAssertTrue(snapshot.toolCalls.first?.contains(#""tool_name":"mcp.echo""#) == true)
         XCTAssertTrue(snapshot.toolCalls.first?.contains(#""text":"hello""#) == true)
+    }
+
+    func testExternalToolProviderTrustRequestRequiresYoloOrTrustedProvider() throws {
+        let providerJSON = #"{"provider_id":"mcp-trust","namespace":"mcp","requiresTrust":true,"trustRequest":{"reason":"local MCP provider asks for host trust"},"allowed_tools":["echo"],"schemas":[{"name":"echo","description":"Echo input.","category":"external","sideEffect":"readOnly","parameters":[{"name":"text","type":"string","required":true}],"sensitivity":"normal"}],"api_token":"must-not-leak"}"#
+
+        guard let normalRuntime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(normalRuntime) }
+        LuminaAgentRuntimeSetEventCallback(normalRuntime, luminaEventCallback, nil)
+        let deniedPointer = LuminaAgentRuntimeRegisterExternalToolProvider(normalRuntime, providerJSON)
+        let deniedResult = deniedPointer.map { String(cString: $0) } ?? "{}"
+        if let deniedPointer { LuminaAgentRuntimeReleaseString(deniedPointer) }
+        XCTAssertTrue(deniedResult.contains(#""ok":false"#))
+        XCTAssertTrue(deniedResult.contains("external provider trust required"))
+        XCTAssertFalse(deniedResult.contains("must-not-leak"))
+
+        guard let yoloRuntime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 1, yoloMode: true)) else {
+            XCTFail("Failed to create runtime")
+            return
+        }
+        defer { LuminaAgentRuntimeDestroy(yoloRuntime) }
+        LuminaAgentRuntimeSetEventCallback(yoloRuntime, luminaEventCallback, nil)
+        LuminaRuntimeCaptureStore.shared.reset()
+        let allowedPointer = LuminaAgentRuntimeRegisterExternalToolProvider(yoloRuntime, providerJSON)
+        let allowedResult = allowedPointer.map { String(cString: $0) } ?? "{}"
+        if let allowedPointer { LuminaAgentRuntimeReleaseString(allowedPointer) }
+        XCTAssertTrue(allowedResult.contains(#""ok":true"#))
+        XCTAssertTrue(allowedResult.contains(#""registered_tools":1"#))
+        XCTAssertTrue(allowedResult.contains(#""trusted_by_yolo":true"#))
+        XCTAssertFalse(allowedResult.contains("must-not-leak"))
+        let events = LuminaRuntimeCaptureStore.shared.snapshot().events.joined(separator: "\n")
+        XCTAssertTrue(events.contains("external_tool_provider_trust_yolo_allowed"))
     }
 
     func testCoreRetryProviderCanControlModelGenerationRetry() throws {

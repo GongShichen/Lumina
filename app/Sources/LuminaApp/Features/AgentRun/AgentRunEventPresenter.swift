@@ -28,6 +28,9 @@ enum AgentRunEventPresenter {
             return AgentRunTimelineItem(title: "ReAct 思考", detail: step.thought, systemImage: "bubble.left.and.text.bubble.right", status: .info)
         case let .actionProposed(call):
             return AgentRunTimelineItem(title: "ReAct 动作：\(call.toolName)", detail: nil, systemImage: "arrowshape.turn.up.right", status: .active)
+        case let .multiActionProposed(calls):
+            let names = calls.map(\.toolName).joined(separator: " -> ")
+            return AgentRunTimelineItem(title: "ReAct 多工具动作：\(names)", detail: "按顺序执行 \(calls.count) 个调用", systemImage: "arrow.trianglehead.branch", status: .active)
         case let .observationCreated(observation):
             return AgentRunTimelineItem(title: "观察结果：\(observation.toolName)", detail: observation.summary, systemImage: "eye", status: status(for: observation.status))
         case .resultGenerated:

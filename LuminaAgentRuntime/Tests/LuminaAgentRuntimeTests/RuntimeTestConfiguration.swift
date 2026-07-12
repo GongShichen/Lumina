@@ -33,7 +33,11 @@ func luminaTestRuntimeConfiguration(
     stopOnToolFailure: Bool = false,
     rollbackFailedSideEffects: Bool = true,
     emitVerboseEvents: Bool = true,
-    preservedStepsAfterCompaction: Int = 6
+    preservedStepsAfterCompaction: Int = 6,
+    yoloMode: Bool = false,
+    multiToolUseEnabled: Bool = true,
+    continueReadOnlyMultiToolFailures: Bool = true,
+    ignoreInternalToolCalls: Bool = false
 ) -> LuminaAgentRuntimeConfiguration {
     LuminaAgentRuntimeConfiguration(
         maximumToolCalls: maximumToolCalls,
@@ -50,7 +54,11 @@ func luminaTestRuntimeConfiguration(
         stopOnToolFailure: stopOnToolFailure,
         rollbackFailedSideEffects: rollbackFailedSideEffects,
         emitVerboseEvents: emitVerboseEvents,
-        preservedStepsAfterCompaction: preservedStepsAfterCompaction
+        preservedStepsAfterCompaction: preservedStepsAfterCompaction,
+        yoloMode: yoloMode,
+        multiToolUseEnabled: multiToolUseEnabled,
+        continueReadOnlyMultiToolFailures: continueReadOnlyMultiToolFailures,
+        ignoreInternalToolCalls: ignoreInternalToolCalls
     )
 }
 
@@ -58,8 +66,8 @@ let luminaKernelRuntimeConfigurationJSON = """
 {"maxIterations":12,"maxToolCalls":8,"contextWindowTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false}
 """
 
-func luminaKernelRuntimeConfigurationJSON(maxIterations: Int) -> String {
+func luminaKernelRuntimeConfigurationJSON(maxIterations: Int, yoloMode: Bool = false) -> String {
     """
-    {"maxIterations":\(maxIterations),"maxToolCalls":8,"contextWindowTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false}
+    {"maxIterations":\(maxIterations),"maxToolCalls":8,"contextWindowTokens":12000,"maxOutputTokens":4096,"reservedOutputTokens":256,"maxObservationCharacters":1500,"toolResultTokenBudget":1024,"compactThresholdTokens":1800,"maxCompactFailures":3,"maxReasoningSteps":3,"maxReplayObservations":2,"stopOnToolFailure":false,"yoloMode":\(yoloMode)}
     """
 }

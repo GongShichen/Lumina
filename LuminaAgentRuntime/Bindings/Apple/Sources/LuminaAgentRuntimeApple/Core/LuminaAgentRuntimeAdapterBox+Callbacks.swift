@@ -10,7 +10,7 @@ extension LuminaAgentRuntimeAdapterBox {
             let step = try await stepGenerator.nextStep(context: context)
             return step.runtimeTransportJSON
         } catch {
-            return #"{"type":"cannot_complete","thought":"model callback failed","reason":"\#(Self.escape(error.localizedDescription))"}"#
+            return #"{"type":"cannot_complete","thinking":"model callback failed","reason":"\#(Self.escape(error.localizedDescription))"}"#
         }
     }
 
@@ -89,7 +89,7 @@ extension LuminaAgentRuntimeAdapterBox {
 
             case "tool_input":
                 let call = try Self.toolCallFromObject(payload)
-                guard let tool = toolsByName[call.toolName] else {
+                guard let schema = modelVisibleToolSchema(named: call.toolName) else {
                     return Self.guardrailDecisionJSON("reject", message: "tool is not registered")
                 }
                 guard !guardrails.toolInput.isEmpty else { return Self.guardrailDecisionJSON("allow") }
@@ -97,7 +97,7 @@ extension LuminaAgentRuntimeAdapterBox {
                 var current = call
                 var rewritten = false
                 for guardrail in guardrails.toolInput {
-                    switch await guardrail.evaluate(call: current, schema: tool.schema, request: request) {
+                    switch await guardrail.evaluate(call: current, schema: schema, request: request) {
                     case .allow:
                         continue
                     case let .rewrite(value):
@@ -118,14 +118,14 @@ extension LuminaAgentRuntimeAdapterBox {
                 let callObject = payload["call"] as? [String: Any] ?? [:]
                 let resultObject = payload["result"] as? [String: Any] ?? [:]
                 let call = try Self.toolCallFromObject(callObject)
-                guard let tool = toolsByName[call.toolName] else {
+                guard let schema = modelVisibleToolSchema(named: call.toolName) else {
                     return Self.guardrailDecisionJSON("reject", message: "tool is not registered")
                 }
                 let request = currentRequest ?? LuminaAgentRequest(text: "")
                 var result = Self.toolResultFromObject(resultObject, fallbackToolName: call.toolName)
                 var rewritten = false
                 for guardrail in guardrails.toolOutput {
-                    switch await guardrail.evaluate(result: result, call: call, schema: tool.schema, request: request) {
+                    switch await guardrail.evaluate(result: result, call: call, schema: schema, request: request) {
                     case .allow:
                         continue
                     case let .rewrite(value):
@@ -177,7 +177,7 @@ extension LuminaAgentRuntimeAdapterBox {
             let request = try Self.decodeRequest(fromRuntimeJSON: requestJSON)
             let runtimeRequest = LuminaRuntimeContextRequest(
                 request: request,
-                availableTools: tools.map(\.schema),
+                availableTools: modelVisibleToolSchemas(),
                 trace: trace,
                 iteration: trace.steps.count,
                 remainingToolCalls: max(0, configuration.maximumToolCalls - trace.actionCount),
@@ -264,7 +264,7 @@ extension LuminaAgentRuntimeAdapterBox {
         let context = LuminaAgentRuntimeHookContext(
             request: currentRequest ?? LuminaAgentRequest(text: ""),
             lifecyclePayload: lifecyclePayload,
-            availableTools: tools.map(\.schema),
+            availableTools: modelVisibleToolSchemas(),
             trace: trace,
             toolCall: toolCall,
             toolResult: toolResult
@@ -402,6 +402,8 @@ extension LuminaAgentRuntimeAdapterBox {
                 currentEventSink?(.thoughtGenerated(step))
             case .action:
                 if let call = step.action { currentEventSink?(.actionProposed(call)) }
+            case .multiAction:
+                currentEventSink?(.multiActionProposed(step.toolCalls))
             case .result:
                 currentEventSink?(.resultGenerated(step.resultMarkdown ?? ""))
             case .observation:
@@ -420,7 +422,13 @@ extension LuminaAgentRuntimeAdapterBox {
         let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let runtimeDebug = object?["runtime_debug"] as? [String: Any]
         let requestObject = (runtimeDebug?["raw_request"] as? [String: Any]) ?? (object?["request"] as? [String: Any])
-        let request = try Self.decodeRequest(fromObject: requestObject) ?? (currentRequest ?? LuminaAgentRequest(text: ""))
+        var request = try Self.decodeRequest(fromObject: requestObject) ?? (currentRequest ?? LuminaAgentRequest(text: ""))
+        if request.systemInstructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let instructions = object?["instructions"] as? [String: Any],
+           let system = instructions["system"] as? String,
+           !system.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.systemInstructions = system
+        }
         currentRequest = request
         var loadedContext = LuminaRuntimeContext.empty
         let contextEnvelope = object?["context"] as? [String: Any]
@@ -443,7 +451,7 @@ extension LuminaAgentRuntimeAdapterBox {
                 trace.steps.append(.observation(observation))
             }
         }
-        let schemas = tools.map(\.schema)
+        let schemas = modelVisibleToolSchemas()
         let iteration = budget?["iteration"] as? Int ?? trace.steps.count
         let remainingToolCalls = (budget?["remaining_tool_calls"] as? Int) ?? (budget?["remainingToolCalls"] as? Int) ?? max(0, configuration.maximumToolCalls - trace.actionCount)
         let progressSink: (@Sendable (LuminaStepGenerationProgress) -> Void)?
@@ -500,7 +508,7 @@ extension LuminaAgentRuntimeAdapterBox {
         }
         let estimatedCharacters = LuminaReActContextWindowEstimator.estimateCharacters(
             request: request,
-            schemas: tools.map(\.schema),
+            schemas: modelVisibleToolSchemas(),
             trace: trace,
             loadedContext: loadedContext
         )
@@ -509,7 +517,7 @@ extension LuminaAgentRuntimeAdapterBox {
                 agentRequest: request,
                 trace: trace,
                 loadedContext: loadedContext,
-                availableTools: tools.map(\.schema),
+                availableTools: modelVisibleToolSchemas(),
                 estimatedCharacters: estimatedCharacters,
                 characterBudget: max(1, configuration.contextWindowTokens - configuration.reservedOutputTokens) * 4,
                 preservedStepCount: configuration.preservedStepsAfterCompaction,
@@ -584,7 +592,7 @@ extension LuminaAgentRuntimeAdapterBox {
 
     static func stepFromRuntimePayload(_ payload: [String: Any]) -> LuminaReActStep? {
         let type = (payload["type"] as? String)?.lowercased()
-        let thought = payload["thought"] as? String
+        let thought = payload["thinking"] as? String
         switch type {
         case "reasoning":
             return .thought(thought ?? "")
@@ -597,6 +605,21 @@ extension LuminaAgentRuntimeAdapterBox {
                 thought: thought ?? "",
                 call: LuminaToolCall(toolName: toolName, arguments: arguments, requiresConfirmation: payload["requires_confirmation"] as? Bool ?? false)
             )
+        case "multi_tool_use":
+            guard let toolCallObjects = payload["tool_calls"] as? [[String: Any]] else { return nil }
+            let calls = toolCallObjects.compactMap { object -> LuminaToolCall? in
+                guard let toolName = object["tool_name"] as? String else { return nil }
+                let parameters = object["parameters"] ?? [:]
+                let parameterData = try? JSONSerialization.data(withJSONObject: parameters)
+                let arguments = parameterData.flatMap { try? JSONDecoder().decode([String: LuminaJSONValue].self, from: $0) } ?? [:]
+                return LuminaToolCall(
+                    toolName: toolName,
+                    arguments: arguments,
+                    requiresConfirmation: object["requires_confirmation"] as? Bool ?? false
+                )
+            }
+            guard !calls.isEmpty else { return nil }
+            return .multiAction(thought: thought ?? "", calls: calls)
         case "result":
             return .result(payload["content"] as? String ?? "", thought: thought)
         case "cannot_complete":

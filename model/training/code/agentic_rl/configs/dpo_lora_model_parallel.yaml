@@ -4,8 +4,8 @@ model:
   load_in_8bit: false
   torch_dtype: bfloat16
   device_map:
-    model.vision_tower: 1
-    model.merger: 1
+    model.vision_tower: 3
+    model.merger: 3
     model.language_model.embed_tokens: 0
     model.language_model.layers.0: 0
     model.language_model.layers.1: 0
@@ -19,18 +19,18 @@ model:
     model.language_model.layers.9: 1
     model.language_model.layers.10: 1
     model.language_model.layers.11: 1
-    model.language_model.layers.12: 1
-    model.language_model.layers.13: 1
-    model.language_model.layers.14: 1
-    model.language_model.layers.15: 1
-    model.language_model.layers.16: 1
-    model.language_model.layers.17: 1
-    model.language_model.layers.18: 1
-    model.language_model.layers.19: 1
-    model.language_model.layers.20: 1
-    model.language_model.layers.21: 1
-    model.language_model.layers.22: 1
-    model.language_model.layers.23: 1
+    model.language_model.layers.12: 2
+    model.language_model.layers.13: 2
+    model.language_model.layers.14: 2
+    model.language_model.layers.15: 2
+    model.language_model.layers.16: 2
+    model.language_model.layers.17: 2
+    model.language_model.layers.18: 3
+    model.language_model.layers.19: 3
+    model.language_model.layers.20: 3
+    model.language_model.layers.21: 3
+    model.language_model.layers.22: 3
+    model.language_model.layers.23: 3
     model.language_model.norm: 0
     model.language_model.rotary_emb: 0
     lm_head: 0
@@ -40,27 +40,31 @@ model:
     - projector
     - resampler
 data:
-  train_file: ../TrainingData/splits/dpo_general_train.jsonl
-  eval_file: ../TrainingData/splits/dpo_general_test.jsonl
+  train_file: /root/rivermind-data/lumina-agentic-training/data/TrainingData/splits/dpo_general_train.jsonl
+  eval_file: /root/rivermind-data/lumina-agentic-training/data/TrainingData/splits/dpo_general_test.jsonl
   downsample_mode: 16x
   max_slice_nums: 9
 training:
   output_dir: /root/rivermind-data/lumina-agentic-training/runs/dpo-lora
   run_name: minicpmv46-agentic-xml-standard-dpo
-  per_device_train_batch_size: 1
+  per_device_train_batch_size: 2
   per_device_eval_batch_size: 1
-  gradient_accumulation_steps: 16
+  gradient_accumulation_steps: 8
   learning_rate: 0.000005
   num_train_epochs: 2
   logging_steps: 5
-  eval_strategy: "no"
-  save_steps: 100
+  eval_strategy: steps
+  eval_steps: 200
+  save_steps: 200
   save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: eval_loss
+  greater_is_better: false
   report_to: swanlab
   beta: 0.05
   reference_free: false
   length_normalize: false
-  max_length: 8192
+  max_length: 4096
   bf16: true
   tf32: true
   gradient_checkpointing: true
@@ -68,8 +72,8 @@ training:
   dataloader_pin_memory: true
   remove_unused_columns: false
 lora:
-  r: 128
-  lora_alpha: 256
+  r: 64
+  lora_alpha: 128
   lora_dropout: 0.04
   bias: none
   task_type: CAUSAL_LM

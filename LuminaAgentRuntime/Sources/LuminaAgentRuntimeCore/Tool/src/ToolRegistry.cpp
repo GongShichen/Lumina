@@ -54,6 +54,20 @@ static std::vector<std::string> extractStringArrayItems(const std::string &array
     return values;
 }
 
+static std::map<std::string, std::string> extractStringMapItems(const std::string &objectJson) {
+    std::map<std::string, std::string> values;
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(objectJson, fields)) {
+        return values;
+    }
+    for (const auto &entry : fields) {
+        if (entry.second.kind == JsonKind::string) {
+            values[entry.first] = entry.second.stringValue;
+        }
+    }
+    return values;
+}
+
 static std::vector<std::string> splitCommaSeparated(const std::string &value) {
     std::vector<std::string> parts;
     std::string current;
@@ -106,13 +120,32 @@ std::string ToolRegistry::registerRecord(const std::string &schemaJson, bool met
     }
 
     names_.insert(name);
+    for (auto it = aliases_.begin(); it != aliases_.end();) {
+        if (it->second == name) {
+            aliasWarnings_.erase(it->first);
+            it = aliases_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     ToolSchemaRecord record = parseRecord(schema);
     record.metadataOnly = metadataOnly;
     if (metadataOnly) {
         record.deferByDefault = true;
     }
-    readOnly_[name] = isReadOnlySideEffect(record.sideEffect) || boolField(fields, "readOnly", false);
+    readOnly_[name] = isReadOnlySideEffect(record.sideEffect) || boolField(fields, "readOnly", boolField(fields, "read_only", false));
     records_[name] = record;
+    for (const std::string &alias : record.aliases) {
+        if (!alias.empty() && alias != name) {
+            aliases_[alias] = name;
+        }
+    }
+    for (const auto &entry : record.deprecatedAliases) {
+        if (!entry.first.empty() && entry.first != name) {
+            aliases_[entry.first] = name;
+            aliasWarnings_[entry.first] = entry.second.empty() ? "deprecated tool alias" : entry.second;
+        }
+    }
     if (!metadataOnly) {
         bool replaced = false;
         for (std::string &existing : schemas_) {
@@ -131,69 +164,88 @@ std::string ToolRegistry::registerRecord(const std::string &schemaJson, bool met
 }
 
 bool ToolRegistry::contains(const std::string &toolName) const {
-    return names_.count(toolName) > 0;
+    return !resolveName(toolName).empty();
+}
+
+std::string ToolRegistry::resolveName(const std::string &toolName) const {
+    if (names_.count(toolName) > 0) {
+        return toolName;
+    }
+    auto aliasIt = aliases_.find(toolName);
+    return aliasIt == aliases_.end() ? "" : aliasIt->second;
+}
+
+std::string ToolRegistry::aliasWarning(const std::string &toolName) const {
+    auto warningIt = aliasWarnings_.find(toolName);
+    return warningIt == aliasWarnings_.end() ? "" : warningIt->second;
 }
 
 bool ToolRegistry::isDeferred(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it != records_.end() && !it->second.alwaysLoad && it->second.deferByDefault;
 }
 
 bool ToolRegistry::isCallable(const std::string &toolName, const std::set<std::string> &loadedToolNames) const {
-    auto it = records_.find(toolName);
+    const std::string canonicalName = resolveName(toolName);
+    auto it = records_.find(canonicalName);
     if (it == records_.end() || it->second.metadataOnly) {
         return false;
     }
-    if (!isDeferred(toolName)) {
+    if (!isDeferred(canonicalName)) {
         return true;
     }
-    return loadedToolNames.count(toolName) > 0;
+    return loadedToolNames.count(canonicalName) > 0;
 }
 
 bool ToolRegistry::isReadOnly(const std::string &toolName) const {
-    auto it = readOnly_.find(toolName);
+    auto it = readOnly_.find(resolveName(toolName));
     return it != readOnly_.end() && it->second;
 }
 
 bool ToolRegistry::isConcurrencySafe(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it != records_.end() && it->second.concurrencySafe;
 }
 
 bool ToolRegistry::requiresUserInteraction(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it != records_.end() && it->second.requiresUserInteraction;
 }
 
+bool ToolRegistry::requiresConfirmation(const std::string &toolName) const {
+    auto it = records_.find(resolveName(toolName));
+    return it != records_.end() && it->second.requiresConfirmation;
+}
+
 std::string ToolRegistry::sideEffect(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it == records_.end() ? "" : it->second.sideEffect;
 }
 
 std::string ToolRegistry::sensitivity(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it == records_.end() ? "" : it->second.sensitivity;
 }
 
 bool ToolRegistry::isDestructive(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it != records_.end() && it->second.destructive;
 }
 
 std::string ToolRegistry::interruptBehavior(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it == records_.end() ? "" : it->second.interruptBehavior;
 }
 
 std::string ToolRegistry::idempotencyPolicy(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it == records_.end() || it->second.idempotencyPolicy.empty()
         ? "replay_identical"
         : it->second.idempotencyPolicy;
 }
 
 int ToolRegistry::maxResultSizeCharacters(const std::string &toolName) const {
-    auto it = records_.find(toolName);
+    auto it = records_.find(resolveName(toolName));
     return it == records_.end() ? 0 : it->second.maxResultSize;
 }
 
@@ -251,6 +303,7 @@ std::string ToolRegistry::compactRecordJson(const ToolSchemaRecord &record, bool
            << "\"destructive\":" << jsonBool(record.destructive) << ","
            << "\"concurrency_safe\":" << jsonBool(record.concurrencySafe) << ","
            << "\"requires_user_interaction\":" << jsonBool(record.requiresUserInteraction) << ","
+           << "\"requires_confirmation\":" << jsonBool(record.requiresConfirmation) << ","
            << "\"interrupt_behavior\":" << jsonString(record.interruptBehavior) << ","
            << "\"idempotency_policy\":" << jsonString(record.idempotencyPolicy) << ","
            << "\"sensitivity\":" << jsonString(record.sensitivity) << ","
@@ -276,6 +329,15 @@ std::string ToolRegistry::compactRecordJson(const ToolSchemaRecord &record, bool
                    << "}";
         }
     output << "]";
+    output << ",\"deprecated_aliases\":{";
+    size_t deprecatedAliasIndex = 0;
+    for (const auto &entry : record.deprecatedAliases) {
+        if (deprecatedAliasIndex++ > 0) {
+            output << ",";
+        }
+        output << jsonString(entry.first) << ":" << jsonString(entry.second);
+    }
+    output << "}";
     if (includeSchema) {
         output << ",\"strict\":" << jsonBool(record.strict)
                << ",\"input_schema\":" << (record.inputSchema.empty() ? "null" : record.inputSchema)
@@ -307,6 +369,7 @@ std::string ToolRegistry::capabilityListJson(const std::set<std::string> &loaded
                << "\"read_only\":" << jsonBool(isReadOnly(record.name)) << ","
                << "\"destructive\":" << jsonBool(record.destructive) << ","
                << "\"requires_user_interaction\":" << jsonBool(record.requiresUserInteraction) << ","
+               << "\"requires_confirmation\":" << jsonBool(record.requiresConfirmation) << ","
                << "\"idempotency_policy\":" << jsonString(record.idempotencyPolicy) << ","
                << "\"aliases\":[";
         for (size_t aliasIndex = 0; aliasIndex < record.aliases.size(); aliasIndex++) {
@@ -417,6 +480,61 @@ std::string ToolRegistry::discoverToolsJson(const std::string &query, const std:
     return output.str();
 }
 
+std::string ToolRegistry::mcpCatalogJson(const std::set<std::string> &loadedToolNames) const {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const auto &entry : records_) {
+        const ToolSchemaRecord &record = entry.second;
+        if (!isMCPRecord(record) || !shouldExposeRecord(record, loadedToolNames)) {
+            continue;
+        }
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << "{"
+               << "\"name\":" << jsonString(record.name) << ","
+               << "\"description\":" << jsonString(truncateToCharacters(record.description, 160)) << ","
+               << "\"category\":" << jsonString(record.category) << ","
+               << "\"deferred\":" << jsonBool(isDeferred(record.name)) << ","
+               << "\"loaded\":" << jsonBool(!isDeferred(record.name) || loadedToolNames.count(record.name) > 0)
+               << "}";
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string ToolRegistry::discoverMCPToolsJson(
+    const std::string &query,
+    int maxResults,
+    bool includeSchemas,
+    const std::set<std::string> &loadedToolNames
+) const {
+    const int safeMax = maxResults <= 0 ? static_cast<int>(records_.size()) : maxResults;
+    std::ostringstream output;
+    output << "{\"ok\":true,\"matches\":[";
+    int emitted = 0;
+    for (const auto &entry : records_) {
+        const ToolSchemaRecord &record = entry.second;
+        if (!isMCPRecord(record) || !recordMatches(record, query, "")) {
+            continue;
+        }
+        if (emitted > 0) {
+            output << ",";
+        }
+        output << compactRecordJson(record, includeSchemas && shouldExposeRecord(record, loadedToolNames));
+        emitted += 1;
+        if (emitted >= safeMax) {
+            break;
+        }
+    }
+    output << "],\"query\":" << jsonString(query)
+           << ",\"total_mcp_tools\":" << emitted
+           << ",\"catalog\":" << mcpCatalogJson(loadedToolNames)
+           << "}";
+    return output.str();
+}
+
 std::vector<std::string> ToolRegistry::deferredToolNames() const {
     std::vector<std::string> names;
     for (const auto &entry : records_) {
@@ -440,7 +558,7 @@ int ToolRegistry::estimatedDeferredSchemaTokens() const {
 }
 
 std::string ToolRegistry::validateCallJson(const std::string &toolName, const std::string &parametersJson) const {
-    auto recordIt = records_.find(toolName);
+    auto recordIt = records_.find(resolveName(toolName));
     if (recordIt == records_.end()) {
         return "{\"ok\":false,\"error\":\"tool is not registered\"}";
     }
@@ -483,7 +601,7 @@ std::string ToolRegistry::validateResultJson(const std::string &toolName, const 
 }
 
 std::string ToolRegistry::redactedParametersJson(const std::string &toolName, const std::string &parametersJson) const {
-    auto recordIt = records_.find(toolName);
+    auto recordIt = records_.find(resolveName(toolName));
     if (recordIt == records_.end()) {
         return parametersJson.empty() ? "{}" : parametersJson;
     }
@@ -505,7 +623,14 @@ std::string ToolRegistry::redactedParametersJson(const std::string &toolName, co
             output << ",";
         }
         output << jsonString(entry.first) << ":";
-        output << (sensitive.count(entry.first) > 0 ? jsonString("[redacted]") : entry.second.raw);
+        const std::string key = lowercased(entry.first);
+        const bool sensitiveName = key.find("token") != std::string::npos ||
+            key.find("secret") != std::string::npos ||
+            key.find("password") != std::string::npos ||
+            key.find("authorization") != std::string::npos ||
+            key.find("api_key") != std::string::npos ||
+            key.find("apikey") != std::string::npos;
+        output << (sensitive.count(entry.first) > 0 || sensitiveName ? jsonString("[redacted]") : entry.second.raw);
     }
     output << "}";
     return output.str();
@@ -540,11 +665,13 @@ ToolRegistry::ToolSchemaRecord ToolRegistry::parseRecord(const std::string &sche
     record.destructive = boolField(fields, "destructive", false);
     record.concurrencySafe = boolField(fields, "concurrencySafe", boolField(fields, "concurrency_safe", false));
     record.requiresUserInteraction = boolField(fields, "requiresUserInteraction", boolField(fields, "requires_user_interaction", false));
+    record.requiresConfirmation = boolField(fields, "requiresConfirmation", boolField(fields, "requires_confirmation", false));
     record.strict = boolField(fields, "strict", false);
     record.alwaysLoad = boolField(fields, "alwaysLoad", boolField(fields, "always_load", false));
     record.deferByDefault = boolField(fields, "deferByDefault", boolField(fields, "defer_by_default", false));
     record.maxResultSize = intField(fields, "maxResultSize", intField(fields, "max_result_size", 0));
     record.aliases = extractStringArrayItems(rawField(fields, "aliases", "[]"));
+    record.deprecatedAliases = extractStringMapItems(rawField(fields, "deprecatedAliases", rawField(fields, "deprecated_aliases", "{}")));
     for (const std::string &parameterJson : extractObjectArrayItems(rawField(fields, "parameters", "[]"))) {
         std::map<std::string, JsonField> parameterFields;
         parseFieldsOrEmpty(parameterJson, parameterFields);
@@ -642,6 +769,14 @@ bool ToolRegistry::recordMatches(const ToolSchemaRecord &record, const std::stri
         }
     }
     return haystack.find(normalizedQuery) != std::string::npos;
+}
+
+bool ToolRegistry::isMCPRecord(const ToolSchemaRecord &record) const {
+    const std::string name = lowercased(record.name);
+    const std::string category = lowercased(record.category);
+    return name.rfind("mcp__", 0) == 0 ||
+        name.rfind("mcp.", 0) == 0 ||
+        category == "mcp";
 }
 
 } // namespace LuminaAgent

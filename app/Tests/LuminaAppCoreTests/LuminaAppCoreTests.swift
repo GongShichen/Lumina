@@ -696,6 +696,24 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(report.strictToolPassCount, 0)
     }
 
+    func testBenchmarkStrictToolPassRequiresExpectedOrder() {
+        let reordered = benchmarkResult(
+            id: "reordered",
+            expectedTools: ["device.current_time", "text.transform"],
+            actualTools: ["text.transform", "device.current_time"]
+        )
+        let orderedWithExtraExpectedTool = benchmarkResult(
+            id: "ordered-subsequence",
+            expectedTools: ["device.current_time", "text.transform"],
+            actualTools: ["device.current_time", "network.status", "text.transform"]
+        )
+
+        XCTAssertFalse(reordered.orderedToolMatch)
+        XCTAssertFalse(reordered.strictToolPassed)
+        XCTAssertTrue(orderedWithExtraExpectedTool.orderedToolMatch)
+        XCTAssertFalse(orderedWithExtraExpectedTool.strictToolPassed)
+    }
+
     func testBenchmarkRuntimeFailureDoesNotPassSemanticsByDefault() {
         let incomplete = benchmarkResult(
             id: "incomplete",
@@ -787,6 +805,38 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(report.toolExecutionAt1Rate, 0, accuracy: 0.0001)
     }
 
+    func testBenchmarkReportAggregatesMiniCPMContractEvidence() {
+        var metrics = LuminaBenchmarkRuntimeMetrics()
+        metrics.modelGenerationValidatedCount = 2
+        metrics.modelStreamContainsSpecialTokensCount = 2
+        metrics.hostReturnedCanonicalStepCount = 2
+        metrics.coreExtractedSpecialTokenStepCount = 1
+        metrics.canonicalToolUseStepCount = 1
+        metrics.canonicalResultStepCount = 1
+        metrics.legacyOutputSchemaObservedCount = 0
+
+        let task = benchmarkResult(
+            id: "contract",
+            expectedTools: ["device.current_time"],
+            actualTools: ["device.current_time"],
+            runtimeMetrics: metrics
+        )
+
+        let report = LuminaBenchmarkReport.make(
+            results: [task],
+            jsonReportURL: nil,
+            markdownReportURL: nil
+        )
+
+        XCTAssertEqual(report.modelGenerationValidatedCount, 2)
+        XCTAssertEqual(report.modelStreamContainsSpecialTokensCount, 2)
+        XCTAssertEqual(report.hostReturnedCanonicalStepCount, 2)
+        XCTAssertEqual(report.coreExtractedSpecialTokenStepCount, 1)
+        XCTAssertEqual(report.canonicalToolUseStepCount, 1)
+        XCTAssertEqual(report.canonicalResultStepCount, 1)
+        XCTAssertEqual(report.legacyOutputSchemaObservedCount, 0)
+    }
+
     private func benchmarkResult(
         id: String,
         expectedTools: [String],
@@ -794,7 +844,8 @@ final class LuminaAppCoreTests: XCTestCase {
         successfulTools: [String]? = nil,
         failedTools: [String] = [],
         semanticFailures: [String] = [],
-        status: String = "succeeded"
+        status: String = "succeeded",
+        runtimeMetrics: LuminaBenchmarkRuntimeMetrics = LuminaBenchmarkRuntimeMetrics()
     ) -> LuminaBenchmarkTaskResult {
         LuminaBenchmarkTaskResult(
             task: LuminaBenchmarkTask(
@@ -820,7 +871,7 @@ final class LuminaAppCoreTests: XCTestCase {
             stepGenerationMilliseconds: 1,
             toolMilliseconds: 1,
             modelMetrics: [],
-            runtimeMetrics: LuminaBenchmarkRuntimeMetrics(),
+            runtimeMetrics: runtimeMetrics,
             failureSummary: semanticFailures.first
         )
     }
@@ -945,6 +996,9 @@ private func collectReActCalls(
         case .action:
             guard let call = step.action else { return calls }
             calls.append(call)
+            trace.steps.append(step)
+        case .multiAction:
+            calls.append(contentsOf: step.toolCalls)
             trace.steps.append(step)
         case .result:
             return calls

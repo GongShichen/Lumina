@@ -23,6 +23,8 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let unexpectedToolCount: Int
     let failedToolCount: Int
     let replayedToolCount: Int
+    let orderedToolMatchCount: Int
+    let orderedToolMatchRate: Double
     let toolAttemptCount: Int
     let toolExecutionCount: Int
     let toolReplayCount: Int
@@ -54,10 +56,22 @@ struct LuminaBenchmarkReport: Codable, Hashable {
     let fallbackCount: Int
     let remoteModelInvocationCount: Int
     let localModelInvocationCount: Int
+    let modelGenerationValidatedCount: Int
+    let modelStreamContainsSpecialTokensCount: Int
+    let hostReturnedCanonicalStepCount: Int
+    let coreExtractedSpecialTokenStepCount: Int
+    let canonicalToolUseStepCount: Int
+    let canonicalResultStepCount: Int
+    let legacyOutputSchemaObservedCount: Int
     let runtimeObservationCount: Int
     let resultGeneratedCount: Int
     let hookEventCount: Int
     let toolFailureCount: Int
+    let multiToolGenerationCount: Int
+    let multiToolCallCount: Int
+    let multiToolPartialFailureCount: Int
+    let internalToolIgnoredCount: Int
+    let sideEffectBatchStopCount: Int
     let schemaTokensSavedEstimate: Int
     let toolDiscoveryHitRate: Double
     let deferredUnknownToolRate: Double
@@ -100,6 +114,8 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         case unexpectedToolCount
         case failedToolCount
         case replayedToolCount
+        case orderedToolMatchCount
+        case orderedToolMatchRate
         case toolAttemptCount
         case toolExecutionCount
         case toolReplayCount
@@ -131,10 +147,22 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         case fallbackCount
         case remoteModelInvocationCount
         case localModelInvocationCount
+        case modelGenerationValidatedCount
+        case modelStreamContainsSpecialTokensCount
+        case hostReturnedCanonicalStepCount
+        case coreExtractedSpecialTokenStepCount
+        case canonicalToolUseStepCount
+        case canonicalResultStepCount
+        case legacyOutputSchemaObservedCount
         case runtimeObservationCount
         case resultGeneratedCount
         case hookEventCount
         case toolFailureCount
+        case multiToolGenerationCount
+        case multiToolCallCount
+        case multiToolPartialFailureCount
+        case internalToolIgnoredCount
+        case sideEffectBatchStopCount
         case schemaTokensSavedEstimate
         case toolDiscoveryHitRate
         case deferredUnknownToolRate
@@ -172,6 +200,7 @@ struct LuminaBenchmarkReport: Codable, Hashable {
         let toolRequired = results.filter { !$0.expectedTools.isEmpty }.count
         let toolExecutionAt1 = results.filter(\.toolExecutedAt1).count
         let semanticPassed = results.filter(\.semanticPassed).count
+        let orderedToolMatch = results.filter(\.orderedToolMatch).count
         let exact = ratio(results.filter(\.exactMatch).count, completed)
         let missingToolCount = results.reduce(0) { $0 + $1.missingTools.count }
         let unexpectedToolCount = results.reduce(0) { $0 + $1.unexpectedTools.count }
@@ -223,6 +252,8 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             unexpectedToolCount: unexpectedToolCount,
             failedToolCount: failedToolCount,
             replayedToolCount: replayedToolCount,
+            orderedToolMatchCount: orderedToolMatch,
+            orderedToolMatchRate: ratio(orderedToolMatch, completed),
             toolAttemptCount: toolAttemptCount,
             toolExecutionCount: toolExecutionCount,
             toolReplayCount: toolReplayCount,
@@ -254,10 +285,22 @@ struct LuminaBenchmarkReport: Codable, Hashable {
             fallbackCount: runtimeMetrics.fallbackCount,
             remoteModelInvocationCount: runtimeMetrics.remoteModelInvocationCount,
             localModelInvocationCount: runtimeMetrics.localModelInvocationCount,
+            modelGenerationValidatedCount: runtimeMetrics.modelGenerationValidatedCount,
+            modelStreamContainsSpecialTokensCount: runtimeMetrics.modelStreamContainsSpecialTokensCount,
+            hostReturnedCanonicalStepCount: runtimeMetrics.hostReturnedCanonicalStepCount,
+            coreExtractedSpecialTokenStepCount: runtimeMetrics.coreExtractedSpecialTokenStepCount,
+            canonicalToolUseStepCount: runtimeMetrics.canonicalToolUseStepCount,
+            canonicalResultStepCount: runtimeMetrics.canonicalResultStepCount,
+            legacyOutputSchemaObservedCount: runtimeMetrics.legacyOutputSchemaObservedCount,
             runtimeObservationCount: runtimeMetrics.observationCount,
             resultGeneratedCount: runtimeMetrics.resultGeneratedCount,
             hookEventCount: runtimeMetrics.hookEventCount,
             toolFailureCount: runtimeMetrics.toolFailureCount,
+            multiToolGenerationCount: runtimeMetrics.multiToolGenerationCount,
+            multiToolCallCount: runtimeMetrics.multiToolCallCount,
+            multiToolPartialFailureCount: runtimeMetrics.multiToolPartialFailureCount,
+            internalToolIgnoredCount: runtimeMetrics.internalToolIgnoredCount,
+            sideEffectBatchStopCount: runtimeMetrics.sideEffectBatchStopCount,
             schemaTokensSavedEstimate: runtimeMetrics.schemaTokensSavedEstimate,
             toolDiscoveryHitRate: ratio(runtimeMetrics.toolLoadingDiscoveryHitCount, runtimeMetrics.toolLoadingSearchCount),
             deferredUnknownToolRate: ratio(runtimeMetrics.toolLoadingUnknownToolCount, max(1, runtimeMetrics.toolLoadingSearchCount + runtimeMetrics.toolLoadingLoadedCount)),

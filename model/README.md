@@ -8,7 +8,7 @@
 - `bundles/trained/MiniCPMV46ReActModel-AgenticSFTDPO-Q8/`：Agentic SFT+DPO 训练后的 GGUF app bundle。
 - `embeddings/BGETextEmbedding/`：BGE embedding 编译模型和 tokenizer。
 - `training/code/agentic_rl/`：SFT/DPO 训练包、配置、训练脚本和训练数据 QA 脚本。
-- `training/data/TrainingData/`：XML ReAct SFT/DPO 训练与评估数据。
+- `training/data/TrainingData/`：MiniCPM-V4.6 tool-call transport SFT/DPO 训练与评估数据。
 
 训练后的模型 bundle、训练代码和训练数据会随仓库提交；原始模型、embedding 模型、虚拟环境和缓存不提交，需要时通过脚本下载或从远端拉取。
 
@@ -66,16 +66,17 @@
 
 ## 模型训练
 
-训练基座是 MiniCPM-V 4.6。训练流程为 XML ReAct SFT、holdout 检查、standard DPO、LoRA 合并回 base model、GGUF Q8 转换。
+训练基座是 MiniCPM-V 4.6。训练流程为 MiniCPM-V4.6 special-token/tool-call transport SFT、holdout 检查、standard DPO、LoRA 合并回 base model、GGUF Q8 转换。
 
 SFT/DPO 均为 LoRA 微调，主要训练 language modules，并冻结 vision、visual、projector、resampler 等视觉相关模块。
 
 数据规模：
 
-- SFT train/test：16,673 / 1,867
-- DPO train/test：16,673 / 1,867
-- holdout evaluation：SFT 1,680，DPO 1,680
-- 当前提交的数据为 text/tool-only；已剔除 `localImagePath` 多模态图片样本。
+- SFT train/test/evaluation：50,844 / 6,351 / 6,351
+- DPO train/test/evaluation：41,126 / 5,139 / 5,139
+- 上下文窗口：16,000 tokens
+- 当前提交的数据为 text/tool-only，仅从公开 parquet/metadata 抽取；SFT 与 DPO public sources 不相交，覆盖英文与中文，以及 intent recognition、multi-turn rewrite、knowledge retrieval、tool use、agent multi-hop 和 observation-driven multi-turn tool use。
+- MiniCPM special token 清单：`training/data/TrainingData/minicpm_special_tokens.json`。
 
 训练数据 QA：
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,7 @@ from .train_common import (
     ChatTemplateCollator,
     DPODataset,
     collate_encoded,
+    completion_sequence_logps,
     init_swanlab,
     load_processor,
     load_q_lora_model,
@@ -36,8 +39,8 @@ class DPOCollator:
         for record in records:
             chosen.append(self.template_collator.encode_pair(record.prompt, record.chosen))
             rejected.append(self.template_collator.encode_pair(record.prompt, record.rejected))
-        chosen_batch = collate_encoded(chosen, self.pad_token_id)
-        rejected_batch = collate_encoded(rejected, self.pad_token_id)
+        chosen_batch = collate_encoded(chosen, self.pad_token_id, pad_to_length=self.template_collator.max_length)
+        rejected_batch = collate_encoded(rejected, self.pad_token_id, pad_to_length=self.template_collator.max_length)
         return {
             **{f"chosen_{key}": value for key, value in chosen_batch.items()},
             **{f"rejected_{key}": value for key, value in rejected_batch.items()},
@@ -89,15 +92,15 @@ def _move_tensors(payload: Any, device: torch.device) -> Any:
     return payload
 
 
-def _sequence_logps(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    labels = labels.to(logits.device)
-    shifted_logits = logits[:, :-1, :]
-    shifted_labels = labels[:, 1:]
-    mask = shifted_labels.ne(-100)
-    safe_labels = shifted_labels.masked_fill(~mask, 0)
-    target_logits = torch.gather(shifted_logits, dim=-1, index=safe_labels.unsqueeze(-1)).squeeze(-1)
-    token_logps = target_logits - torch.logsumexp(shifted_logits, dim=-1)
-    return (token_logps * mask).sum(dim=-1)
+def _concatenate_inputs(
+    chosen_inputs: dict[str, torch.Tensor], rejected_inputs: dict[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    if chosen_inputs.keys() != rejected_inputs.keys():
+        raise ValueError("chosen and rejected model inputs must have identical keys")
+    return {
+        key: torch.cat((chosen_inputs[key], rejected_inputs[key]), dim=0)
+        for key in chosen_inputs
+    }
 
 
 def _completion_lengths(labels: torch.Tensor) -> torch.Tensor:
@@ -129,11 +132,13 @@ class LuminaDPOTrainer:
                 input_device = _input_device(model)
                 chosen_inputs = _move_tensors(chosen_inputs, input_device)
                 rejected_inputs = _move_tensors(rejected_inputs, input_device)
+                combined_inputs = _concatenate_inputs(chosen_inputs, rejected_inputs)
+                combined_labels = torch.cat((chosen_labels, rejected_labels), dim=0)
+                chosen_batch_size = chosen_labels.shape[0]
 
-                chosen_outputs = model(**chosen_inputs)
-                rejected_outputs = model(**rejected_inputs)
-                policy_chosen = _sequence_logps(chosen_outputs.logits, chosen_labels)
-                policy_rejected = _sequence_logps(rejected_outputs.logits, rejected_labels)
+                policy_logps = completion_sequence_logps(model, combined_inputs, combined_labels)
+                policy_chosen = policy_logps[:chosen_batch_size]
+                policy_rejected = policy_logps[chosen_batch_size:]
                 chosen_lengths = _completion_lengths(chosen_labels)
                 rejected_lengths = _completion_lengths(rejected_labels)
                 if length_normalize:
@@ -146,10 +151,9 @@ class LuminaDPOTrainer:
                     if ref_model is None:
                         raise RuntimeError("standard DPO requires a frozen reference model")
                     with torch.no_grad():
-                        ref_chosen_outputs = ref_model(**chosen_inputs)
-                        ref_rejected_outputs = ref_model(**rejected_inputs)
-                        ref_chosen = _sequence_logps(ref_chosen_outputs.logits, chosen_labels)
-                        ref_rejected = _sequence_logps(ref_rejected_outputs.logits, rejected_labels)
+                        ref_logps = completion_sequence_logps(ref_model, combined_inputs, combined_labels)
+                        ref_chosen = ref_logps[:chosen_batch_size]
+                        ref_rejected = ref_logps[chosen_batch_size:]
                         if length_normalize:
                             ref_chosen = ref_chosen / chosen_lengths.to(ref_chosen.device)
                             ref_rejected = ref_rejected / rejected_lengths.to(ref_rejected.device)
@@ -167,6 +171,13 @@ class LuminaDPOTrainer:
                 if return_outputs:
                     return loss, {"preference_logits": logits.detach()}
                 return loss
+
+            def prediction_step(inner_self, model, inputs, prediction_loss_only, ignore_keys=None):
+                # DPO batches contain chosen/rejected-prefixed fields, so the base Trainer
+                # prediction path cannot call model(**inputs) directly during evaluation.
+                with torch.no_grad():
+                    loss = inner_self.compute_loss(model, inputs, return_outputs=False)
+                return loss.detach(), None, None
 
         self.trainer = _Trainer(
             model=model,
@@ -188,6 +199,11 @@ def main() -> None:
 
     args = parse_args()
     cfg = load_config(args.config)
+    training_cfg = cfg.get("training", {})
+    reference_free = bool(training_cfg.get("reference_free", False))
+    if reference_free:
+        raise ValueError("formal DPO requires reference_free: false")
+
     train_file = resolve_data_path(cfg["data"]["train_file"], config_path=args.config)
     dataset = DPODataset(train_file)
     if len(dataset) == 0:
@@ -198,8 +214,8 @@ def main() -> None:
         eval_dataset = DPODataset(eval_file)
 
     model_cfg = cfg.get("model", {})
+    init_swanlab("lumina-agentic-dpo", training_cfg.get("run_name"), cfg, required=True)
     model = load_q_lora_model(model_cfg, cfg.get("lora", {}), train=True)
-    reference_free = bool(cfg.get("training", {}).get("reference_free", False))
     ref_model = None
     if not reference_free:
         ref_model = load_q_lora_model(model_cfg, None, train=False)
@@ -208,9 +224,7 @@ def main() -> None:
             parameter.requires_grad = False
 
     processor = load_processor(model_cfg["name_or_path"])
-    init_swanlab("lumina-agentic-dpo", cfg.get("training", {}).get("run_name"), cfg)
-
-    training_args = TrainingArguments(**supported_dataclass_kwargs(TrainingArguments, cfg.get("training", {})))
+    training_args = TrainingArguments(**supported_dataclass_kwargs(TrainingArguments, training_cfg))
     template_collator = ChatTemplateCollator(
         processor,
         max_length=int(cfg.get("training", {}).get("max_length", 4096)),
@@ -229,8 +243,27 @@ def main() -> None:
         length_normalize=bool(cfg.get("training", {}).get("length_normalize", False)),
     )
     trainer.train()
-    trainer.save_model(cfg["training"]["output_dir"])
-    processor.save_pretrained(cfg["training"]["output_dir"])
+    output_dir = Path(cfg["training"]["output_dir"])
+    trainer.save_model(str(output_dir))
+    processor.save_pretrained(output_dir)
+    best_checkpoint = trainer.trainer.state.best_model_checkpoint
+    (output_dir / "best_checkpoint.json").write_text(
+        json.dumps(
+            {
+                "loadedAtEnd": bool(training_args.load_best_model_at_end),
+                "sourceCheckpoint": Path(best_checkpoint).name if best_checkpoint else None,
+                "bestMetric": trainer.trainer.state.best_metric,
+                "globalStep": trainer.trainer.state.global_step,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for checkpoint_dir in output_dir.glob("checkpoint-*"):
+        if checkpoint_dir.is_dir():
+            shutil.rmtree(checkpoint_dir)
 
 
 if __name__ == "__main__":

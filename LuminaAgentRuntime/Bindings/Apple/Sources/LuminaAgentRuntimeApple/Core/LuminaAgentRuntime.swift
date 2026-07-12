@@ -48,7 +48,16 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
     }
 
     public func availableToolSchemas() async -> [LuminaToolSchema] {
-        box.tools.map(\.schema)
+        box.modelVisibleToolSchemas()
+    }
+
+    @discardableResult
+    public func setYoloMode(_ enabled: Bool) -> String {
+        runtimeHandle?.setYoloMode(enabled) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+    }
+
+    public func yoloModeStatus() -> String {
+        runtimeHandle?.yoloModeStatus() ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
     }
 
     @discardableResult
@@ -66,6 +75,23 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
     @discardableResult
     public func registerDeferredToolMetadata(metadataJSON: String) -> String {
         runtimeHandle?.registerDeferredToolMetadata(metadataJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+    }
+
+    @discardableResult
+    public func registerSkillMetadata(metadataJSON: String) -> String {
+        let result = runtimeHandle?.registerSkillMetadata(metadataJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+        if ((try? JSONSerialization.jsonObject(with: Data(result.utf8))) as? [String: Any])?["ok"] as? Bool == true {
+            box.registeredSkillMetadataCount += 1
+        }
+        return result
+    }
+
+    public func discoverSkills(queryJSON: String = "{}") -> String {
+        runtimeHandle?.discoverSkills(queryJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
+    }
+
+    public func discoverMCPTools(queryJSON: String = "{}") -> String {
+        runtimeHandle?.discoverMCPTools(queryJSON) ?? #"{"ok":false,"error":"runtime handle unavailable"}"#
     }
 
     @discardableResult
@@ -244,7 +270,7 @@ let luminaAgentSwiftAdapterModelCallback: LuminaAgentModelCallback = { plannerIn
     let input = String(cString: plannerInput)
     let response = blockOn(
         isCancelled: { box.isCancellationRequested() },
-        cancellationValue: { #"{"type":"cannot_complete","thought":"cancelled","reason":"cancelled"}"# }
+        cancellationValue: { #"{"type":"cannot_complete","thinking":"cancelled","reason":"cancelled"}"# }
     ) {
         await box.generateStepJSON(plannerInputJSON: input)
     }
@@ -253,13 +279,13 @@ let luminaAgentSwiftAdapterModelCallback: LuminaAgentModelCallback = { plannerIn
 
 let luminaAgentSwiftAdapterStreamingModelCallback: LuminaAgentStreamingModelCallback = { plannerInput, emit, emitContext, context in
     guard let box = box(from: context), let plannerInput else {
-        return retainedCString(#"{"type":"cannot_complete","thought":"missing model callback context","reason":"missing model callback context"}"#)
+        return retainedCString(#"{"type":"cannot_complete","thinking":"missing model callback context","reason":"missing model callback context"}"#)
     }
     let input = String(cString: plannerInput)
     let safeEmitContext = LuminaAgentUnsafeEmitContext(rawValue: emitContext)
     let response = blockOn(
         isCancelled: { box.isCancellationRequested() },
-        cancellationValue: { #"{"type":"cannot_complete","thought":"cancelled","reason":"cancelled"}"# }
+        cancellationValue: { #"{"type":"cannot_complete","thinking":"cancelled","reason":"cancelled"}"# }
     ) {
         await box.generateStepJSON(plannerInputJSON: input) { progress in
             guard let emit else { return true }

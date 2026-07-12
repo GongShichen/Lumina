@@ -24,6 +24,7 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     var timingStartedAt: ContinuousClock.Instant?
     var stepGenerationMilliseconds: Double = 0
     var toolExecutionMilliseconds: Double = 0
+    var registeredSkillMetadataCount = 0
     private let cancellationLock = NSLock()
     private var cancellationRequested = false
 
@@ -78,6 +79,61 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         cancellationLock.lock()
         defer { cancellationLock.unlock() }
         return cancellationRequested
+    }
+
+    func modelVisibleToolSchemas() -> [LuminaToolSchema] {
+        var schemas = tools.map(\.schema)
+        let hostToolNames = Set(schemas.map(\.name))
+        let builtinSchemas = Self.runtimeDiscoveryToolSchemas(includeSkillDiscovery: registeredSkillMetadataCount > 0 || hostToolNames.contains("Skill"))
+        for schema in builtinSchemas where !hostToolNames.contains(schema.name) {
+            schemas.append(schema)
+        }
+        return schemas
+    }
+
+    func modelVisibleToolSchema(named name: String) -> LuminaToolSchema? {
+        if let tool = toolsByName[name] {
+            return tool.schema
+        }
+        return modelVisibleToolSchemas().first { $0.name == name }
+    }
+
+    private static func runtimeDiscoveryToolSchemas(includeSkillDiscovery: Bool) -> [LuminaToolSchema] {
+        var schemas: [LuminaToolSchema] = []
+        if includeSkillDiscovery {
+            schemas.append(LuminaToolSchema(
+                name: "runtime.skill_discovery",
+                description: "Discover available local skills. Use this before invoking Skill when the task may match a skill but the exact canonical skill name is uncertain.",
+                parameters: [
+                    LuminaToolParameterSchema(name: "query", type: .string, description: "Skill search query or select:canonical-skill-name.", required: false),
+                    LuminaToolParameterSchema(name: "max_results", type: .number, description: "Maximum number of skill matches.", required: false)
+                ],
+                sideEffect: .readOnly,
+                sensitivity: .normal,
+                destructive: false,
+                concurrencySafe: true,
+                alwaysLoad: true,
+                deferByDefault: false,
+                requiresConfirmation: false
+            ))
+        }
+        schemas.append(LuminaToolSchema(
+            name: "runtime.mcp_discovery",
+            description: "Discover MCP-style external provider tools and load selected deferred schemas for this session.",
+            parameters: [
+                LuminaToolParameterSchema(name: "query", type: .string, description: "MCP tool search query or select:mcp.tool-name.", required: false),
+                LuminaToolParameterSchema(name: "max_results", type: .number, description: "Maximum number of MCP tool matches.", required: false),
+                LuminaToolParameterSchema(name: "include_schemas", type: .bool, description: "Whether matching deferred schemas should be loaded for this session.", required: false)
+            ],
+            sideEffect: .readOnly,
+            sensitivity: .normal,
+            destructive: false,
+            concurrencySafe: true,
+            alwaysLoad: true,
+            deferByDefault: false,
+            requiresConfirmation: false
+        ))
+        return schemas
     }
 
     func makeRunResult(fromRuntimeResultJSON json: String, request: LuminaAgentRequest) -> LuminaAgentRunResult {

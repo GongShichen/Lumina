@@ -22,7 +22,34 @@ static std::string makeSessionIdentifier(const std::string &prefix) {
 RuntimeSession::RuntimeSession(RuntimeSessionConfig config)
     : config_(config),
       sessionId_(makeSessionIdentifier("session")),
-      runId_(makeSessionIdentifier("run")) {}
+      runId_(makeSessionIdentifier("run")) {
+    permissionState_.yoloMode = config_.yoloMode;
+}
+
+static std::string stringSetJson(const std::set<std::string> &values) {
+    std::ostringstream output;
+    output << "[";
+    size_t index = 0;
+    for (const std::string &value : values) {
+        if (index++ > 0) {
+            output << ",";
+        }
+        output << jsonString(value);
+    }
+    output << "]";
+    return output.str();
+}
+
+std::string RuntimePermissionState::json() const {
+    std::ostringstream output;
+    output << "{"
+           << "\"confirmed_tools\":" << stringSetJson(confirmedTools) << ","
+           << "\"confirmed_paths\":" << stringSetJson(confirmedPaths) << ","
+           << "\"confirmed_command_rules\":" << stringSetJson(confirmedCommandRules) << ","
+           << "\"yolo_mode\":" << jsonBool(yoloMode)
+           << "}";
+    return output.str();
+}
 
 const std::string &RuntimeSession::sessionId() const {
     return sessionId_;
@@ -74,6 +101,7 @@ std::string RuntimeSession::snapshotJson() const {
            << "\"observationCount\":" << observationCount_ << ","
            << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
            << "\"loaded_context_set\":" << loadedContextSetJson() << ","
+           << "\"permission_state\":" << permissionStateJson() << ","
            << "\"context_catalog_summary\":" << (trim(contextCatalogSummaryJson_).empty() ? "null" : contextCatalogSummaryJson_) << ","
            << "\"remainingToolCalls\":" << std::max(0, config_.maximumToolCalls - actionCount_) << ","
            << "\"remainingContextTokensEstimate\":" << remainingContextTokensEstimate() << ","
@@ -131,6 +159,7 @@ std::string RuntimeSession::checkpointJson() const {
            << "\"last_observation\":" << (trim(lastObservationJson_).empty() ? "null" : lastObservationJson_) << ","
            << "\"loaded_tool_set\":" << loadedToolSetJson() << ","
            << "\"loaded_context_set\":" << loadedContextSetJson() << ","
+           << "\"permission_state\":" << permissionStateJson() << ","
            << "\"context_catalog_summary\":" << (trim(contextCatalogSummaryJson_).empty() ? "null" : contextCatalogSummaryJson_) << ","
            << "\"runtime_state\":" << stateSnapshotJson() << ","
            << "\"tool_replay_ledger\":" << ledgerJson(toolCallLedger_) << ","
@@ -165,6 +194,56 @@ static bool restoreStateObject(
     return true;
 }
 
+static std::set<std::string> restoreStringSet(const std::string &arrayJson) {
+    std::set<std::string> values;
+    const std::string json = trim(arrayJson);
+    size_t index = 0;
+    while (index < json.size()) {
+        while (index < json.size() && json[index] != '"') {
+            index += 1;
+        }
+        if (index >= json.size()) {
+            break;
+        }
+        index += 1;
+        std::string value;
+        bool escaped = false;
+        while (index < json.size()) {
+            const char c = json[index++];
+            if (escaped) {
+                value += c;
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                if (!value.empty()) {
+                    values.insert(value);
+                }
+                break;
+            } else {
+                value += c;
+            }
+        }
+    }
+    return values;
+}
+
+static RuntimePermissionState restorePermissionStateObject(
+    const std::string &permissionStateJson,
+    const RuntimePermissionState &fallback
+) {
+    RuntimePermissionState state = fallback;
+    std::map<std::string, JsonField> fields;
+    if (!parseFieldsOrEmpty(permissionStateJson, fields)) {
+        return state;
+    }
+    state.confirmedTools = restoreStringSet(rawField(fields, "confirmed_tools", rawField(fields, "confirmedTools", "[]")));
+    state.confirmedPaths = restoreStringSet(rawField(fields, "confirmed_paths", rawField(fields, "confirmedPaths", "[]")));
+    state.confirmedCommandRules = restoreStringSet(rawField(fields, "confirmed_command_rules", rawField(fields, "confirmedCommandRules", "[]")));
+    state.yoloMode = boolField(fields, "yolo_mode", boolField(fields, "yoloMode", state.yoloMode));
+    return state;
+}
+
 bool RuntimeSession::restoreFromCheckpointJson(const std::string &checkpointJson, std::string &error) {
     std::map<std::string, JsonField> fields;
     if (!parseTopLevelObject(checkpointJson, fields, error)) {
@@ -190,6 +269,8 @@ bool RuntimeSession::restoreFromCheckpointJson(const std::string &checkpointJson
         pendingPayloadJson_ = rawField(pendingFields, "payload", pendingPayloadJson_.empty() ? "{}" : pendingPayloadJson_);
     }
     restoreStateObject(rawField(fields, "runtime_state", "{}"), state_);
+    permissionState_ = restorePermissionStateObject(rawField(fields, "permission_state", rawField(fields, "permissionState", "{}")), permissionState_);
+    config_.yoloMode = permissionState_.yoloMode;
     loadedToolNames_.clear();
     const std::string loadedToolsJson = trim(rawField(fields, "loaded_tool_set", "[]"));
     size_t loadedIndex = 0;
@@ -398,7 +479,7 @@ std::string RuntimeSession::finishIfNeeded() {
         if (resultMarkdown_.empty()) {
             resultMarkdown_ = terminationReason_ == "budget"
                 ? "### 已达到执行预算\n\nAgent 已停止继续调用工具。"
-                : "### 执行结束\n\n本次任务没有生成result。";
+                : "### 执行结束\n\n本次任务没有生成最终回答。";
         }
     }
     return snapshotJson();
@@ -619,6 +700,55 @@ std::string RuntimeSession::stateSnapshotJson(const std::string &scope) const {
     return output.str();
 }
 
+const RuntimePermissionState &RuntimeSession::permissionState() const {
+    return permissionState_;
+}
+
+std::string RuntimeSession::permissionStateJson() const {
+    return permissionState_.json();
+}
+
+bool RuntimeSession::yoloMode() const {
+    return permissionState_.yoloMode;
+}
+
+void RuntimeSession::setYoloMode(bool enabled) {
+    permissionState_.yoloMode = enabled;
+    config_.yoloMode = enabled;
+    appendTrace("permission_state_changed", "{\"yolo_mode\":" + jsonBool(enabled) + "}");
+}
+
+bool RuntimeSession::isToolPermissionConfirmed(const std::string &toolName) const {
+    return permissionState_.yoloMode || permissionState_.confirmedTools.count(toolName) > 0;
+}
+
+void RuntimeSession::confirmToolPermission(const std::string &toolName) {
+    if (!trim(toolName).empty()) {
+        permissionState_.confirmedTools.insert(toolName);
+        appendTrace("permission_grant_recorded", "{\"tool_name\":" + jsonString(toolName) + "}");
+    }
+}
+
+void RuntimeSession::clearPermissionGrants() {
+    permissionState_.confirmedTools.clear();
+    permissionState_.confirmedPaths.clear();
+    permissionState_.confirmedCommandRules.clear();
+    deniedToolCalls_.clear();
+    appendTrace("permission_grants_cleared", "{}");
+}
+
+int RuntimeSession::recordPermissionDenied(const std::string &toolName) {
+    if (trim(toolName).empty()) {
+        return 0;
+    }
+    deniedToolCalls_[toolName] += 1;
+    return deniedToolCalls_[toolName];
+}
+
+void RuntimeSession::clearPermissionDenials(const std::string &toolName) {
+    deniedToolCalls_.erase(toolName);
+}
+
 void RuntimeSession::pause(const std::string &kind, const std::string &payloadJson) {
     paused_ = true;
     pendingKind_ = kind;
@@ -688,6 +818,9 @@ bool RuntimeSession::isTerminated() const { return hasResult_ || !terminationRea
 int RuntimeSession::consecutiveReasoningCount() const { return consecutiveReasoningCount_; }
 int RuntimeSession::maximumConsecutiveReasoningSteps() const { return config_.maximumConsecutiveReasoningSteps; }
 int RuntimeSession::maximumConsecutiveReplayObservations() const { return config_.maximumConsecutiveReplayObservations; }
+bool RuntimeSession::multiToolUseEnabled() const { return config_.multiToolUseEnabled; }
+bool RuntimeSession::continueReadOnlyMultiToolFailures() const { return config_.continueReadOnlyMultiToolFailures; }
+bool RuntimeSession::ignoreInternalToolCalls() const { return config_.ignoreInternalToolCalls; }
 int RuntimeSession::compactFailureCount() const { return compactFailureCount_; }
 
 void RuntimeSession::setContextTokenUsageEstimate(int usedTokens) {
@@ -799,7 +932,7 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
 
     const std::string summary =
         "Runtime 已检测到同一个 tool_name + parameters 在本 session 中执行过，因此没有再次执行工具。"
-        "请基于上一轮结果继续；如果任务已经完成，请输出 result；不要再次调用相同参数。"
+        "请基于上一轮结果继续；如果任务已经完成，请正常回答；不要再次调用相同参数。"
         "上一轮状态：" + resultStatus + "。上一轮摘要：" + entry.summary;
     observationCount_ += 1;
     observations_.push_back(summary);
@@ -813,7 +946,7 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
         consecutiveReplayObservationCount_ >= config_.maximumConsecutiveReplayObservations) {
         hasResult_ = true;
         terminationReason_ = "replay-loop";
-        resultMarkdown_ = "### 无法继续执行\n\n模型连续重复同一个 tool call，runtime 已复用上一轮 observation 并停止重复执行。请根据上一轮 observation 选择下一步工具或输出result。";
+        resultMarkdown_ = "### 无法继续执行\n\n模型连续重复同一个 tool call，runtime 已复用上一轮 observation 并停止重复执行。请根据上一轮 observation 选择下一步工具或给出正常回答。";
     }
     appendTrace(
         "observation_created",

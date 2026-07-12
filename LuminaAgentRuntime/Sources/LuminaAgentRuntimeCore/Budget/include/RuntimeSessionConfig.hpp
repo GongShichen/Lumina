@@ -63,6 +63,21 @@ struct RuntimeSessionConfig {
     // When true, the first non-success tool result terminates the session.
     bool stopOnToolFailure = false;
 
+    // Whether a model may return an ordered batch of tool calls.
+    bool multiToolUseEnabled = true;
+
+    // Continue after failures only when every call in the batch is read-only.
+    bool continueReadOnlyMultiToolFailures = true;
+
+    // Ignore runtime-owned helper tools instead of exposing them as task actions.
+    bool ignoreInternalToolCalls = false;
+
+    // Explicit dangerous-mode switch aligned with LuminaCode backend YOLO mode.
+    // YOLO skips runtime permission/confirmation prompts, but does not bypass
+    // schema validation, tool existence/loading checks, guardrail tripwires,
+    // cancellation, budget limits, or replay/idempotency constraints.
+    bool yoloMode = false;
+
     // Tool schema disclosure profile for model-facing planner input:
     // full, compact, or name-only.
     std::string toolSchemaProfile = "compact";

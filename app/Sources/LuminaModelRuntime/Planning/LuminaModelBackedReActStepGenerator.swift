@@ -37,80 +37,10 @@ public struct LuminaModelBackedReActStepGenerator: LuminaReActStepGenerator {
             availableTools: context.availableTools,
             maxOutputTokensHint: Self.outputBudgetHint(for: context, repairAttempt: nil)
         )
-        print("[Lumina][StepGenerator] Calling model.generateJSON...")
-        let json: String
-        do {
-            json = try await generateJSON(input: input, context: context)
-        } catch {
-            print("[Lumina][StepGenerator] Generation normalization failed: \(error.localizedDescription), triggering format repair...")
-            return try await repairAndParse(
-                invalidJSON: error.localizedDescription,
-                parserError: error,
-                originalInput: input,
-                context: context
-            )
-        }
-        print("[Lumina][StepGenerator] model.generateJSON returned, length: \(json.count)")
-        do {
-            return try LuminaReActStepParser.parse(json: json, availableTools: context.availableTools)
-        } catch {
-            print("[Lumina][StepGenerator] Parser failed: \(error.localizedDescription), triggering repair...")
-            return try await repairAndParse(invalidJSON: json, parserError: error, originalInput: input, context: context)
-        }
-    }
-
-    private func repairAndParse(
-        invalidJSON: String,
-        parserError: Error,
-        originalInput: LuminaStructuredStepGenerationInput,
-        context: LuminaReActStepContext
-    ) async throws -> LuminaReActStep {
-        try Task.checkCancellation()
-        var currentInvalidJSON = invalidJSON
-        var currentParserError = parserError.localizedDescription
-        let isEvaluation = Self.isEvaluation(context)
-        for attempt in 1...1 {
-            let repairError = isEvaluation ? Self.safeXMLRepairError(currentParserError) : currentParserError
-            let repairInvalidOutput = isEvaluation ? "omitted forbidden XML/prose output" : currentInvalidJSON
-            let repairPrompt = isEvaluation
-                ? LuminaReActSchema.xmlRepairPrompt(
-                    invalidOutput: repairInvalidOutput,
-                    parserError: repairError,
-                    availableToolNames: context.availableTools.map(\.name),
-                    originalPrompt: originalInput.prompt,
-                    task: context.request.text,
-                    lastObservation: Self.latestObservationSummary(context)
-                )
-                : LuminaReActSchema.repairPrompt(
-                    invalidJSON: currentInvalidJSON,
-                    parserError: currentParserError,
-                    availableToolNames: context.availableTools.map(\.name),
-                    originalPrompt: originalInput.prompt,
-                    task: context.request.text,
-                    lastObservation: Self.latestObservationSummary(context)
-                )
-            context.progressSink?(LuminaStepGenerationProgress(
-                requestID: context.request.id,
-                iteration: context.iteration,
-                elapsedMilliseconds: 0,
-                message: "format_retry",
-                partialOutput: "attempt=\(attempt)"
-            ))
-            let repairedJSON = try await generateJSON(input: LuminaStructuredStepGenerationInput(
-                prompt: repairPrompt,
-                content: originalInput.content,
-                availableTools: originalInput.availableTools,
-                maxOutputTokensHint: Self.outputBudgetHint(for: context, repairAttempt: attempt)
-            ), context: context)
-            Self.debugLog("Repaired model JSON attempt \(attempt): \(repairedJSON.prefix(1_200))")
-            do {
-                return try LuminaReActStepParser.parse(json: repairedJSON, availableTools: context.availableTools)
-            } catch {
-                currentInvalidJSON = repairedJSON
-                currentParserError = error.localizedDescription
-            }
-        }
-        throw LuminaReActParserError.invalidSchema("model did not produce valid standard ReAct JSON after repair: \(currentParserError)")
+        print("[Lumina][StepGenerator] Calling model.generateJSON for MiniCPM-V 4.6 tool-call transport...")
+        let json = try await generateJSON(input: input, context: context)
+        print("[Lumina][StepGenerator] model.generateJSON returned normalized step, length: \(json.count)")
+        return try LuminaReActStepParser.parse(json: json, availableTools: context.availableTools)
     }
 
     private func generateJSON(
@@ -203,26 +133,6 @@ public struct LuminaModelBackedReActStepGenerator: LuminaReActStepGenerator {
             parts.append("error=\(error)")
         }
         return parts.joined(separator: "; ")
-    }
-
-    private static func safeXMLRepairError(_ error: String) -> String {
-        let lowered = error.lowercased()
-        if lowered.contains("<observation") || lowered.contains("observation") {
-            return "Forbidden runtime-owned observation tag appeared in model output."
-        }
-        if lowered.contains("<think") || lowered.contains("think") {
-            return "Forbidden private thinking tag appeared in model output."
-        }
-        if lowered.contains("tool_use") && lowered.contains("closing") {
-            return "tool_use XML was incomplete or malformed."
-        }
-        if lowered.contains("missing required parameter") {
-            return "Tool parameters were missing required keys."
-        }
-        if lowered.contains("schema") {
-            return "Output did not match the required ReAct schema."
-        }
-        return "Output was not exactly one valid Lumina XML ReAct step."
     }
 
     private static func debugLog(_ message: String) {

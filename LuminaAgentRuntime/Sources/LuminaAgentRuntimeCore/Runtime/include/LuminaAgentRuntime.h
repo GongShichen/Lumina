@@ -298,6 +298,48 @@ char *LuminaAgentRuntimeRegisterDeferredToolMetadata(
 );
 
 /**
+ * Registers lightweight LuminaCode-style skill metadata. Registered skills are
+ * discoverable through `runtime.skill_discovery`; execution is available only
+ * through a host-provided `Skill` tool callback.
+ */
+char *LuminaAgentRuntimeRegisterSkillMetadata(
+    LuminaAgentRuntimeRef *runtime,
+    const char *skill_metadata_json
+);
+
+/**
+ * Searches registered skill metadata and returns a LuminaCode-style listing
+ * reminder plus structured matches.
+ */
+char *LuminaAgentRuntimeDiscoverSkills(
+    LuminaAgentRuntimeRef *runtime,
+    const char *query_json
+);
+
+/**
+ * Searches registered MCP/provider tools. MCP tools execute through their
+ * normal registered tool schemas after provider registration/loading.
+ */
+char *LuminaAgentRuntimeDiscoverMCPTools(
+    LuminaAgentRuntimeRef *runtime,
+    const char *query_json
+);
+
+/**
+ * Enables or disables YOLO mode for future sessions created by this runtime.
+ *
+ * YOLO skips runtime permission and confirmation prompts, but it does not
+ * bypass schema validation, tool availability/loading checks, guardrail
+ * tripwires, cancellation, budgets, or replay/idempotency controls.
+ */
+char *LuminaAgentRuntimeSetYoloMode(LuminaAgentRuntimeRef *runtime, bool enabled);
+
+/**
+ * Returns `{"ok":true,"yolo_mode":...}` for the runtime default.
+ */
+char *LuminaAgentRuntimeGetYoloMode(LuminaAgentRuntimeRef *runtime);
+
+/**
  * Installs the model callback used to produce structured ReAct steps.
  *
  * The callback and `user_context` are stored without ownership transfer. Set a
@@ -709,6 +751,21 @@ char *LuminaAgentRuntimeSessionDeleteState(
 char *LuminaAgentRuntimeSessionStateSnapshot(LuminaAgentRuntimeSessionRef *session);
 
 /**
+ * Enables or disables YOLO mode on an explicit session.
+ */
+char *LuminaAgentRuntimeSessionSetYoloMode(LuminaAgentRuntimeSessionRef *session, bool enabled);
+
+/**
+ * Exports the backend-aligned session permission state.
+ */
+char *LuminaAgentRuntimeSessionPermissionStateSnapshot(LuminaAgentRuntimeSessionRef *session);
+
+/**
+ * Clears remembered permission grants for an explicit session.
+ */
+char *LuminaAgentRuntimeSessionClearPermissionGrants(LuminaAgentRuntimeSessionRef *session);
+
+/**
  * Destroys an explicit session created by `LuminaAgentRuntimeCreateSession`.
  */
 void LuminaAgentRuntimeDestroySession(LuminaAgentRuntimeSessionRef *session);
@@ -740,20 +797,25 @@ void LuminaAgentRuntimeReleaseString(char *value);
 char *LuminaReActValidateStepJSON(const char *json);
 
 /**
- * Extracts the first valid structured ReAct step object from arbitrary text.
+ * Validates a complete canonical runtime ReAct step object.
  *
- * This is useful for model adapters that receive streamed text with surrounding
- * prose. The returned heap-allocated JSON status must be released with
+ * This validates only complete canonical runtime ReAct objects. Raw MiniCPM
+ * model text should first be extracted with `LuminaReActNormalizeStepText`;
+ * other providers should pass through a trusted adapter before this call.
+ * The returned heap-allocated JSON status must be released with
  * `LuminaAgentRuntimeReleaseString`.
  */
 char *LuminaReActExtractFirstStandardObject(const char *text);
 
 /**
- * Normalizes model output from a supported dialect into the canonical runtime
- * ReAct step contract.
+ * Normalizes MiniCPM model output into the canonical runtime ReAct step
+ * contract.
  *
- * Supported dialects include `canonical_json` and `xml_tags`. Provider-native
- * or custom adapters should normalize before calling the runtime.
+ * The default and only model-facing dialect is `minicpm_v46_tool_calls`, which
+ * extracts MiniCPM-V4.6 chat-template `<think>` and `<tool_call>` content.
+ * Canonical runtime steps can still be validated explicitly through
+ * `LuminaReActExtractFirstStandardObject` after a trusted adapter converts
+ * provider output.
  */
 char *LuminaReActNormalizeStepText(const char *text, const char *dialect);
 

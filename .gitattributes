@@ -1,1 +1,2 @@
 model/bundles/trained/**/*.gguf filter=lfs diff=lfs merge=lfs -text
+model/training/data/TrainingData/splits/*_general_train.jsonl filter=lfs diff=lfs merge=lfs -text

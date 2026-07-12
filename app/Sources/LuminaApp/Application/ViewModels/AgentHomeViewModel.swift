@@ -100,17 +100,19 @@ final class AgentHomeViewModel: ObservableObject {
         guard let services else { return }
         benchmarkTask?.cancel()
         let runID = UUID()
+        let configuredTaskCount = UserDefaults.standard.integer(forKey: "lumina.benchmark.taskCount")
+        let taskCount = configuredTaskCount > 0 ? min(configuredTaskCount, 200) : 200
         benchmarkRunID = runID
-        benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "准备 200 条真实任务", completed: 0, total: 200)
+        benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "准备 \(taskCount) 条真实任务", completed: 0, total: taskCount)
         benchmarkTask = Task { [weak self] in
             guard let self else { return }
             await services.waitUntilLoaded()
             guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
-            self.benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "正在准备隔离 Benchmark 工具", completed: 0, total: 200)
+            self.benchmarkSnapshot = LuminaBenchmarkSnapshot(state: .running, currentTask: "正在准备隔离 Benchmark 工具", completed: 0, total: taskCount)
             await LuminaBenchmarkPermissionWarmup.requestAllNeededPermissions()
             guard self.benchmarkRunID == runID, !Task.isCancelled else { return }
             let runner = services.makeBenchmarkRunner()
-            _ = await runner.run(taskCount: 200) { snapshot in
+            _ = await runner.run(taskCount: taskCount) { snapshot in
                 guard self.benchmarkRunID == runID else { return }
                 self.benchmarkSnapshot = snapshot
             }
@@ -499,6 +501,9 @@ final class AgentHomeViewModel: ObservableObject {
             } else {
                 snapshot = runningSnapshot(title: "准备调用工具", detail: call.toolName, toolName: call.toolName, progress: baseProgress)
             }
+        case let .multiActionProposed(calls):
+            let names = calls.map(\.toolName).joined(separator: " -> ")
+            snapshot = runningSnapshot(title: "准备调用多个工具", detail: names, toolName: calls.first?.toolName, progress: baseProgress)
         case let .observationCreated(observation):
             snapshot = runningSnapshot(title: "读取执行结果", detail: observation.summary, toolName: observation.toolName, progress: baseProgress)
         case .resultGenerated:

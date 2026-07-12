@@ -3,13 +3,14 @@
 #include <string>
 
 #include "Session.hpp"
+#include "SkillRegistry.hpp"
 #include "ToolRegistry.hpp"
 
 namespace LuminaAgent {
 
 class PlannerInputBuilder {
 public:
-    PlannerInputBuilder(const ToolRegistry &tools, const RuntimeSession &session);
+    PlannerInputBuilder(const ToolRegistry &tools, const SkillRegistry &skills, const RuntimeSession &session);
 
     std::string build(
         const std::string &request,
@@ -19,6 +20,7 @@ public:
 
 private:
     const ToolRegistry &tools_;
+    const SkillRegistry &skills_;
     const RuntimeSession &session_;
 };
 

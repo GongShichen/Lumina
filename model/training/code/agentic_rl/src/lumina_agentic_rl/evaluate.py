@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .formatting import assistant_targets
 from .io import validate_trajectories
 from .rewards import compute_reward, load_reward_config, tool_counts
+
+NON_MINICPM_TARGET_PATTERN = re.compile(r'^\s*\{|"type"\s*:\s*"thought"|"type"\s*:\s*"final_answer"|<thought>|<tool_use|<result>', re.S)
 
 
 def evaluate_file(input_path: Path, reward_config_path: Path | None = None) -> dict[str, Any]:
@@ -24,12 +27,7 @@ def evaluate_file(input_path: Path, reward_config_path: Path | None = None) -> d
         false_negative += fn
         rewards.append(compute_reward(record, reward_config))
         for target in assistant_targets(record, include_thought=True):
-            try:
-                payload = json.loads(target)
-            except json.JSONDecodeError:
-                format_errors += 1
-                continue
-            if payload.get("type") == "observation":
+            if NON_MINICPM_TARGET_PATTERN.search(target):
                 format_errors += 1
 
     precision = _ratio(true_positive, true_positive + false_positive)

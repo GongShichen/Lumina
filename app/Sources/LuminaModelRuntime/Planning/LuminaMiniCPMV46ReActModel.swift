@@ -76,82 +76,10 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
 
     static func extractJSONObject(from generated: String) throws -> String {
         let trimmed = generated.trimmingCharacters(in: .whitespacesAndNewlines)
-        for candidate in extractionCandidates(from: trimmed) {
-            if containsForbiddenXMLTag(candidate) {
-                continue
-            }
-            if let standard = LuminaReActTransport.extractFirstStandardJSONObject(from: candidate) {
-                return standard
-            }
-            if let fenced = extractFencedJSON(from: candidate),
-               let standard = LuminaReActTransport.extractFirstStandardJSONObject(from: fenced) {
-                return standard
-            }
-            if let fenced = extractFencedJSON(from: candidate),
-               let normalized = LuminaReActTransport.normalizeXMLTags(from: fenced) {
-                return normalized
-            }
-            if let normalized = LuminaReActTransport.normalizeXMLTags(from: candidate) {
-                return normalized
-            }
+        if let normalized = LuminaReActTransport.normalizeMiniCPMV46ToolCalls(from: trimmed) {
+            return normalized
         }
         throw LuminaMiniCPMV46ReActModelError.missingJSONObject(generated)
-    }
-
-    private static func extractionCandidates(from text: String) -> [String] {
-        var candidates: [String] = []
-        func append(_ candidate: String) {
-            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, !candidates.contains(trimmed) else { return }
-            candidates.append(trimmed)
-        }
-        append(text)
-        append(strippingPrivateThinkScaffolding(from: text))
-        return candidates
-    }
-
-    private static func strippingPrivateThinkScaffolding(from text: String) -> String {
-        var sanitized = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let open = sanitized.range(of: "<think", options: [.caseInsensitive]),
-              let openEnd = sanitized.range(of: ">", range: open.lowerBound..<sanitized.endIndex),
-              let close = sanitized.range(of: "</think>", options: [.caseInsensitive], range: openEnd.upperBound..<sanitized.endIndex) {
-            sanitized.removeSubrange(open.lowerBound..<close.upperBound)
-            sanitized = sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let lowered = sanitized.lowercased()
-        guard lowered.hasPrefix("<think"),
-              let firstStepStart = firstXMLStepTagStart(in: sanitized)
-        else {
-            return sanitized
-        }
-        return String(sanitized[firstStepStart...])
-    }
-
-    private static func firstXMLStepTagStart(in text: String) -> String.Index? {
-        let tags = ["<thought", "<tool_use", "<result", "<cannot_complete", "<ask_user"]
-        return tags.compactMap { tag in
-            text.range(of: tag, options: [.caseInsensitive])?.lowerBound
-        }.min()
-    }
-
-    private static func containsForbiddenXMLTag(_ text: String) -> Bool {
-        text.contains("<think") ||
-            text.contains("</think>") ||
-            text.contains("<tool_call") ||
-            text.contains("</tool_call>") ||
-            text.contains("<observation") ||
-            text.contains("</observation>")
-    }
-
-    private static func extractFencedJSON(from text: String) -> String? {
-        guard let start = text.range(of: "```") else { return nil }
-        let tail = text[start.upperBound...]
-        guard let end = tail.range(of: "```") else { return nil }
-        var body = String(tail[..<end.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        if body.lowercased().hasPrefix("json") {
-            body = String(body.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return body
     }
 
     private actor Runner {

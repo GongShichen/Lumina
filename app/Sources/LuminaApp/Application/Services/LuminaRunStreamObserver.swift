@@ -33,6 +33,7 @@ struct LuminaRunStreamObserver {
             runtimeMetrics.runtimeEventCount += key.hasPrefix("runtime") ? 1 : 0
             classifyToolLoadingEvent(key: key, value: value)
             classifyContextLoadingEvent(key: key, value: value)
+            classifyModelGenerationEvent(key: key, value: value)
             classifyRuntimeDiagnostic(key: key, value: value)
         case .confirmationRequired:
             confirmationStartedAt = ContinuousClock.now
@@ -80,8 +81,28 @@ struct LuminaRunStreamObserver {
     }
 
     private mutating func classifyRuntimeDiagnostic(key: String, value: LuminaJSONValue) {
+        classifyMultiToolEvent(key: key, value: value)
         classifyDiagnosticText(key)
         classifyDiagnosticText(Self.string(for: value))
+    }
+
+    private mutating func classifyMultiToolEvent(key: String, value: LuminaJSONValue) {
+        switch key {
+        case "runtime_event.internal_tool_ignored":
+            runtimeMetrics.internalToolIgnoredCount += 1
+        case "runtime_event.multi_tool_use_started":
+            guard let payload = Self.runtimePayload(for: value) else { return }
+            runtimeMetrics.multiToolCallCount += Self.int(payload["call_count"])
+        case "runtime_event.multi_tool_use_call_failed":
+            runtimeMetrics.multiToolPartialFailureCount += 1
+        case "runtime_event.multi_tool_use_stopped":
+            guard let payload = Self.runtimePayload(for: value),
+                  payload["reason"] as? String == "side_effect_failure"
+            else { return }
+            runtimeMetrics.sideEffectBatchStopCount += 1
+        default:
+            break
+        }
     }
 
     private mutating func classifyToolLoadingEvent(key: String, value: LuminaJSONValue) {
@@ -170,6 +191,38 @@ struct LuminaRunStreamObserver {
         }
     }
 
+    private mutating func classifyModelGenerationEvent(key: String, value: LuminaJSONValue) {
+        guard key == "runtime_event.model_generation_validated" else { return }
+        runtimeMetrics.modelGenerationValidatedCount += 1
+        guard let payload = Self.runtimePayload(for: value) else { return }
+
+        if Self.bool(payload["model_stream_contains_special_tokens"]) == true {
+            runtimeMetrics.modelStreamContainsSpecialTokensCount += 1
+        }
+        if Self.bool(payload["host_returned_canonical_step"]) == true {
+            runtimeMetrics.hostReturnedCanonicalStepCount += 1
+        }
+        if Self.bool(payload["core_extracted_special_token_step"]) == true {
+            runtimeMetrics.coreExtractedSpecialTokenStepCount += 1
+        }
+
+        let canonicalExcerpt = payload["canonical_step_excerpt"] as? String ?? ""
+        if let canonicalType = Self.canonicalStepType(from: canonicalExcerpt) {
+            if canonicalType == "tool_use" {
+                runtimeMetrics.canonicalToolUseStepCount += 1
+            } else if canonicalType == "multi_tool_use" {
+                runtimeMetrics.multiToolGenerationCount += 1
+            } else if canonicalType == "result" {
+                runtimeMetrics.canonicalResultStepCount += 1
+            }
+        }
+
+        let callbackExcerpt = payload["model_callback_output_excerpt"] as? String ?? ""
+        if Self.containsLegacyOutputSchema(callbackExcerpt) || Self.containsLegacyOutputSchema(canonicalExcerpt) {
+            runtimeMetrics.legacyOutputSchemaObservedCount += 1
+        }
+    }
+
     private mutating func classifyDiagnosticText(_ text: String) {
         let lowered = text.lowercased()
         if lowered.contains("invalid react") ||
@@ -186,7 +239,7 @@ struct LuminaRunStreamObserver {
             runtimeMetrics.schemaValidationFailureCount += 1
         }
         if lowered.contains("observation") &&
-            (lowered.contains("model") || lowered.contains("never output") || lowered.contains("runtime-only") || lowered.contains("not allowed")) {
+            (lowered.contains("model") || lowered.contains("runtime-owned") || lowered.contains("runtime-only")) {
             runtimeMetrics.modelOwnedObservationRejectCount += 1
         }
         if lowered.contains("unknown tool") ||
@@ -207,6 +260,47 @@ struct LuminaRunStreamObserver {
             return string
         }
         return value.compactModelTraceValue
+    }
+
+    private static func runtimePayload(for value: LuminaJSONValue) -> [String: Any]? {
+        guard case let .string(eventJSON) = value,
+              let data = eventJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let outerPayload = object["payload"] as? [String: Any]
+        return (outerPayload?["payload"] as? [String: Any]) ?? outerPayload
+    }
+
+    private static func bool(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool { return bool }
+        if let string = value as? String {
+            if string == "true" { return true }
+            if string == "false" { return false }
+        }
+        return nil
+    }
+
+    private static func int(_ value: Any?) -> Int {
+        if let value = value as? Int { return value }
+        if let value = value as? Double { return Int(value) }
+        if let value = value as? String { return Int(value) ?? 0 }
+        return 0
+    }
+
+    private static func canonicalStepType(from excerpt: String) -> String? {
+        guard let data = excerpt.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["type"] as? String
+    }
+
+    private static func containsLegacyOutputSchema(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("\"thought\"") ||
+            lowered.contains("\"type\":\"tool_response\"") ||
+            lowered.contains("\"type\": \"tool_response\"") ||
+            lowered.contains("<tool_response") ||
+            lowered.contains("<tool_use")
     }
 
     private func milliseconds(since start: ContinuousClock.Instant) -> Double {

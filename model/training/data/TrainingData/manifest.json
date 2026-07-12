@@ -1,262 +1,316 @@
 {
-  "assistantDialect": "xml_tags",
-  "assistantEnvelope": "xml_tags",
-  "benchmarkTraceUsedForTraining": false,
+  "assistantDialect": "minicpm_v46_tool_calls",
+  "assistantEnvelope": "minicpm_v46_special_tokens",
   "benchmarkTracePolicy": "Benchmark traces are used only for aggregate diagnostics, not as training examples.",
-  "evaluation": {
-    "copied_from_general": false,
-    "families": [
-      "eval_budget_reminder",
-      "eval_failure_recovery",
-      "eval_plan_adjust_note",
-      "eval_replay_recovery"
-    ],
-    "independent_holdout": true,
-    "split_policy": "evaluation is holdout-only; no evaluation_train split is generated",
-    "used_by_holdout": "sft_evaluation_test.jsonl",
-    "used_by_training": false
+  "benchmarkTraceUsedForTraining": false,
+  "cleaning": {
+    "contextWindowTokens": 16000,
+    "dedupe": "stable prompt/content hashes",
+    "generatedFromPublicRowsOnly": true,
+    "hardcodedFallbackRows": false,
+    "maxJsonChars": 60000,
+    "tagPolicy": "allowlist validation; no legacy or arbitrary angle-bracket labels are allowed",
+    "truncatedSourceCells": "parquet sources are complete files; no Dataset Viewer truncated cells are used"
   },
-  "multimodal": {
-    "image_files": 0,
-    "image_records_evaluation_test": 0,
-    "image_records_test": 0,
-    "image_records_train": 0,
-    "note": "Multimodal image records were removed because localImagePath assets did not match the expected OCR text. Current committed training data is text/tool-only."
+  "coverage": [
+    "intent_recognition",
+    "multi_turn_query_rewrite",
+    "knowledge_retrieval",
+    "tool_use",
+    "agent_multi_hop"
+  ],
+  "createdAt": "2026-07-09T14:22:00.239458+00:00",
+  "publicDataSources": {
+    "dpo": [
+      "BeIR/msmarco:queries:queries",
+      "BitAgent/tool_calling:default:train",
+      "RZ412/bfcl_multi_turn_dataset:default:train",
+      "SetFit/amazon_massive_intent_en-US:default:train",
+      "SetFit/amazon_massive_intent_zh-CN:default:train",
+      "dgslibisey/MuSiQue:default:train",
+      "glaiveai/glaive-function-calling-v2:default:train",
+      "glaiveai/glaive-function-calling:default:train",
+      "khaimaitien/multi-hop-qa-function-calling-format-V1.0:default:train",
+      "minpeter/bfcl-v1-non-live-ast-parsed:multiple:train",
+      "minpeter/bfcl-v1-non-live-ast-parsed:parallel:train",
+      "minpeter/bfcl-v1-non-live-ast-parsed:parallel_multiple:train",
+      "minpeter/bfcl-v1-non-live-ast-parsed:simple:train",
+      "uninhibited-scholar/zh-function-calling-bench:default:train"
+    ],
+    "sft": [
+      "NobodyExistsOnTheInternet/xlam-function-calling-60k:default:train",
+      "clinc/clinc_oos:plus:train",
+      "hfl/cmrc2018:default:train",
+      "hotpotqa/hotpot_qa:distractor:train",
+      "microsoft/wiki_qa:default:train",
+      "voidful/qrecc:default:train"
+    ]
   },
   "qa": {
     "dpo_evaluation_test": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "evaluation": 1680
+        "agent_tool": 19,
+        "intent": 1554,
+        "multi_hop": 1961,
+        "retrieval": 600,
+        "tool": 1005
       },
       "families": {
-        "eval_budget_reminder": 720,
-        "eval_failure_recovery": 120,
-        "eval_plan_adjust_note": 720,
-        "eval_replay_recovery": 120
+        "agent_multi_hop": 598,
+        "agent_multi_hop_tool": 1363,
+        "agent_tool_multi_step": 19,
+        "intent_recognition": 1554,
+        "knowledge_retrieval": 600,
+        "tool_use": 1005
       },
       "kind": "dpo",
-      "multimodal_records": 0,
-      "records": 1680
+      "languages": {
+        "en": 4374,
+        "zh": 765
+      },
+      "max_json_chars": 8295,
+      "records": 5139,
+      "sources": {
+        "BeIR/msmarco:queries:queries": 600,
+        "BitAgent/tool_calling:default:train": 7,
+        "RZ412/bfcl_multi_turn_dataset:default:train": 19,
+        "SetFit/amazon_massive_intent_en-US:default:train": 794,
+        "SetFit/amazon_massive_intent_zh-CN:default:train": 760,
+        "dgslibisey/MuSiQue:default:train": 598,
+        "glaiveai/glaive-function-calling-v2:default:train": 306,
+        "glaiveai/glaive-function-calling:default:train": 581,
+        "khaimaitien/multi-hop-qa-function-calling-format-V1.0:default:train": 1363,
+        "minpeter/bfcl-v1-non-live-ast-parsed:multiple:train": 23,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel:train": 24,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel_multiple:train": 24,
+        "minpeter/bfcl-v1-non-live-ast-parsed:simple:train": 35,
+        "uninhibited-scholar/zh-function-calling-bench:default:train": 5
+      }
     },
     "dpo_test": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "calendar": 339,
-        "complex": 207,
-        "contacts": 126,
-        "document": 121,
-        "file": 51,
-        "ledger": 129,
-        "local": 81,
-        "reminder": 340,
-        "subscription": 155,
-        "system": 202,
-        "web": 116
+        "agent_tool": 19,
+        "intent": 1554,
+        "multi_hop": 1961,
+        "retrieval": 600,
+        "tool": 1005
       },
       "families": {
-        "budget_audit_note_reminder": 104,
-        "calculator": 81,
-        "calendar_create": 121,
-        "calendar_delete": 92,
-        "calendar_update": 87,
-        "contacts_open": 43,
-        "contacts_update": 83,
-        "document_summary_clipboard": 121,
-        "failure_recovery": 39,
-        "ledger_record": 49,
-        "ledger_update": 80,
-        "morning_plan_adjust_save": 103,
-        "reminder_complete": 82,
-        "reminder_create": 86,
-        "reminder_delete": 88,
-        "reminder_update": 84,
-        "replay_recovery": 51,
-        "subscription_add": 49,
-        "subscription_remove": 106,
-        "system_status_chain": 202,
-        "web_summary_save": 116
+        "agent_multi_hop": 598,
+        "agent_multi_hop_tool": 1363,
+        "agent_tool_multi_step": 19,
+        "intent_recognition": 1554,
+        "knowledge_retrieval": 600,
+        "tool_use": 1005
       },
       "kind": "dpo",
-      "multimodal_records": 0,
-      "records": 1867
+      "languages": {
+        "en": 4380,
+        "zh": 759
+      },
+      "max_json_chars": 9377,
+      "records": 5139,
+      "sources": {
+        "BeIR/msmarco:queries:queries": 600,
+        "BitAgent/tool_calling:default:train": 6,
+        "RZ412/bfcl_multi_turn_dataset:default:train": 19,
+        "SetFit/amazon_massive_intent_en-US:default:train": 803,
+        "SetFit/amazon_massive_intent_zh-CN:default:train": 751,
+        "dgslibisey/MuSiQue:default:train": 598,
+        "glaiveai/glaive-function-calling-v2:default:train": 299,
+        "glaiveai/glaive-function-calling:default:train": 595,
+        "khaimaitien/multi-hop-qa-function-calling-format-V1.0:default:train": 1363,
+        "minpeter/bfcl-v1-non-live-ast-parsed:multiple:train": 25,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel:train": 24,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel_multiple:train": 19,
+        "minpeter/bfcl-v1-non-live-ast-parsed:simple:train": 29,
+        "uninhibited-scholar/zh-function-calling-bench:default:train": 8
+      }
     },
     "dpo_train": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "calendar": 3021,
-        "complex": 1953,
-        "contacts": 1134,
-        "document": 1139,
-        "file": 369,
-        "ledger": 1131,
-        "local": 759,
-        "reminder": 3020,
-        "subscription": 1105,
-        "system": 1898,
-        "web": 1144
+        "agent_tool": 158,
+        "intent": 12432,
+        "multi_hop": 15690,
+        "retrieval": 4800,
+        "tool": 8046
       },
       "families": {
-        "budget_audit_note_reminder": 976,
-        "calculator": 759,
-        "calendar_create": 1139,
-        "calendar_delete": 748,
-        "calendar_update": 753,
-        "contacts_open": 377,
-        "contacts_update": 757,
-        "document_summary_clipboard": 1139,
-        "failure_recovery": 381,
-        "ledger_record": 371,
-        "ledger_update": 760,
-        "morning_plan_adjust_save": 977,
-        "reminder_complete": 758,
-        "reminder_create": 754,
-        "reminder_delete": 752,
-        "reminder_update": 756,
-        "replay_recovery": 369,
-        "subscription_add": 371,
-        "subscription_remove": 734,
-        "system_status_chain": 1898,
-        "web_summary_save": 1144
+        "agent_multi_hop": 4786,
+        "agent_multi_hop_tool": 10904,
+        "agent_tool_multi_step": 158,
+        "intent_recognition": 12432,
+        "knowledge_retrieval": 4800,
+        "tool_use": 8046
       },
       "kind": "dpo",
-      "multimodal_records": 0,
-      "records": 16673
+      "languages": {
+        "en": 34995,
+        "zh": 6131
+      },
+      "max_json_chars": 10939,
+      "records": 41126,
+      "sources": {
+        "BeIR/msmarco:queries:queries": 4800,
+        "BitAgent/tool_calling:default:train": 51,
+        "RZ412/bfcl_multi_turn_dataset:default:train": 158,
+        "SetFit/amazon_massive_intent_en-US:default:train": 6371,
+        "SetFit/amazon_massive_intent_zh-CN:default:train": 6061,
+        "dgslibisey/MuSiQue:default:train": 4786,
+        "glaiveai/glaive-function-calling-v2:default:train": 2540,
+        "glaiveai/glaive-function-calling:default:train": 4590,
+        "khaimaitien/multi-hop-qa-function-calling-format-V1.0:default:train": 10904,
+        "minpeter/bfcl-v1-non-live-ast-parsed:multiple:train": 152,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel:train": 152,
+        "minpeter/bfcl-v1-non-live-ast-parsed:parallel_multiple:train": 157,
+        "minpeter/bfcl-v1-non-live-ast-parsed:simple:train": 334,
+        "uninhibited-scholar/zh-function-calling-bench:default:train": 70
+      }
     },
     "sft_evaluation_test": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "evaluation": 1680
+        "agent_multi_turn": 992,
+        "intent": 1200,
+        "multi_hop": 1200,
+        "retrieval": 1170,
+        "rewrite": 992,
+        "tool": 797
       },
       "families": {
-        "eval_budget_reminder": 720,
-        "eval_failure_recovery": 120,
-        "eval_plan_adjust_note": 720,
-        "eval_replay_recovery": 120
+        "agent_multi_hop": 600,
+        "agent_multi_hop_answer": 600,
+        "agent_rewrite_then_retrieve": 992,
+        "intent_recognition": 1200,
+        "knowledge_answering": 585,
+        "knowledge_retrieval": 585,
+        "multi_turn_query_rewrite": 992,
+        "tool_use": 797
       },
       "kind": "sft",
-      "multimodal_records": 0,
-      "records": 1680
+      "languages": {
+        "en": 5348,
+        "zh": 1003
+      },
+      "max_json_chars": 4242,
+      "records": 6351,
+      "sources": {
+        "NobodyExistsOnTheInternet/xlam-function-calling-60k:default:train": 797,
+        "clinc/clinc_oos:plus:train": 1200,
+        "hfl/cmrc2018:default:train": 1003,
+        "hotpotqa/hotpot_qa:distractor:train": 1200,
+        "microsoft/wiki_qa:default:train": 167,
+        "voidful/qrecc:default:train": 1984
+      }
     },
     "sft_test": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "calendar": 339,
-        "complex": 207,
-        "contacts": 126,
-        "document": 121,
-        "file": 51,
-        "ledger": 129,
-        "local": 81,
-        "reminder": 340,
-        "subscription": 155,
-        "system": 202,
-        "web": 116
+        "agent_multi_turn": 992,
+        "intent": 1200,
+        "multi_hop": 1200,
+        "retrieval": 1170,
+        "rewrite": 992,
+        "tool": 797
       },
       "families": {
-        "budget_audit_note_reminder": 104,
-        "calculator": 81,
-        "calendar_create": 121,
-        "calendar_delete": 92,
-        "calendar_update": 87,
-        "contacts_open": 43,
-        "contacts_update": 83,
-        "document_summary_clipboard": 121,
-        "failure_recovery": 39,
-        "ledger_record": 49,
-        "ledger_update": 80,
-        "morning_plan_adjust_save": 103,
-        "reminder_complete": 82,
-        "reminder_create": 86,
-        "reminder_delete": 88,
-        "reminder_update": 84,
-        "replay_recovery": 51,
-        "subscription_add": 49,
-        "subscription_remove": 106,
-        "system_status_chain": 202,
-        "web_summary_save": 116
+        "agent_multi_hop": 600,
+        "agent_multi_hop_answer": 600,
+        "agent_rewrite_then_retrieve": 992,
+        "intent_recognition": 1200,
+        "knowledge_answering": 585,
+        "knowledge_retrieval": 585,
+        "multi_turn_query_rewrite": 992,
+        "tool_use": 797
       },
       "kind": "sft",
-      "multimodal_records": 0,
-      "records": 1867
+      "languages": {
+        "en": 5340,
+        "zh": 1011
+      },
+      "max_json_chars": 4390,
+      "records": 6351,
+      "sources": {
+        "NobodyExistsOnTheInternet/xlam-function-calling-60k:default:train": 797,
+        "clinc/clinc_oos:plus:train": 1200,
+        "hfl/cmrc2018:default:train": 1011,
+        "hotpotqa/hotpot_qa:distractor:train": 1200,
+        "microsoft/wiki_qa:default:train": 159,
+        "voidful/qrecc:default:train": 1984
+      }
     },
     "sft_train": {
-      "bad_count": 0,
-      "bad_examples": [],
       "categories": {
-        "calendar": 3021,
-        "complex": 1953,
-        "contacts": 1134,
-        "document": 1139,
-        "file": 369,
-        "ledger": 1131,
-        "local": 759,
-        "reminder": 3020,
-        "subscription": 1105,
-        "system": 1898,
-        "web": 1144
+        "agent_multi_turn": 7942,
+        "intent": 9600,
+        "multi_hop": 9600,
+        "retrieval": 9378,
+        "rewrite": 7942,
+        "tool": 6382
       },
       "families": {
-        "budget_audit_note_reminder": 976,
-        "calculator": 759,
-        "calendar_create": 1139,
-        "calendar_delete": 748,
-        "calendar_update": 753,
-        "contacts_open": 377,
-        "contacts_update": 757,
-        "document_summary_clipboard": 1139,
-        "failure_recovery": 381,
-        "ledger_record": 371,
-        "ledger_update": 760,
-        "morning_plan_adjust_save": 977,
-        "reminder_complete": 758,
-        "reminder_create": 754,
-        "reminder_delete": 752,
-        "reminder_update": 756,
-        "replay_recovery": 369,
-        "subscription_add": 371,
-        "subscription_remove": 734,
-        "system_status_chain": 1898,
-        "web_summary_save": 1144
+        "agent_multi_hop": 4800,
+        "agent_multi_hop_answer": 4800,
+        "agent_rewrite_then_retrieve": 7942,
+        "intent_recognition": 9600,
+        "knowledge_answering": 4689,
+        "knowledge_retrieval": 4689,
+        "multi_turn_query_rewrite": 7942,
+        "tool_use": 6382
       },
       "kind": "sft",
-      "multimodal_records": 0,
-      "records": 16673
+      "languages": {
+        "en": 42858,
+        "zh": 7986
+      },
+      "max_json_chars": 5260,
+      "records": 50844,
+      "sources": {
+        "NobodyExistsOnTheInternet/xlam-function-calling-60k:default:train": 6382,
+        "clinc/clinc_oos:plus:train": 9600,
+        "hfl/cmrc2018:default:train": 7986,
+        "hotpotqa/hotpot_qa:distractor:train": 9600,
+        "microsoft/wiki_qa:default:train": 1392,
+        "voidful/qrecc:default:train": 15884
+      }
     }
   },
-  "removed": {
-    "policy": "Removed every record with metadata.localImagePath or metadata.modalities containing image.",
-    "total_records_removed": 6120,
-    "by_file": {
-      "dpo_evaluation_test.jsonl": {
-        "records": 1680,
-        "removed_multimodal": 720
-      },
-      "dpo_general_test.jsonl": {
-        "records": 1867,
-        "removed_multimodal": 221
-      },
-      "dpo_general_train.jsonl": {
-        "records": 16673,
-        "removed_multimodal": 2119
-      },
-      "sft_evaluation_test.jsonl": {
-        "records": 1680,
-        "removed_multimodal": 720
-      },
-      "sft_general_test.jsonl": {
-        "records": 1867,
-        "removed_multimodal": 221
-      },
-      "sft_general_train.jsonl": {
-        "records": 16673,
-        "removed_multimodal": 2119
-      }
+  "sourceDisjoint": true,
+  "specialTokens": {
+    "canonical_assistant_dialect": "minicpm_v46_tool_calls",
+    "model_facing_transport_tokens": [
+      "<think>",
+      "</think>",
+      "<tool_call>",
+      "</tool_call>",
+      "<function=NAME>",
+      "</function>",
+      "<parameter=NAME>",
+      "</parameter>"
+    ],
+    "source": "model/bundles/trained/MiniCPMV46ReActModel-AgenticSFTDPO-Q8/tokenizer_config.json and Lumina runtime contract",
+    "tag_policy": "All angle-bracket tags in records are validated by allowlist; only MiniCPM transport tags and prompt tool wrapper tags are allowed.",
+    "token_ids_known_from_hf_config": {
+      "eos_token_id": 248044,
+      "image_token_id": 248056,
+      "video_token_id": 248057
+    },
+    "tokenizer_special_tokens": {
+      "audio_bos_token": "<|audio_start|>",
+      "audio_eos_token": "<|audio_end|>",
+      "audio_token": "<|audio_pad|>",
+      "bos_token": "<|im_start|>",
+      "eos_token": "<|im_end|>",
+      "image_end_token": "</image>",
+      "image_id_end_token": "</image_id>",
+      "image_id_start_token": "<image_id>",
+      "image_start_token": "<image>",
+      "image_token": "<|image_pad|>",
+      "pad_token": "<|endoftext|>",
+      "slice_end_token": "</slice>",
+      "slice_start_token": "<slice>",
+      "unk_token": "<unk>",
+      "video_token": "<|video_pad|>",
+      "vision_bos_token": "<|vision_start|>",
+      "vision_eos_token": "<|vision_end|>"
     }
   }
 }

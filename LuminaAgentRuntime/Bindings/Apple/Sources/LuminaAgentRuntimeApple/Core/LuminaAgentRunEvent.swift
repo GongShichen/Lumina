@@ -5,6 +5,7 @@ public enum LuminaAgentRunEvent: Sendable {
     case stepGenerationProgress(LuminaStepGenerationProgress)
     case thoughtGenerated(LuminaReActStep)
     case actionProposed(LuminaToolCall)
+    case multiActionProposed([LuminaToolCall])
     case observationCreated(LuminaReActObservation)
     case resultGenerated(String)
     case hookAnnotated(String, LuminaJSONValue)

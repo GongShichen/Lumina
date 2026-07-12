@@ -37,6 +37,121 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue(result.plan.summary.contains("真实记忆摘要"))
     }
 
+    func testYoloModeSkipsPermissionAndConfirmationButExecutesTool() async {
+        let calls = ActorBox(0)
+        let permissionGate = CountingDenyPermissionGate()
+        let confirmation = CountingDenyConfirmationCoordinator()
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
+                name: "calendar.create",
+                description: "Create event",
+                parameters: [
+                    LuminaToolParameterSchema(name: "title", type: .string, description: "Title")
+                ],
+                sideEffect: .systemWrite,
+                destructive: true,
+                requiresConfirmation: true
+            )
+        ) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "calendar.create", status: .succeeded, content: [.text("created")])
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: ScriptedReActModel(steps: [
+                .action(thought: "Create.", call: LuminaToolCall(toolName: "calendar.create", arguments: ["title": .string("Demo")])),
+                .result("done")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true),
+            permissionGate: permissionGate,
+            confirmationCoordinator: confirmation
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "create"))
+        let callCount = await calls.value
+        let permissionCount = await permissionGate.count
+        let confirmationCount = await confirmation.count
+
+        XCTAssertEqual(result.status, .succeeded)
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(permissionCount, 0)
+        XCTAssertEqual(confirmationCount, 0)
+    }
+
+    func testYoloModeDoesNotBypassSchemaValidation() async {
+        let calls = ActorBox(0)
+        let tool = AnyLuminaAgentTool(
+            schema: LuminaToolSchema(
+                name: "calendar.create",
+                description: "Create event",
+                parameters: [
+                    LuminaToolParameterSchema(name: "title", type: .string, description: "Title")
+                ],
+                sideEffect: .systemWrite,
+                requiresConfirmation: true
+            )
+        ) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "calendar.create", status: .succeeded)
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: ScriptedReActModel(steps: [
+                .action(thought: "Create.", call: LuminaToolCall(toolName: "calendar.create", arguments: [:])),
+                .result("handled validation")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "create"))
+        let callCount = await calls.value
+
+        XCTAssertEqual(callCount, 0)
+        XCTAssertEqual(result.toolResults.first?.status, .failed)
+        XCTAssertTrue(result.toolResults.first?.errorMessage?.contains("missing required parameter title") == true)
+    }
+
+    func testPermissionStateIsExportedInSessionCheckpoint() {
+        let runtime = LuminaAgentRuntime(
+            tools: [],
+            stepGenerator: ScriptedReActModel(steps: [.result("done")]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true)
+        )
+        guard let session = runtime.createSession(request: LuminaAgentRequest(text: "snapshot")) else {
+            XCTFail("Expected session")
+            return
+        }
+
+        let permissionState = session.permissionStateSnapshot()
+        let checkpoint = session.exportCheckpoint()
+
+        XCTAssertTrue(permissionState.contains(#""yolo_mode":true"#))
+        XCTAssertTrue(checkpoint.contains(#""permission_state""#))
+        XCTAssertTrue(checkpoint.contains(#""yolo_mode":true"#))
+    }
+
+    func testPermissionAndConfirmationAreNotToolSchemas() async {
+        let runtime = LuminaAgentRuntime(
+            tools: [
+                AnyLuminaAgentTool(schema: LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)) { _, _ in
+                    LuminaToolResult(callID: UUID(), toolName: "local.search", status: .succeeded)
+                }
+            ],
+            stepGenerator: ScriptedReActModel(steps: [.result("done")]),
+            configuration: luminaTestRuntimeConfiguration
+        )
+
+        let schemaNames = await runtime.availableToolSchemas().map(\.name)
+
+        XCTAssertTrue(schemaNames.contains("local.search"))
+        XCTAssertTrue(schemaNames.contains("runtime.mcp_discovery"))
+        XCTAssertFalse(schemaNames.contains("permission"))
+        XCTAssertFalse(schemaNames.contains("confirmation"))
+        XCTAssertFalse(schemaNames.contains("permission_request"))
+        XCTAssertFalse(schemaNames.contains("confirmation_request"))
+        XCTAssertFalse(schemaNames.contains("ask_user"))
+    }
+
     func testToolRouterReturnsFailedResultForMissingRequiredParameter() async {
         let schema = LuminaToolSchema(
             name: "file.save_note",
@@ -609,7 +724,7 @@ final class ReActRuntimeTests: XCTestCase {
 
     func testReActParserPreservesUnknownToolForRuntimeObservation() throws {
         let json = """
-        {"type":"tool_use","thought":"x","tool_name":"missing","parameters":{},"requires_confirmation":false}
+        {"type":"tool_use","thinking":"x","tool_name":"missing","parameters":{},"requires_confirmation":false}
         """
 
         let step = try LuminaReActStepParser.parse(json: json, availableTools: [])
@@ -633,7 +748,7 @@ final class ReActRuntimeTests: XCTestCase {
         let askUserSchema = LuminaToolSchema(name: "ask_user", description: "Ask user", parameters: [], sideEffect: .readOnly)
         let reasoning = try LuminaReActStepParser.parse(
             json: """
-            {"schema_version":"1.0","step_id":"s1","type":"reasoning","thought":"Need one more detail.","confidence":0.72,"needs_more_context":true,"requires_followup":true}
+            {"schema_version":"1.0","step_id":"s1","type":"reasoning","thinking":"Need one more detail.","confidence":0.72,"needs_more_context":true,"requires_followup":true}
             """,
             availableTools: []
         )
@@ -641,7 +756,7 @@ final class ReActRuntimeTests: XCTestCase {
 
         let ask = try LuminaReActStepParser.parse(
             json: """
-            {"schema_version":"1.0","step_id":"s2","type":"ask_user","thought":"Need a preference.","questions":[{"id":"time","question":"几点？"}],"allow_custom_answer":true,"requires_followup":true}
+            {"schema_version":"1.0","step_id":"s2","type":"ask_user","thinking":"Need a preference.","questions":[{"id":"time","question":"几点？"}],"allow_custom_answer":true,"requires_followup":true}
             """,
             availableTools: [askUserSchema]
         )
@@ -649,7 +764,7 @@ final class ReActRuntimeTests: XCTestCase {
 
         let cannotComplete = try LuminaReActStepParser.parse(
             json: """
-            {"schema_version":"1.0","step_id":"s3","type":"cannot_complete","thought":"No permission.","reason":"缺少权限。","recoverable_actions":["打开设置"],"requires_followup":false}
+            {"schema_version":"1.0","step_id":"s3","type":"cannot_complete","thinking":"No permission.","reason":"缺少权限。","recoverable_actions":["打开设置"],"requires_followup":false}
             """,
             availableTools: []
         )
@@ -659,7 +774,7 @@ final class ReActRuntimeTests: XCTestCase {
 
     func testReActParserRejectsLegacyActionShape() throws {
         let json = """
-        {"kind":"action","thought":"x","action":{"toolName":"local.search","arguments":{},"requiresConfirmation":false}}
+        {"kind":"action","thinking":"x","action":{"toolName":"local.search","arguments":{},"requiresConfirmation":false}}
         """
 
         XCTAssertThrowsError(try LuminaReActStepParser.parse(
@@ -668,12 +783,21 @@ final class ReActRuntimeTests: XCTestCase {
         ))
     }
 
+    func testReActParserRejectsLegacyThoughtStepType() throws {
+        XCTAssertThrowsError(try LuminaReActStepParser.parse(
+            json: """
+            {"type":"thinking","thinking":"old step name","requires_followup":true}
+            """,
+            availableTools: []
+        ))
+    }
+
     func testReActParserAcceptsFlatToolUseShape() throws {
         let schema = LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)
 
         let step = try LuminaReActStepParser.parse(
             json: """
-            {"type":"tool_use","thought":"x","tool_name":"local.search","parameters":{"query":"coffee"},"requires_confirmation":false}
+            {"type":"tool_use","thinking":"x","tool_name":"local.search","parameters":{"query":"coffee"},"requires_confirmation":false}
             """,
             availableTools: [schema]
         )
@@ -682,12 +806,142 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertEqual(step.action?.arguments["query"], .string("coffee"))
     }
 
+    func testReActParserAcceptsMultiToolUseShape() throws {
+        let schemas = [
+            LuminaToolSchema(name: "device.current_time", description: "Time", parameters: [], sideEffect: .readOnly),
+            LuminaToolSchema(name: "network.status", description: "Network", parameters: [], sideEffect: .readOnly)
+        ]
+        let step = try LuminaReActStepParser.parse(
+            json: """
+            {"type":"multi_tool_use","thinking":"Gather both signals.","tool_calls":[{"tool_name":"device.current_time","parameters":{},"requires_confirmation":false},{"tool_name":"network.status","parameters":{},"requires_confirmation":true}]}
+            """,
+            availableTools: schemas
+        )
+
+        XCTAssertEqual(step.kind, .multiAction)
+        XCTAssertEqual(step.toolCalls.map(\.toolName), ["device.current_time", "network.status"])
+        XCTAssertTrue(step.toolCalls[1].requiresConfirmation)
+    }
+
+    func testReActParserRejectsMalformedMultiToolUseShape() throws {
+        XCTAssertThrowsError(try LuminaReActStepParser.parse(
+            json: "{\"type\":\"multi_tool_use\",\"tool_calls\":[]}",
+            availableTools: []
+        ))
+        XCTAssertThrowsError(try LuminaReActStepParser.parse(
+            json: "{\"type\":\"multi_tool_use\",\"tool_calls\":[{\"tool_name\":\"device.current_time\",\"parameters\":\"not-an-object\"}]}",
+            availableTools: []
+        ))
+    }
+
+    func testRuntimeExecutesReadOnlyMultiToolCallsInOrder() async {
+        let first = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "device.current_time", description: "Time", parameters: [], sideEffect: .readOnly)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "device.current_time", status: .succeeded, content: [.text("10:00")])
+        }
+        let second = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "network.status", description: "Network", parameters: [], sideEffect: .readOnly)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "network.status", status: .succeeded, content: [.text("online")])
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [first, second],
+            stepGenerator: ScriptedReActModel(steps: [
+                .multiAction(thought: "Gather", calls: [
+                    LuminaToolCall(toolName: "device.current_time", arguments: [:]),
+                    LuminaToolCall(toolName: "network.status", arguments: [:])
+                ]),
+                .result("done")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "check time and network"))
+
+        XCTAssertEqual(result.toolResults.map(\.toolName), ["device.current_time", "network.status"])
+        XCTAssertTrue(result.toolResults.allSatisfy { $0.status == .succeeded })
+    }
+
+    func testReadOnlyMultiToolFailureContinuesToRemainingCalls() async {
+        let first = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "device.current_time", description: "Time", parameters: [], sideEffect: .readOnly)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "device.current_time", status: .failed, errorMessage: "clock unavailable")
+        }
+        let second = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "network.status", description: "Network", parameters: [], sideEffect: .readOnly)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "network.status", status: .succeeded)
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [first, second],
+            stepGenerator: ScriptedReActModel(steps: [
+                .multiAction(thought: "Gather", calls: [
+                    LuminaToolCall(toolName: "device.current_time", arguments: [:]),
+                    LuminaToolCall(toolName: "network.status", arguments: [:])
+                ]),
+                .result("done")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "check time and network"))
+
+        XCTAssertEqual(result.toolResults.map(\.toolName), ["device.current_time", "network.status"])
+        XCTAssertEqual(result.toolResults.first?.status, .failed)
+        XCTAssertEqual(result.toolResults.last?.status, .succeeded)
+    }
+
+    func testSideEffectMultiToolFailureStopsRemainingCalls() async {
+        let calls = ActorBox(0)
+        let first = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "calendar.create", description: "Create", parameters: [], sideEffect: .systemWrite)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "calendar.create", status: .failed, errorMessage: "calendar unavailable")
+        }
+        let second = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "reminder.create", description: "Create", parameters: [], sideEffect: .systemWrite)) { _, _ in
+            await calls.increment()
+            return LuminaToolResult(callID: UUID(), toolName: "reminder.create", status: .succeeded)
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [first, second],
+            stepGenerator: ScriptedReActModel(steps: [
+                .multiAction(thought: "Write both", calls: [
+                    LuminaToolCall(toolName: "calendar.create", arguments: [:]),
+                    LuminaToolCall(toolName: "reminder.create", arguments: [:])
+                ]),
+                .result("done")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "write both"))
+
+        let executedSecond = await calls.value
+        XCTAssertEqual(executedSecond, 0)
+        XCTAssertEqual(result.toolResults.map(\.toolName), ["calendar.create"])
+        XCTAssertEqual(result.toolResults.first?.status, .failed)
+    }
+
+    func testMultiToolIgnoresInternalRuntimeCallsWhenConfigured() async {
+        let tool = AnyLuminaAgentTool(schema: LuminaToolSchema(name: "network.status", description: "Network", parameters: [], sideEffect: .readOnly)) { _, _ in
+            LuminaToolResult(callID: UUID(), toolName: "network.status", status: .succeeded)
+        }
+        let runtime = LuminaAgentRuntime(
+            tools: [tool],
+            stepGenerator: ScriptedReActModel(steps: [
+                .multiAction(thought: "Use helper and task tool", calls: [
+                    LuminaToolCall(toolName: "runtime.mcp_discovery", arguments: [:]),
+                    LuminaToolCall(toolName: "network.status", arguments: [:])
+                ]),
+                .result("done")
+            ]),
+            configuration: luminaTestRuntimeConfiguration(yoloMode: true, ignoreInternalToolCalls: true)
+        )
+
+        let result = await runtime.run(request: LuminaAgentRequest(text: "check network"))
+
+        XCTAssertEqual(result.toolResults.map(\.toolName), ["network.status"])
+        XCTAssertFalse(result.toolResults.contains { $0.toolName.hasPrefix("runtime.") })
+    }
+
     func testReActParserRejectsNonStandardToolCallAliases() throws {
         let schema = LuminaToolSchema(name: "local.search", description: "Search", parameters: [], sideEffect: .readOnly)
 
         XCTAssertThrowsError(try LuminaReActStepParser.parse(
             json: """
-            {"type":"tool_use","thought":"x","tool_call":{"name":"local.search","parameters":{}}}
+            {"type":"tool_use","thinking":"x","tool_call":{"name":"local.search","parameters":{}}}
             """,
             availableTools: [schema]
         ))
@@ -708,7 +962,7 @@ final class ReActRuntimeTests: XCTestCase {
 
         XCTAssertThrowsError(try LuminaReActStepParser.parse(
             json: """
-            {"type":"tool_use","thought":"x","tool_use":{"name":"local.search","input":{},"requires_confirmation":false}}
+            {"type":"tool_use","thinking":"x","tool_use":{"name":"local.search","input":{},"requires_confirmation":false}}
             """,
             availableTools: [schema]
         ))
@@ -980,6 +1234,32 @@ private actor ArgumentBox {
 
     func set(_ value: [String: LuminaJSONValue]) {
         storage = value
+    }
+}
+
+private actor CountingDenyPermissionGate: LuminaPermissionGate {
+    private var storage = 0
+
+    var count: Int {
+        storage
+    }
+
+    func decision(for call: LuminaToolCall, schema: LuminaToolSchema, request: LuminaAgentRequest) async -> LuminaPermissionDecision {
+        storage += 1
+        return .denied(reason: "blocked by test")
+    }
+}
+
+private actor CountingDenyConfirmationCoordinator: LuminaConfirmationCoordinator {
+    private var storage = 0
+
+    var count: Int {
+        storage
+    }
+
+    func confirm(call: LuminaToolCall, schema: LuminaToolSchema, reason: String) async -> Bool {
+        storage += 1
+        return false
     }
 }
 
