@@ -52,103 +52,95 @@ cmake --build build/android-arm64
 
 ### HarmonyOS
 
-HarmonyOS 侧通过 ETS wrapper 调用 native runtime。编译时把 Runtime Core 源码、`Runtime/include` 头文件，以及 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
+HarmonyOS 侧通过 ETS wrapper 调用 native runtime。将 Runtime Core 源码、`Runtime/include` 头文件和 `Bindings/HarmonyOS/native/lumina_runtime_harmony.cpp` 加入 native module，并链接 N-API。
 
-## Model
+## 模型推理部署与量化
 
-模型、训练脚本和训练数据统一放在根目录 `model/` 下。App 运行时需要的模型副本通过脚本安装到 `app/Resources/Models/`，该目录不作为源码资产保存。
+本节介绍 MiniCPM-V 4.6 的端侧 GGUF 推理接入、native engine 构建、App 资源安装和离线量化。
 
-目录结构：
+### 环境要求
 
-- `model/bundles/original/MiniCPMV46ReActModel/`：原始 MiniCPM-V 4.6 GGUF bundle，本地保留，不提交。
-- `model/bundles/trained/MiniCPMV46ReActModel-AgenticSFTDPO-Q8/`：训练后的 Agentic SFT+DPO Q8 GGUF bundle，提交进 git。
-- `model/embeddings/BGETextEmbedding/`：BGE embedding Core ML 模型和 tokenizer，本地保留，不提交。
-- `model/training/code/agentic_rl/`：SFT/DPO 训练代码、配置和脚本。
-- `model/training/data/TrainingData/`：训练和 holdout 数据，提交进 git。
+- macOS 与 Xcode
+- Python 3
+- Git、CMake、rsync
+- Hugging Face CLI：`python3 -m pip install -U huggingface_hub`
+- llama.cpp GGUF 转换依赖：`python3 -m pip install -r <llama.cpp>/requirements.txt`
 
-统一模型脚本：
+### 下载预量化 GGUF
+
+默认从 `openbmb/MiniCPM-V-4_6-gguf` 下载 F16 text model 和 F16 multimodal projector：
 
 ```bash
 ./model/lumina_model.sh download original
+```
+
+可通过环境变量选择仓库和量化文件：
+
+```bash
+LUMINA_MINICPMV46_REPO=openbmb/MiniCPM-V-4_6-gguf \
+LUMINA_MINICPMV46_QUANT=Q8_0 \
+./model/lumina_model.sh download original
+```
+
+下载结果位于：
+
+```text
+model/bundles/original/MiniCPMV46ReActModel/
+├── model.gguf
+├── mmproj-model-f16.gguf
+├── model_config.json
+├── libLuminaMiniCPMV46GGUFEngine.dylib
+└── libllama / libggml dylibs
+```
+
+### 构建推理引擎
+
+MiniCPM-V 4.6 在 App 内通过 `app/NativeEngines/MiniCPMV46/LuminaMiniCPMV46GGUFEngine.cpp` 和 llama.cpp/ggml 执行。单独构建 native engine：
+
+```bash
+./model/lumina_model.sh build-native-engine
+```
+
+将 engine 写入指定 bundle：
+
+```bash
+LUMINA_MINICPMV46_OUTPUT_DIR=/absolute/path/to/MiniCPMV46ReActModel \
+./model/lumina_model.sh build-native-engine
+```
+
+需要 hardened runtime 时可指定签名身份：
+
+```bash
+LUMINA_CODESIGN_IDENTITY="Apple Development: Your Name" \
+./model/lumina_model.sh build-native-engine
+```
+
+### 安装到 App
+
+校验并安装 MiniCPM-V bundle：
+
+```bash
+./model/lumina_model.sh validate original
+./model/lumina_model.sh install original
+```
+
+模型会复制到 `app/Resources/Models/MiniCPMV46ReActModel/`，并在 Xcode 构建时作为本地资源打包。
+
+安装 embedding：
+
+```bash
 ./model/lumina_model.sh download embedding
+./model/lumina_model.sh install embedding
+```
+
+安装全部本地推理资源：
+
+```bash
 ./model/lumina_model.sh download all
-./model/lumina_model.sh pull-trained
-./model/lumina_model.sh build-native-engine
-./model/lumina_model.sh install original
-./model/lumina_model.sh install trained
-./model/lumina_model.sh install embedding
 ./model/lumina_model.sh install all
 ```
 
-MiniCPM-V 4.6 的 GGUF 推理走 app 内的 C++ native engine，需要把
-`app/NativeEngines/MiniCPMV46/LuminaMiniCPMV46GGUFEngine.cpp` 单独编译成
-`libLuminaMiniCPMV46GGUFEngine.dylib`，并和 llama.cpp/ggml 依赖 dylib 一起放进模型 bundle。
-这个编译入口已经合并到统一模型脚本：
-
-```bash
-./model/lumina_model.sh build-native-engine
-```
-
-`download original` 默认会在下载后构建 native engine；训练后的模型 bundle 已包含当前编译好的 dylib。
-如果改过 C++ 推理代码、llama.cpp 依赖，或需要重新签名 dylib，重新运行 `build-native-engine`，再执行对应的 `install original` 或 `install trained`。
-
-训练方式：
-
-- Base model：MiniCPM-V 4.6。
-- 流程：MiniCPM-V4.6 special-token/tool-call transport SFT -> holdout 检查 -> standard DPO -> LoRA 合并回 base model -> GGUF Q8 转换。
-- LoRA 微调 language modules，冻结 vision / visual / projector / resampler。
-- SFT train/test/evaluation：`50,844 / 6,351 / 6,351`。
-- DPO train/test/evaluation：`41,126 / 5,139 / 5,139`。
-
-## App
-
-要求：
-
-- 安装 Xcode。
-- Swift Package 支持。
-
-准备模型：
-
-```bash
-# 使用训练后的模型
-./model/lumina_model.sh install trained
-
-# 或使用原始模型
-./model/lumina_model.sh install original
-
-# 安装 embedding
-./model/lumina_model.sh install embedding
-
-# 一键安装已有本地资源
-./model/lumina_model.sh install all
-```
-
-前置检查：
-
-```bash
-./scripts/check.sh
-```
-
-这个脚本会运行 Runtime SDK 和 App 的 Swift tests、文件命名检查，并执行一次 macOS Catalyst Debug build。需要清理构建产物时使用：
-
-```bash
-./scripts/clean_build_artifacts.sh
-```
-
-需要运行性能测试报告时使用：
-
-```bash
-./scripts/perf.sh
-```
-
-用 Xcode 运行：
-
-1. 打开 `app/Lumina.xcodeproj`。
-2. 选择 `Lumina` scheme。
-3. 选择 Mac Catalyst、已连接的 iPhone 或 iPad。
-4. Build & Run。
-
-命令行构建 macOS Catalyst：
+构建 Mac Catalyst App：
 
 ```bash
 xcodebuild -project app/Lumina.xcodeproj \
@@ -157,11 +149,61 @@ xcodebuild -project app/Lumina.xcodeproj \
   -configuration Debug build
 ```
 
-命令行构建真机版本：
+开发环境也可以直接指定外部模型目录，避免复制权重。在 Xcode Scheme 的 Run 环境变量中设置：
+
+```text
+LUMINA_MINICPMV46_ORIGINAL_MODEL=/absolute/path/to/MiniCPMV46ReActModel
+```
+
+### 从 Hugging Face 权重量化
+
+`model/quantize_minicpmv46.sh` 接收本地 Hugging Face 格式目录，先转换为 F16 GGUF，再使用 llama.cpp 生成目标量化文件。输入目录可以来自 ModelScope、Hugging Face 或本地导出，但必须包含 `config.json` 和模型分片。
+
+准备 llama.cpp：
 
 ```bash
-xcodebuild -project app/Lumina.xcodeproj \
-  -scheme Lumina \
-  -destination 'generic/platform=iOS' \
-  -configuration Debug build
+git clone --depth 1 https://github.com/ggml-org/llama.cpp .build/vendor/llama.cpp
+python3 -m pip install -r .build/vendor/llama.cpp/requirements.txt
 ```
+
+生成 Q8_0 bundle：
+
+```bash
+LUMINA_PROJECTOR_GGUF=/absolute/path/to/mmproj-model-f16.gguf \
+./model/quantize_minicpmv46.sh \
+  /absolute/path/to/hf-model \
+  /absolute/path/to/MiniCPMV46ReActModel-Q8 \
+  Q8_0
+```
+
+常用量化类型：
+
+| 类型 | 体积 | 精度 | 适用场景 |
+| --- | --- | --- | --- |
+| `Q8_0` | 较大 | 最高 | 桌面端与高内存设备 |
+| `Q6_K` | 中等偏大 | 高 | 精度和内存折中 |
+| `Q5_K_M` | 中等 | 较高 | 常规端侧部署 |
+| `Q4_K_M` | 较小 | 中等 | 内存受限设备 |
+
+文本模型可以量化，`mmproj-model-f16.gguf` 保持 F16。完成后校验并安装自定义 bundle：
+
+```bash
+LUMINA_ORIGINAL_BUNDLE_DIR=/absolute/path/to/MiniCPMV46ReActModel-Q8 \
+./model/lumina_model.sh validate original
+
+LUMINA_MINICPMV46_OUTPUT_DIR=/absolute/path/to/MiniCPMV46ReActModel-Q8 \
+./model/lumina_model.sh build-native-engine
+
+LUMINA_ORIGINAL_BUNDLE_DIR=/absolute/path/to/MiniCPMV46ReActModel-Q8 \
+./model/lumina_model.sh install original
+```
+
+### Bundle 校验
+
+任意 MiniCPM-V bundle 都可以直接校验：
+
+```bash
+./model/lumina_model.sh validate /absolute/path/to/MiniCPMV46ReActModel
+```
+
+校验器会检查 `model.gguf`、`mmproj-model-f16.gguf`、`model_config.json`、context length 和配置中的文件映射。

@@ -8,11 +8,9 @@ VALIDATOR="$MODEL_ROOT/validate_minicpmv46_bundle.py"
 HF_BIN="${HF_BIN:-hf}"
 
 ORIGINAL_BUNDLE_DIR="${LUMINA_ORIGINAL_BUNDLE_DIR:-$MODEL_ROOT/bundles/original/MiniCPMV46ReActModel}"
-TRAINED_BUNDLE_DIR="${LUMINA_TRAINED_BUNDLE_DIR:-$MODEL_ROOT/bundles/trained/MiniCPMV46ReActModel-AgenticSFTDPO-Q8}"
 EMBEDDING_DIR="${LUMINA_EMBEDDING_DIR:-$MODEL_ROOT/embeddings/BGETextEmbedding}"
 
 ORIGINAL_APP_DIR="$APP_MODELS_DIR/MiniCPMV46ReActModel"
-TRAINED_APP_DIR="$APP_MODELS_DIR/MiniCPMV46ReActModel-AgenticSFTDPO-Q8"
 EMBEDDING_APP_DIR="$APP_MODELS_DIR/BGETextEmbedding.mlmodelc"
 EMBEDDING_TOKENIZER_APP="$APP_MODELS_DIR/BGETextEmbedding-tokenizer.json"
 
@@ -23,9 +21,6 @@ MINICPM_CONTEXT_LENGTH="${LUMINA_MINICPMV46_CONTEXT_LENGTH:-16000}"
 TEXT_MODEL_FILE="MiniCPM-V-4_6-${MINICPM_QUANT}.gguf"
 PROJECTOR_FILE="mmproj-model-f16.gguf"
 
-TRAINED_REMOTE="${LUMINA_TRAINED_REMOTE:-root@sh01-ssh.gpuhome.cc:/root/rivermind-data/lumina-agentic-training/artifacts/MiniCPMV46ReActModel-AgenticSFTDPO-Q8}"
-TRAINED_REMOTE_PORT="${LUMINA_TRAINED_REMOTE_PORT:-30058}"
-
 usage() {
   cat <<'USAGE'
 Lumina model manager
@@ -34,15 +29,12 @@ Usage:
   model/lumina_model.sh download original     Download original MiniCPM-V 4.6 GGUF bundle into model/bundles/original
   model/lumina_model.sh download embedding    Download and compile BGE embedding model into model/embeddings
   model/lumina_model.sh download all          Download original + embedding
-  model/lumina_model.sh pull-trained          Pull trained Agentic SFT+DPO bundle from the remote server
   model/lumina_model.sh build-native-engine   Build native MiniCPM-V 4.6 GGUF engine dylibs into model bundles
   model/lumina_model.sh validate original     Validate original MiniCPM-V bundle
-  model/lumina_model.sh validate trained      Validate trained Agentic SFT+DPO bundle
   model/lumina_model.sh validate PATH         Validate a MiniCPM-V bundle path
   model/lumina_model.sh install original      Install original MiniCPM-V bundle into app/Resources/Models
-  model/lumina_model.sh install trained       Install trained Agentic SFT+DPO bundle into app/Resources/Models
   model/lumina_model.sh install embedding     Install embedding model into app/Resources/Models
-  model/lumina_model.sh install all           Install original + trained + embedding
+  model/lumina_model.sh install all           Install original + embedding
   model/lumina_model.sh paths                 Print source and app model paths
 
 Environment:
@@ -51,8 +43,6 @@ Environment:
   LUMINA_BGE_REPO                Embedding repo, default: zhufucdev/BAAI-bge-small-zh-v1.5
   LUMINA_MINICPMV46_REPO         Original GGUF repo, default: openbmb/MiniCPM-V-4_6-gguf
   LUMINA_MINICPMV46_QUANT        Original quant, default: F16
-  LUMINA_TRAINED_REMOTE          rsync/scp-style trained bundle source
-  LUMINA_TRAINED_REMOTE_PORT     SSH port for trained bundle source, default: 30058
 USAGE
 }
 
@@ -73,11 +63,9 @@ print_paths() {
   cat <<PATHS
 MODEL_ROOT=$MODEL_ROOT
 ORIGINAL_BUNDLE_DIR=$ORIGINAL_BUNDLE_DIR
-TRAINED_BUNDLE_DIR=$TRAINED_BUNDLE_DIR
 EMBEDDING_DIR=$EMBEDDING_DIR
 APP_MODELS_DIR=$APP_MODELS_DIR
 ORIGINAL_APP_DIR=$ORIGINAL_APP_DIR
-TRAINED_APP_DIR=$TRAINED_APP_DIR
 EMBEDDING_APP_DIR=$EMBEDDING_APP_DIR
 PATHS
 }
@@ -102,7 +90,6 @@ build_native_engine() {
   local llama_repo="${LUMINA_LLAMA_CPP_REPO:-https://github.com/ggml-org/llama.cpp.git}"
   local llama_build_dir="$llama_dir/build"
   local default_model_dir="$ORIGINAL_APP_DIR"
-  local agentic_dpo_model_dir="$TRAINED_APP_DIR"
   local model_dirs=()
 
   if [[ -n "${LUMINA_MINICPMV46_INSTALL_DIRS:-}" ]]; then
@@ -111,9 +98,6 @@ build_native_engine() {
     model_dirs=("$LUMINA_MINICPMV46_OUTPUT_DIR")
   else
     model_dirs=("$default_model_dir")
-    if [[ -d "$agentic_dpo_model_dir" ]]; then
-      model_dirs+=("$agentic_dpo_model_dir")
-    fi
   fi
 
   local build_output_dir="${model_dirs[0]}"
@@ -335,24 +319,10 @@ download_embedding() {
   rm -rf "$staging"
 }
 
-pull_trained() {
-  need_cmd rsync
-  mkdir -p "$TRAINED_BUNDLE_DIR"
-  log "Pulling trained bundle from $TRAINED_REMOTE"
-  rsync -a --delete -e "ssh -p $TRAINED_REMOTE_PORT" "$TRAINED_REMOTE/" "$TRAINED_BUNDLE_DIR/"
-}
-
 install_original() {
   validate_minicpm_bundle "$ORIGINAL_BUNDLE_DIR"
   sync_dir "$ORIGINAL_BUNDLE_DIR" "$ORIGINAL_APP_DIR"
   log "Installed original model into $ORIGINAL_APP_DIR"
-}
-
-install_trained() {
-  [[ -f "$TRAINED_BUNDLE_DIR/model.gguf" ]] || die "Trained model bundle is missing model.gguf: $TRAINED_BUNDLE_DIR"
-  [[ -f "$TRAINED_BUNDLE_DIR/model_config.json" ]] || die "Trained model bundle is missing model_config.json: $TRAINED_BUNDLE_DIR"
-  sync_dir "$TRAINED_BUNDLE_DIR" "$TRAINED_APP_DIR"
-  log "Installed trained model into $TRAINED_APP_DIR"
 }
 
 install_embedding() {
@@ -377,9 +347,8 @@ download_target() {
 install_target() {
   case "${1:-}" in
     original) install_original ;;
-    trained) install_trained ;;
     embedding) install_embedding ;;
-    all) install_original; install_trained; install_embedding ;;
+    all) install_original; install_embedding ;;
     *) usage; die "Unknown install target: ${1:-}" ;;
   esac
 }
@@ -387,7 +356,6 @@ install_target() {
 validate_target() {
   case "${1:-}" in
     original) validate_minicpm_bundle "$ORIGINAL_BUNDLE_DIR" ;;
-    trained) validate_minicpm_bundle "$TRAINED_BUNDLE_DIR" ;;
     "") usage; die "Missing validate target" ;;
     *) validate_minicpm_bundle "$1" ;;
   esac
@@ -396,7 +364,6 @@ validate_target() {
 main() {
   case "${1:-}" in
     download) shift; download_target "${1:-}" ;;
-    pull-trained) pull_trained ;;
     build-native-engine) build_native_engine ;;
     validate) shift; validate_target "${1:-}" ;;
     install) shift; install_target "${1:-}" ;;
