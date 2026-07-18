@@ -26,3 +26,4 @@ model/embeddings/
 app/Reports/
 app/optimize/
 PLAN.md
+.ua/.trash-*/
