@@ -69,11 +69,37 @@ public final class LuminaCoreMLEmbeddingProvider: LuminaEmbeddingProvider, @unch
             let pointer = array.dataPointer.bindMemory(to: Float.self, capacity: array.count)
             return Array(UnsafeBufferPointer(start: pointer, count: array.count))
         case .float16:
-            let pointer = array.dataPointer.bindMemory(to: Float16.self, capacity: array.count)
-            return UnsafeBufferPointer(start: pointer, count: array.count).map(Float.init)
+            let pointer = array.dataPointer.bindMemory(to: UInt16.self, capacity: array.count)
+            return UnsafeBufferPointer(start: pointer, count: array.count).map(halfPrecisionFloat)
         default:
             return (0..<array.count).map { Float(truncating: array[$0]) }
         }
+    }
+
+    private static func halfPrecisionFloat(_ bits: UInt16) -> Float {
+        let sign = UInt32(bits & 0x8000) << 16
+        let exponent = UInt32((bits >> 10) & 0x001f)
+        var mantissa = UInt32(bits & 0x03ff)
+        let floatBits: UInt32
+        switch exponent {
+        case 0 where mantissa == 0:
+            floatBits = sign
+        case 0:
+            var normalizedExponent: Int32 = -14
+            while mantissa & 0x0400 == 0 {
+                mantissa <<= 1
+                normalizedExponent -= 1
+            }
+            mantissa &= 0x03ff
+            floatBits = sign
+                | (UInt32(normalizedExponent + 127) << 23)
+                | (mantissa << 13)
+        case 0x1f:
+            floatBits = sign | 0x7f80_0000 | (mantissa << 13)
+        default:
+            floatBits = sign | ((exponent + 112) << 23) | (mantissa << 13)
+        }
+        return Float(bitPattern: floatBits)
     }
 }
 

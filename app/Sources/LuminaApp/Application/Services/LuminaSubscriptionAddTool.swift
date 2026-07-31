@@ -1,6 +1,7 @@
 import LuminaAgentRuntime
 @preconcurrency import EventKit
 import Foundation
+import LuminaAppCore
 import PersonalMemory
 
 struct LuminaSubscriptionAddTool: LuminaAgentTool {

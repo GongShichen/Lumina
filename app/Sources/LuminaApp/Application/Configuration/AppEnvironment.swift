@@ -4,6 +4,7 @@ import PersonalMemory
 
 struct AppEnvironment {
     var memoryStore: LuminaMemoryStore
+    var knowledgeStore: LuminaKnowledgeStore
     var ledgerStore: LuminaLedgerStore
     var subscriptionStore: LuminaSubscriptionStore
     var messageDrafts: LuminaMessageDraftCenter
@@ -31,8 +32,9 @@ struct AppEnvironment {
         let localModelSelection = LuminaLocalModelSelectionStore()
         let remoteInferenceSettings = LuminaRemoteInferenceSettingsStore()
         let memoryRepository = LuminaJSONMemoryRepository(url: appSupport.appendingPathComponent("memory-index.json"))
+        let embeddingProvider = LocalModelBootstrap.makeEmbeddingProvider(readinessStore: modelReadiness)
         let memoryStore = LuminaMemoryStore(
-            embeddingProvider: LocalModelBootstrap.makeEmbeddingProvider(readinessStore: modelReadiness),
+            embeddingProvider: embeddingProvider,
             repository: memoryRepository,
             configuration: LuminaMemoryStoreConfiguration(
                 cacheLimit: 32,
@@ -42,11 +44,18 @@ struct AppEnvironment {
                 persistAfterEmbedding: false
             )
         )
+        let knowledgeStore = LuminaKnowledgeStore(
+            embeddingProvider: embeddingProvider,
+            repository: LuminaFileKnowledgeRepository(
+                rootURL: appSupport.appendingPathComponent("KnowledgeBases", isDirectory: true)
+            )
+        )
 
         let auditLogger = LuminaJSONLAuditLogger(url: appSupport.appendingPathComponent("audit.jsonl"))
 
         return AppEnvironment(
             memoryStore: memoryStore,
+            knowledgeStore: knowledgeStore,
             ledgerStore: LuminaLedgerStore(url: appSupport.appendingPathComponent("ledger.json")),
             subscriptionStore: LuminaSubscriptionStore(url: appSupport.appendingPathComponent("subscriptions.json")),
             messageDrafts: LuminaMessageDraftCenter(),

@@ -7,6 +7,7 @@ import PersonalMemory
 @MainActor
 final class AgentAppServices: ObservableObject {
     let memoryStore: LuminaMemoryStore
+    let knowledgeStore: LuminaKnowledgeStore
     let ledgerStore: LuminaLedgerStore
     let subscriptionStore: LuminaSubscriptionStore
     let messageDrafts: LuminaMessageDraftCenter
@@ -20,12 +21,22 @@ final class AgentAppServices: ObservableObject {
     let auditLogReader: (any LuminaAuditLogReader)?
     let evaluationCalendarStore = LuminaVolatileCalendarStore()
     private let environment: AppEnvironment
+    private let knowledgeDisclosurePolicy: LuminaKnowledgeDisclosurePolicy
     private let loadTask: Task<Void, Never>
 
     private(set) lazy var runtime: LuminaAgentRuntime = {
-        makeRuntime(
-            tools: allAppTools(),
-            contextProvider: environment.contextProvider
+        let tools = allAppTools()
+        return makeRuntime(
+            tools: tools,
+            contextProvider: environment.contextProvider,
+            contextLoadingPlugin: LuminaAppContextLoadingPlugin(
+                knowledgeStore: knowledgeStore,
+                configuration: environment.runtimeConfiguration,
+                availableCapabilityCategories: AppToolFactory.knowledgeCapabilityCategories(for: tools),
+                destinationResolver: {
+                    await self.knowledgeDisclosurePolicy.destination()
+                }
+            )
         )
     }()
 
@@ -57,24 +68,21 @@ final class AgentAppServices: ObservableObject {
             ledgerStore: ledgerStore,
             subscriptionStore: subscriptionStore,
             messageDrafts: messageDrafts,
-            askUser: askUser
+            askUser: askUser,
+            knowledgeStore: knowledgeStore,
+            knowledgeDisclosurePolicy: knowledgeDisclosurePolicy,
+            maximumObservationCharacters: environment.runtimeConfiguration.maximumObservationCharacters
         )
     }
 
     private func makeRuntime(
         tools: [AnyLuminaAgentTool],
         contextProvider: any LuminaRuntimeContextProvider,
+        contextLoadingPlugin: (any LuminaContextLoadingPlugin)? = nil,
         confirmationCoordinator: (any LuminaConfirmationCoordinator)? = nil,
         configuration: LuminaAgentRuntimeConfiguration? = nil
     ) -> LuminaAgentRuntime {
         let resolvedConfiguration = configuration ?? environment.runtimeConfiguration
-        let contextLoadingPlugin: (any LuminaContextLoadingPlugin)? = contextProvider is LuminaEmptyRuntimeContextProvider
-            ? nil
-            : LuminaAppContextLoadingPlugin(
-                contextProvider: contextProvider,
-                tools: tools,
-                configuration: resolvedConfiguration
-            )
         return LuminaAgentRuntime(
             tools: tools,
             stepGenerator: environment.stepGenerator,
@@ -107,6 +115,7 @@ final class AgentAppServices: ObservableObject {
     init(environment: AppEnvironment = .live()) {
         self.environment = environment
         self.memoryStore = environment.memoryStore
+        self.knowledgeStore = environment.knowledgeStore
         self.ledgerStore = environment.ledgerStore
         self.subscriptionStore = environment.subscriptionStore
         self.messageDrafts = environment.messageDrafts
@@ -116,13 +125,20 @@ final class AgentAppServices: ObservableObject {
         self.modelMetrics = environment.modelMetrics
         self.localModelSelection = environment.localModelSelection
         self.remoteInferenceSettings = environment.remoteInferenceSettings
+        self.knowledgeDisclosurePolicy = LuminaKnowledgeDisclosurePolicy(
+            remoteSettings: environment.remoteInferenceSettings
+        )
         self.auditLogger = environment.auditLogger
         self.auditLogReader = environment.auditLogReader
         let memoryStore = environment.memoryStore
+        let knowledgeStore = environment.knowledgeStore
         let ledgerStore = environment.ledgerStore
         let subscriptionStore = environment.subscriptionStore
         self.loadTask = Task {
             try? await memoryStore.load()
+            let bundledRoot = Bundle.main.resourceURL?
+                .appendingPathComponent("KnowledgeBases", isDirectory: true)
+            await knowledgeStore.load(bundledRootURL: bundledRoot)
             try? await ledgerStore.load()
             try? await subscriptionStore.load()
             await Self.removeLegacyWelcomeMemory(from: memoryStore)
@@ -139,15 +155,44 @@ final class AgentAppServices: ObservableObject {
     }
 
     func run(_ text: String) async -> LuminaAgentRunResult {
-        await runtime.run(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, text: text))
+        let disclosureRunID = knowledgeDisclosurePolicy.beginRun()
+        defer { knowledgeDisclosurePolicy.endRun(disclosureRunID) }
+        return await runtime.run(request: LuminaAgentRequest(
+            systemInstructions: LuminaAppSystemInstructions.taskExecution,
+            text: text
+        ))
     }
 
     func run(content: [LuminaAgentContentPart]) async -> LuminaAgentRunResult {
-        await runtime.run(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, content: content))
+        let disclosureRunID = knowledgeDisclosurePolicy.beginRun()
+        defer { knowledgeDisclosurePolicy.endRun(disclosureRunID) }
+        return await runtime.run(request: LuminaAgentRequest(
+            systemInstructions: LuminaAppSystemInstructions.taskExecution,
+            content: content
+        ))
     }
 
     func runStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {
-        runtime.runStream(request: LuminaAgentRequest(systemInstructions: LuminaAppSystemInstructions.taskExecution, content: content))
+        let disclosureRunID = knowledgeDisclosurePolicy.beginRun()
+        let upstream = runtime.runStream(request: LuminaAgentRequest(
+            systemInstructions: LuminaAppSystemInstructions.taskExecution,
+            content: content
+        ))
+        return AsyncStream { continuation in
+            let relay = Task { @MainActor in
+                for await event in upstream {
+                    continuation.yield(event)
+                }
+                knowledgeDisclosurePolicy.endRun(disclosureRunID)
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in
+                relay.cancel()
+                Task { @MainActor in
+                    self.knowledgeDisclosurePolicy.endRun(disclosureRunID)
+                }
+            }
+        }
     }
 
     func runEvaluationStream(content: [LuminaAgentContentPart]) -> AsyncStream<LuminaAgentRunEvent> {

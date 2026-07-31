@@ -61,6 +61,205 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertTrue(schemas.contains { $0.name == "ask_user" && $0.sideEffect == .readOnly })
     }
 
+    func testKnowledgeSearchToolUsesRuntimeValidationReplayAuditAndDisclosure() async throws {
+        let store = await makeKnowledgeStore()
+        let localTool = LuminaKnowledgeSearchTool(
+            knowledgeStore: store,
+            maximumResultCharacters: 1_500,
+            availableCapabilityCategories: [],
+            destinationResolver: { .local }
+        )
+        XCTAssertEqual(localTool.schema.name, "knowledge.search")
+        XCTAssertEqual(localTool.schema.sideEffect, .readOnly)
+        XCTAssertEqual(localTool.schema.sensitivity, .privateData)
+        XCTAssertEqual(localTool.schema.idempotencyPolicy, "replay_identical")
+        XCTAssertTrue(localTool.schema.parameters.first { $0.name == "query" }?.sensitive == true)
+
+        let direct = try await localTool.call(
+            arguments: ["query": .string("nebula refund"), "limit": .number(5)],
+            cancellation: LuminaCancellationToken()
+        )
+        guard case let .array(directRows) = direct.output["results"] else {
+            return XCTFail("Expected structured knowledge results.")
+        }
+        XCTAssertEqual(directRows.count, 1)
+        XCTAssertTrue(direct.content.contains {
+            ($0.textForModelInput ?? "").contains("policy.txt")
+        })
+
+        let remoteTool = LuminaKnowledgeSearchTool(
+            knowledgeStore: store,
+            maximumResultCharacters: 1_500,
+            availableCapabilityCategories: [],
+            destinationResolver: { .remote }
+        )
+        let remote = try await remoteTool.call(
+            arguments: ["query": .string("nebula refund")],
+            cancellation: LuminaCancellationToken()
+        )
+        guard case let .array(remoteRows) = remote.output["results"] else {
+            return XCTFail("Expected structured remote result array.")
+        }
+        XCTAssertTrue(remoteRows.isEmpty)
+
+        let audit = LuminaInMemoryAuditLogger()
+        let call = LuminaToolCall(
+            toolName: "knowledge.search",
+            arguments: ["query": .string("nebula refund"), "limit": .number(5)]
+        )
+        let runtime = LuminaAgentRuntime(
+            tools: [localTool.eraseToAnyTool()],
+            stepGenerator: LuminaFixedReActModel(calls: [call, call]),
+            configuration: luminaAppCoreTestRuntimeConfiguration,
+            auditLogger: audit
+        )
+        let run = await runtime.run(request: LuminaAgentRequest(text: "Search policy twice"))
+        let replayed = run.toolResults.filter { $0.output["replayed"]?.boolValue == true }
+        let auditRecords = await audit.allRecords()
+
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertEqual(run.toolResults.count, 2)
+        XCTAssertEqual(replayed.count, 1)
+        XCTAssertTrue(auditRecords.contains {
+            $0.toolName == "runtime" && $0.outputSummary.contains("knowledge.search")
+        })
+
+        let invalidRuntime = LuminaAgentRuntime(
+            tools: [localTool.eraseToAnyTool()],
+            stepGenerator: LuminaFixedReActModel(calls: [
+                LuminaToolCall(toolName: "knowledge.search", arguments: [:])
+            ]),
+            configuration: luminaAppCoreTestRuntimeConfiguration
+        )
+        let invalid = await invalidRuntime.run(request: LuminaAgentRequest(text: "Invalid search"))
+        XCTAssertEqual(invalid.toolResults.first?.status, .failed)
+    }
+
+    func testKnowledgeContextPluginProgressivelyLoadsAndRevalidatesDisclosure() async throws {
+        let store = await makeKnowledgeStore()
+        let localPlugin = LuminaAppContextLoadingPlugin(
+            knowledgeStore: store,
+            configuration: luminaAppCoreTestRuntimeConfiguration,
+            availableCapabilityCategories: [],
+            destinationResolver: { .local }
+        )
+        let remotePlugin = LuminaAppContextLoadingPlugin(
+            knowledgeStore: store,
+            configuration: luminaAppCoreTestRuntimeConfiguration,
+            availableCapabilityCategories: [],
+            destinationResolver: { .remote }
+        )
+        let requestObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(LuminaAgentRequest(text: "nebula refund"))
+            ) as? [String: Any]
+        )
+
+        let catalogRequest = try jsonString([
+            "action": "catalog",
+            "request": requestObject,
+            "context_budget": ["remaining_tokens_estimate": 100],
+            "loaded_context_set": [],
+            "items": []
+        ])
+        let localCatalog = await localPlugin.handleContextLoading(requestJSON: catalogRequest)
+        let remoteCatalog = await remotePlugin.handleContextLoading(requestJSON: catalogRequest)
+        XCTAssertTrue(localCatalog.contains("knowledge-base:tool-knowledge"))
+        XCTAssertFalse(localCatalog.contains("fourteen days"))
+        let localCatalogItems = try XCTUnwrap(
+            try jsonObject(localCatalog)["items"] as? [[String: Any]]
+        )
+        XCTAssertEqual(localCatalogItems.first?["version"] as? String, "1")
+        XCTAssertFalse(remoteCatalog.contains("tool-knowledge"))
+        XCTAssertFalse(remoteCatalog.contains("Imported policy"))
+
+        let searchRequest = try jsonString([
+            "action": "search",
+            "request": requestObject,
+            "query": "ignored fallback",
+            "context_budget": ["remaining_tokens_estimate": 100],
+            "loaded_context_set": [],
+            "items": []
+        ])
+        let searchResponse = await localPlugin.handleContextLoading(requestJSON: searchRequest)
+        let searchObject = try jsonObject(searchResponse)
+        let items = try XCTUnwrap(searchObject["items"] as? [[String: Any]])
+        let item = try XCTUnwrap(items.first)
+        let itemID = try XCTUnwrap(item["id"] as? String)
+        let itemHash = try XCTUnwrap(item["hash"] as? String)
+        XCTAssertEqual(itemID, "knowledge:tool-knowledge:tool-chunk")
+        XCTAssertFalse(searchResponse.contains("fourteen days"))
+
+        let loadRequest = try jsonString([
+            "action": "load",
+            "request": requestObject,
+            "context_budget": ["remaining_tokens_estimate": 100],
+            "loaded_context_set": [],
+            "items": [item]
+        ])
+        let localLoad = await localPlugin.handleContextLoading(requestJSON: loadRequest)
+        XCTAssertTrue(localLoad.contains("fourteen days"))
+        XCTAssertTrue(localLoad.contains(#""sensitivity":"privateData""#))
+        XCTAssertTrue(localLoad.contains(#""disclosure_level":1"#))
+
+        let remoteLoad = await remotePlugin.handleContextLoading(requestJSON: loadRequest)
+        XCTAssertFalse(remoteLoad.contains("fourteen days"))
+        XCTAssertEqual(
+            (try jsonObject(remoteLoad)["sections"] as? [Any])?.count,
+            0
+        )
+
+        var forgedItem = item
+        forgedItem["hash"] = "wrong-hash"
+        let forgedRequest = try jsonString([
+            "action": "load",
+            "request": requestObject,
+            "context_budget": ["remaining_tokens_estimate": 100],
+            "loaded_context_set": [],
+            "items": [forgedItem]
+        ])
+        let forgedLoad = await localPlugin.handleContextLoading(requestJSON: forgedRequest)
+        XCTAssertEqual(
+            (try jsonObject(forgedLoad)["sections"] as? [Any])?.count,
+            0
+        )
+
+        let zeroBudgetRequest = try jsonString([
+            "action": "load",
+            "request": requestObject,
+            "context_budget": ["remaining_tokens_estimate": 0],
+            "loaded_context_set": [],
+            "items": [item]
+        ])
+        let zeroBudgetLoad = await localPlugin.handleContextLoading(requestJSON: zeroBudgetRequest)
+        XCTAssertEqual(
+            (try jsonObject(zeroBudgetLoad)["sections"] as? [Any])?.count,
+            0
+        )
+
+        let rangeRequest = try jsonString([
+            "action": "range",
+            "request": requestObject,
+            "context_budget": ["remaining_tokens_estimate": 100],
+            "loaded_context_set": [["id": itemID, "hash": itemHash]],
+            "items": [item]
+        ])
+        let rangeResponse = await localPlugin.handleContextLoading(requestJSON: rangeRequest)
+        let rangeSections = try XCTUnwrap(
+            try jsonObject(rangeResponse)["sections"] as? [[String: Any]]
+        )
+        XCTAssertEqual(rangeSections.count, 2)
+        XCTAssertTrue(rangeResponse.contains("Previous clause alpha"))
+        XCTAssertTrue(rangeResponse.contains("Following clause omega"))
+
+        let unknown = await localPlugin.handleContextLoading(
+            requestJSON: try jsonString(["action": "not_supported"])
+        )
+        XCTAssertEqual(try jsonObject(unknown)["status"] as? String, "skipped")
+        let invalid = await localPlugin.handleContextLoading(requestJSON: "{")
+        XCTAssertEqual(try jsonObject(invalid)["status"] as? String, "failed")
+    }
+
     func testMemoryPermissionGateOnlyConfirmsSensitiveMemoryWrites() async {
         let gate = LuminaAppMemoryPermissionGate()
         let schema = LuminaToolSchema(name: "memory.ingest_text", description: "Memory", parameters: [], sideEffect: .appLocalWrite, sensitivity: .sensitive)
@@ -85,6 +284,89 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(normal, .allowed)
         XCTAssertFalse(sensitive.isAllowedWithoutConfirmation)
         XCTAssertFalse(elevated.isAllowedWithoutConfirmation)
+    }
+
+    private func makeKnowledgeStore() async -> LuminaKnowledgeStore {
+        let baseID = "tool-knowledge"
+        let document = LuminaKnowledgeDocument(
+            id: "tool-document",
+            knowledgeBaseID: baseID,
+            title: "Refund",
+            fileName: "policy.txt",
+            storedFileName: "tool-document.txt",
+            mediaType: "text/plain",
+            contentHash: "tool-document-hash",
+            characterCount: 35
+        )
+        let previousChunk = LuminaKnowledgeChunk(
+            id: "tool-chunk-previous",
+            knowledgeBaseID: baseID,
+            documentID: document.id,
+            ordinal: 0,
+            title: "Previous policy clause",
+            text: "Previous clause alpha.",
+            summary: "Previous clause.",
+            locator: LuminaKnowledgeLocator(fileName: document.fileName),
+            tags: [],
+            contentHash: "tool-chunk-previous-hash"
+        )
+        let chunk = LuminaKnowledgeChunk(
+            id: "tool-chunk",
+            knowledgeBaseID: baseID,
+            documentID: document.id,
+            ordinal: 1,
+            title: "Nebula refund policy",
+            text: "The nebula refund period is fourteen days.",
+            summary: "A concise refund policy summary.",
+            locator: LuminaKnowledgeLocator(fileName: document.fileName),
+            tags: ["refund"],
+            contentHash: "tool-chunk-hash"
+        )
+        let followingChunk = LuminaKnowledgeChunk(
+            id: "tool-chunk-following",
+            knowledgeBaseID: baseID,
+            documentID: document.id,
+            ordinal: 2,
+            title: "Following policy clause",
+            text: "Following clause omega.",
+            summary: "Following clause.",
+            locator: LuminaKnowledgeLocator(fileName: document.fileName),
+            tags: [],
+            contentHash: "tool-chunk-following-hash"
+        )
+        let snapshot = LuminaKnowledgeBaseSnapshot(
+            descriptor: LuminaKnowledgeBaseDescriptor(
+                id: baseID,
+                title: "Imported policy",
+                summary: "A local-only test knowledge base.",
+                version: "1",
+                origin: .userImported,
+                enabled: true,
+                remoteAccess: .localOnly,
+                indexStatus: .ready,
+                documentCount: 1,
+                chunkCount: 3
+            ),
+            documents: [document],
+            chunks: [previousChunk, chunk, followingChunk]
+        )
+        let store = LuminaKnowledgeStore(
+            repository: LuminaInMemoryKnowledgeRepository(imported: [snapshot]),
+            configuration: LuminaKnowledgeStoreConfiguration(scheduleBackgroundEmbedding: false)
+        )
+        await store.load()
+        return store
+    }
+
+    private func jsonString(_ object: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        return try XCTUnwrap(String(data: data, encoding: .utf8))
+    }
+
+    private func jsonObject(_ value: String) throws -> [String: Any] {
+        try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any]
+        )
     }
 
     func testFactoryIncludesExtendedAssistantToolsButNotAppRuntimeCapabilities() async {

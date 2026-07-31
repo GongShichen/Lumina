@@ -318,6 +318,22 @@ final class LuminaRemoteInferenceSettingsStore: ObservableObject, @unchecked Sen
         )
     }
 
+    func shouldTreatRunAsRemoteForDisclosure() -> Bool {
+        let hasEndpoint = LuminaRemoteInferenceConfiguration(
+            baseURL: baseURL,
+            apiKey: "placeholder",
+            model: model
+        ).normalizedBaseURL != nil
+        let hasModel = !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard hasEndpoint, hasModel else { return false }
+        do {
+            let apiKey = try keychain.readAPIKey()
+            return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return true
+        }
+    }
+
     func apiKeyForDisplay() -> String {
         (try? keychain.readAPIKey()) ?? ""
     }

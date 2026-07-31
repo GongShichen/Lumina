@@ -18,14 +18,20 @@ enum AppToolFactory {
         ledgerStore: LuminaLedgerStore,
         subscriptionStore: LuminaSubscriptionStore,
         messageDrafts: LuminaMessageDraftCenter,
-        askUser: AskUserCoordinator
+        askUser: AskUserCoordinator,
+        knowledgeStore: LuminaKnowledgeStore,
+        knowledgeDisclosurePolicy: LuminaKnowledgeDisclosurePolicy,
+        maximumObservationCharacters: Int
     ) -> [AnyLuminaAgentTool] {
         makeTools(
             memoryStore: memoryStore,
             ledgerStore: ledgerStore,
             subscriptionStore: subscriptionStore,
             messageDrafts: messageDrafts,
-            askUser: askUser.ask
+            askUser: askUser.ask,
+            knowledgeStore: knowledgeStore,
+            knowledgeDisclosurePolicy: knowledgeDisclosurePolicy,
+            maximumObservationCharacters: maximumObservationCharacters
         )
     }
 
@@ -92,7 +98,10 @@ enum AppToolFactory {
         ledgerStore: LuminaLedgerStore,
         subscriptionStore: LuminaSubscriptionStore,
         messageDrafts: LuminaMessageDraftCenter,
-        askUser: @escaping LuminaAskUserTool.AskUser
+        askUser: @escaping LuminaAskUserTool.AskUser,
+        knowledgeStore: LuminaKnowledgeStore,
+        knowledgeDisclosurePolicy: LuminaKnowledgeDisclosurePolicy,
+        maximumObservationCharacters: Int
     ) -> [AnyLuminaAgentTool] {
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ??
             FileManager.default.temporaryDirectory
@@ -101,6 +110,14 @@ enum AppToolFactory {
             LuminaAskUserTool(askUser: askUser).eraseToAnyTool(),
             LuminaMediaImportTool(memoryStore: memoryStore).eraseToAnyTool(),
             LuminaLocalSearchTool(memoryStore: memoryStore).eraseToAnyTool(),
+            LuminaKnowledgeSearchTool(
+                knowledgeStore: knowledgeStore,
+                maximumResultCharacters: maximumObservationCharacters,
+                availableCapabilityCategories: availableKnowledgeCapabilityCategories(),
+                destinationResolver: {
+                    await knowledgeDisclosurePolicy.destination()
+                }
+            ).eraseToAnyTool(),
             LuminaCalendarSearchTool().eraseToAnyTool(),
             LuminaCalendarCreateTool().eraseToAnyTool(),
             LuminaReminderCreateTool().eraseToAnyTool(),
@@ -154,6 +171,45 @@ enum AppToolFactory {
         #else
         return (nil, nil, nil, nil)
         #endif
+    }
+
+    static func knowledgeCapabilityCategories(
+        for tools: [AnyLuminaAgentTool]
+    ) -> Set<String> {
+        let names = tools.map(\.schema.name)
+        var categories: Set<String> = []
+        let mappings: [(String, String)] = [
+            ("calendar.", "calendar"),
+            ("reminder.", "reminders"),
+            ("contacts.", "contacts"),
+            ("message.", "communication"),
+            ("email.", "communication"),
+            ("phone.", "communication"),
+            ("share.", "communication"),
+            ("file.", "files"),
+            ("file.", "notes"),
+            ("clipboard.", "clipboard"),
+            ("ledger.", "ledger"),
+            ("subscription.", "subscriptions"),
+            ("location.", "location"),
+            ("weather.", "weather"),
+            ("health.", "health")
+        ]
+        for (prefix, category) in mappings where names.contains(where: { $0.hasPrefix(prefix) }) {
+            categories.insert(category)
+        }
+        return categories
+    }
+
+    private static func availableKnowledgeCapabilityCategories() -> Set<String> {
+        var categories: Set<String> = [
+            "calendar", "reminders", "contacts", "communication",
+            "notes", "files", "clipboard", "ledger", "subscriptions", "location"
+        ]
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        categories.formUnion(["weather", "health"])
+        #endif
+        return categories
     }
 
     private static func platformFilteredTools(_ tools: [AnyLuminaAgentTool]) -> [AnyLuminaAgentTool] {

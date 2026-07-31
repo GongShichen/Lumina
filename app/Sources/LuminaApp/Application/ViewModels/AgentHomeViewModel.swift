@@ -35,6 +35,7 @@ final class AgentHomeViewModel: ObservableObject {
     @Published private(set) var benchmarkSnapshot = LuminaBenchmarkSnapshot()
 
     let memoryViewModel = PersonalMemoryViewModel()
+    let knowledgeViewModel = KnowledgeBaseViewModel()
     private let voiceInput: VoiceInputController
     private let activityCenter = LuminaAgentActivityCenter()
     private var services: AgentAppServices?
@@ -62,6 +63,7 @@ final class AgentHomeViewModel: ObservableObject {
         memoryViewModel.configure(memoryStore: services.memoryStore, stats: stats, onMemoryChanged: { [weak self] in
             await self?.refreshStats()
         })
+        knowledgeViewModel.configure(knowledgeStore: services.knowledgeStore)
         startMessageDraftStream(services: services)
         Task { await refreshInitialData() }
     }

@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 enum LuminaTab {
     case agent
     case memory
+    case knowledge
     case settings
     case runtimeLab
     case runtime
@@ -23,7 +24,7 @@ enum LuminaFeatureFlags {
 extension LuminaTab {
     var isVisible: Bool {
         switch self {
-        case .agent, .memory:
+        case .agent, .memory, .knowledge:
             return true
         case .settings:
             return LuminaFeatureFlags.showSettingsTab

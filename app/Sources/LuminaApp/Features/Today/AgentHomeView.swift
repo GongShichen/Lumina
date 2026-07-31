@@ -52,6 +52,12 @@ struct AgentHomeView: View {
             .tag(LuminaTab.memory)
             .tabItem { Label("Memory", systemImage: "brain.head.profile") }
 
+            NavigationStack {
+                KnowledgeBaseScreen(viewModel: viewModel.knowledgeViewModel)
+            }
+            .tag(LuminaTab.knowledge)
+            .tabItem { Label("Knowledge", systemImage: "books.vertical.fill") }
+
             if LuminaFeatureFlags.showSettingsTab {
                 NavigationStack {
                     LuminaSettingsScreen(

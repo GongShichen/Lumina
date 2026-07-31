@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "lumina-guide",
+  "version": "1.0.0",
+  "title": "Lumina 使用指南",
+  "summary": "Lumina 的基础操作、多模态输入、记忆、模型状态与 Trust 页面说明。",
+  "default_enabled": true,
+  "remote_access": "allowRemote",
+  "documents": [
+    {
+      "id": "guide-quick-start",
+      "path": "quick-start.md",
+      "title": "快速开始",
+      "tags": ["Lumina", "Today", "Agent", "入门"],
+      "capability_categories": []
+    },
+    {
+      "id": "guide-multimodal-input",
+      "path": "multimodal-input.md",
+      "title": "多模态输入",
+      "tags": ["附件", "图片", "语音", "文件"],
+      "capability_categories": []
+    },
+    {
+      "id": "guide-memory-and-knowledge",
+      "path": "memory-and-knowledge.md",
+      "title": "Personal Memory 与 Knowledge",
+      "tags": ["记忆", "知识库", "检索"],
+      "capability_categories": []
+    },
+    {
+      "id": "guide-models-and-troubleshooting",
+      "path": "models-and-troubleshooting.md",
+      "title": "模型与故障排查",
+      "tags": ["本地模型", "Embedding", "远程 API", "状态"],
+      "capability_categories": []
+    },
+    {
+      "id": "guide-trust-screen",
+      "path": "trust-screen.md",
+      "title": "Trust 页面",
+      "tags": ["Trust", "权限", "审计", "Benchmark"],
+      "capability_categories": []
+    }
+  ]
+}

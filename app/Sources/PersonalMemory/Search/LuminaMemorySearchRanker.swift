@@ -1,42 +1,34 @@
 import Foundation
 
 enum LuminaMemorySearchRanker {
-    static func keywordRank(_ query: String, candidates: [LuminaMemoryChunk]) -> [LuminaMemorySearchResult] {
-        let tokens = Set(query.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
-        guard !tokens.isEmpty else {
-            return candidates.prefix(10).map { LuminaMemorySearchResult(chunk: $0, score: 0.05, matchedBy: .metadata) }
-        }
-
-        return candidates.compactMap { chunk in
-            let haystack = "\(chunk.title) \(chunk.text) \(chunk.metadata.values.joined(separator: " "))".lowercased()
-            let hits = tokens.reduce(0) { count, token in
-                haystack.contains(token) ? count + 1 : count
-            }
-            guard hits > 0 else { return nil }
-            return LuminaMemorySearchResult(chunk: chunk, score: Float(hits) / Float(tokens.count), matchedBy: .keyword)
-        }
-    }
-
     static func merge(
-        vectorResults: [LuminaMemorySearchResult],
-        keywordResults: [LuminaMemorySearchResult],
+        bm25Results: [LuminaBM25Hit<UUID>],
+        vectorIDs: [UUID],
+        chunksByID: [UUID: LuminaMemoryChunk],
         limit: Int
     ) -> [LuminaMemorySearchResult] {
-        var bestByChunk: [UUID: LuminaMemorySearchResult] = [:]
-        for result in vectorResults + keywordResults {
-            let current = bestByChunk[result.chunk.id]
-            if current == nil || result.score > current!.score {
-                bestByChunk[result.chunk.id] = result
+        let candidateLimit = max(limit * 8, 40)
+        return LuminaReciprocalRankFusion.merge(
+            bm25IDs: bm25Results.prefix(candidateLimit).map(\.id),
+            vectorIDs: Array(vectorIDs.prefix(candidateLimit)),
+            limit: max(1, limit)
+        ).compactMap { hit in
+            guard let chunk = chunksByID[hit.id] else { return nil }
+            let matchedBy: LuminaMemoryMatchKind
+            if hit.bm25Rank != nil && hit.vectorRank != nil {
+                matchedBy = .hybrid
+            } else if hit.bm25Rank != nil {
+                matchedBy = .bm25
+            } else {
+                matchedBy = .vector
             }
+            return LuminaMemorySearchResult(
+                chunk: chunk,
+                score: hit.score,
+                matchedBy: matchedBy,
+                bm25Rank: hit.bm25Rank,
+                vectorRank: hit.vectorRank
+            )
         }
-        return bestByChunk.values
-            .sorted { lhs, rhs in
-                if lhs.score == rhs.score {
-                    return lhs.chunk.createdAt > rhs.chunk.createdAt
-                }
-                return lhs.score > rhs.score
-            }
-            .prefix(max(1, limit))
-            .map { $0 }
     }
 }

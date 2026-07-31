@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "lumina-privacy-and-trust",
+  "version": "1.0.0",
+  "title": "Lumina 隐私与可信运行",
+  "summary": "本地数据、权限确认、审计重放、本地与远程推理、知识披露和 Runtime 能力边界。",
+  "default_enabled": true,
+  "remote_access": "allowRemote",
+  "documents": [
+    {
+      "id": "trust-local-data",
+      "path": "local-data-and-sensitivity.md",
+      "title": "本地数据与敏感度",
+      "tags": ["本地数据", "敏感度", "隐私"],
+      "capability_categories": []
+    },
+    {
+      "id": "trust-permissions",
+      "path": "permissions-and-confirmation.md",
+      "title": "权限与确认",
+      "tags": ["权限", "确认"],
+      "capability_categories": []
+    },
+    {
+      "id": "trust-audit",
+      "path": "audit-replay-and-cancellation.md",
+      "title": "审计、重放与取消",
+      "tags": ["审计", "重放", "取消"],
+      "capability_categories": []
+    },
+    {
+      "id": "trust-inference",
+      "path": "local-vs-remote-inference.md",
+      "title": "本地与远程推理",
+      "tags": ["本地模型", "远程模型", "API"],
+      "capability_categories": []
+    },
+    {
+      "id": "trust-disclosure",
+      "path": "knowledge-disclosure-policy.md",
+      "title": "知识披露策略",
+      "tags": ["Knowledge", "远程访问", "披露"],
+      "capability_categories": []
+    },
+    {
+      "id": "trust-runtime-boundary",
+      "path": "runtime-capability-boundary.md",
+      "title": "Runtime 能力边界",
+      "tags": ["Runtime", "工具", "边界"],
+      "capability_categories": []
+    }
+  ]
+}

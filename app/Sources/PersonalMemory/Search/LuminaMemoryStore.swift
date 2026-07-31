@@ -2,6 +2,7 @@ import Foundation
 
 public actor LuminaMemoryStore {
     private var index = LuminaMemoryIndex()
+    private var bm25Index = LuminaBM25Index<UUID>()
     private let chunker: LuminaMemoryChunker
     private let embeddingProvider: any LuminaEmbeddingProvider
     private let repository: (any LuminaMemoryRepository)?
@@ -24,6 +25,7 @@ public actor LuminaMemoryStore {
     public func load() async throws {
         guard let snapshot = try await repository?.load() else { return }
         self.index.load(snapshot: snapshot)
+        rebuildBM25Index()
         self.recentSearchCache.removeAll(keepingCapacity: true)
     }
 
@@ -35,6 +37,9 @@ public actor LuminaMemoryStore {
     public func ingest(_ document: LuminaMemoryDocument) async -> [UUID] {
         let newChunks = chunker.chunks(for: document)
         let ids = index.ingest(newChunks, documentID: document.id)
+        for chunk in newChunks {
+            bm25Index.upsert(Self.bm25Document(for: chunk))
+        }
         recentSearchCache.removeAll(keepingCapacity: true)
         if configuration.embedImmediately {
             Task { await embedMissing(ids: ids) }
@@ -75,24 +80,55 @@ public actor LuminaMemoryStore {
             )
         }
 
-        let keywordResults = LuminaMemorySearchRanker.keywordRank(query.text, candidates: candidates)
+        if LuminaSearchTokenizer.tokens(in: query.text).isEmpty {
+            let results = candidates
+                .sorted { $0.createdAt > $1.createdAt }
+                .prefix(max(1, query.limit))
+                .map { LuminaMemorySearchResult(chunk: $0, score: 0.05, matchedBy: .metadata) }
+            recentSearchCache.remember(results, for: query)
+            return LuminaMemorySearchReport(
+                results: results,
+                candidateCount: candidates.count,
+                vectorCandidateCount: 0,
+                elapsedMilliseconds: LuminaMemoryClock.milliseconds(since: start),
+                cacheHit: false
+            )
+        }
+
+        let candidateIDs = Set(candidates.map(\.id))
+        let candidateLimit = max(query.limit * 8, 40)
+        let bm25Results = bm25Index.search(query.text, allowedIDs: candidateIDs, limit: candidateLimit)
         let embeddedCandidates = candidates
             .filter { $0.embedding != nil }
             .prefix(configuration.maximumVectorCandidates)
 
-        var vectorResults: [LuminaMemorySearchResult] = []
+        var vectorIDs: [UUID] = []
         if !embeddedCandidates.isEmpty {
-            let queryEmbedding = try await embeddingProvider.embed(query.text)
-            vectorResults = embeddedCandidates.map { chunk in
-                LuminaMemorySearchResult(
-                    chunk: chunk,
-                    score: LuminaVectorMath.cosine(queryEmbedding, chunk.embedding ?? []),
-                    matchedBy: .vector
-                )
+            do {
+                let queryEmbedding = try await embeddingProvider.embed(query.text)
+                vectorIDs = embeddedCandidates
+                    .map { chunk in
+                        (chunk.id, LuminaVectorMath.cosine(queryEmbedding, chunk.embedding ?? []))
+                    }
+                    .filter { $0.1 > 0 }
+                    .sorted {
+                        if $0.1 == $1.1 { return $0.0.uuidString < $1.0.uuidString }
+                        return $0.1 > $1.1
+                    }
+                    .prefix(candidateLimit)
+                    .map(\.0)
+            } catch {
+                vectorIDs = []
             }
         }
 
-        let merged = LuminaMemorySearchRanker.merge(vectorResults: vectorResults, keywordResults: keywordResults, limit: query.limit)
+        let chunksByID = Dictionary(uniqueKeysWithValues: candidates.map { ($0.id, $0) })
+        let merged = LuminaMemorySearchRanker.merge(
+            bm25Results: bm25Results,
+            vectorIDs: vectorIDs,
+            chunksByID: chunksByID,
+            limit: query.limit
+        )
         recentSearchCache.remember(merged, for: query)
         return LuminaMemorySearchReport(
             results: merged,
@@ -113,6 +149,7 @@ public actor LuminaMemoryStore {
 
     public func removeDocument(id: UUID) {
         index.removeDocument(id: id)
+        rebuildBM25Index()
         recentSearchCache.removeAll(keepingCapacity: true)
         if configuration.persistAfterIngest {
             Task { try? await persist() }
@@ -125,6 +162,7 @@ public actor LuminaMemoryStore {
         guard removed else {
             return false
         }
+        bm25Index.remove(id: id)
         recentSearchCache.removeAll(keepingCapacity: true)
         if configuration.persistAfterIngest {
             Task { try? await persist() }
@@ -138,6 +176,7 @@ public actor LuminaMemoryStore {
         guard removedCount > 0 else {
             return 0
         }
+        bm25Index.removeAll()
         recentSearchCache.removeAll(keepingCapacity: true)
         if configuration.persistAfterIngest {
             Task { try? await persist() }
@@ -177,5 +216,18 @@ public actor LuminaMemoryStore {
                 return
             }
         }
+    }
+
+    private func rebuildBM25Index() {
+        bm25Index.rebuild(index.allChunks.map(Self.bm25Document(for:)))
+    }
+
+    private static func bm25Document(for chunk: LuminaMemoryChunk) -> LuminaBM25Document<UUID> {
+        LuminaBM25Document(
+            id: chunk.id,
+            title: chunk.title,
+            tags: Array(chunk.metadata.values),
+            body: chunk.text
+        )
     }
 }

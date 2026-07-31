@@ -570,7 +570,7 @@ final class ReActRuntimeTests: XCTestCase {
         XCTAssertTrue(result.plan.summary.contains("hook failed"))
     }
 
-    func testAgentRuntimeTargetDoesNotReferencePersonalMemoryOrMemoryToolNames() throws {
+    func testAgentRuntimeTargetDoesNotOwnAppMemoryOrKnowledgeInfrastructure() throws {
         let runtimeRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("Sources/LuminaAgentRuntimeCore")
         let enumerator = FileManager.default.enumerator(at: runtimeRoot, includingPropertiesForKeys: nil)
@@ -585,6 +585,9 @@ final class ReActRuntimeTests: XCTestCase {
             let contents = try String(contentsOf: file, encoding: .utf8)
             XCTAssertFalse(contents.contains("import PersonalMemory"), "\(file.path) imports PersonalMemory")
             XCTAssertFalse(contents.contains("memory.ingest_text"), "\(file.path) contains an app memory tool name")
+            XCTAssertFalse(contents.contains("LuminaKnowledgeStore"), "\(file.path) owns the app knowledge store")
+            XCTAssertFalse(contents.contains("import PDFKit"), "\(file.path) imports an app document extractor")
+            XCTAssertFalse(contents.contains("KnowledgeBases/"), "\(file.path) contains an app repository path")
         }
     }
 

@@ -1,5 +1,6 @@
 import LuminaAgentRuntime
 import Foundation
+import LuminaAppCore
 
 struct LuminaAppReActPromptBuilder: Sendable {
     var maximumTraceObservations: Int = 2

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "lumina-workflows",
+  "version": "1.0.0",
+  "title": "Lumina 工作流",
+  "summary": "与日历、提醒、联系人、文件、账本、位置、天气和健康能力相关的组合方式。",
+  "default_enabled": true,
+  "remote_access": "allowRemote",
+  "documents": [
+    {
+      "id": "workflow-calendar-reminders",
+      "path": "calendar-and-reminders.md",
+      "title": "日历与提醒",
+      "tags": ["日历", "提醒", "计划"],
+      "capability_categories": ["calendar", "reminders"]
+    },
+    {
+      "id": "workflow-contacts-communication",
+      "path": "contacts-and-communication.md",
+      "title": "联系人与沟通",
+      "tags": ["联系人", "沟通"],
+      "capability_categories": ["contacts", "communication"]
+    },
+    {
+      "id": "workflow-notes-files-clipboard",
+      "path": "notes-files-and-clipboard.md",
+      "title": "笔记、文件与剪贴板",
+      "tags": ["笔记", "文件", "剪贴板"],
+      "capability_categories": ["notes", "files", "clipboard"]
+    },
+    {
+      "id": "workflow-ledger-subscriptions",
+      "path": "ledger-and-subscriptions.md",
+      "title": "账本与订阅",
+      "tags": ["账本", "订阅", "支出"],
+      "capability_categories": ["ledger", "subscriptions"]
+    },
+    {
+      "id": "workflow-location-weather-health",
+      "path": "location-weather-and-health.md",
+      "title": "位置、天气与健康",
+      "tags": ["位置", "天气", "健康"],
+      "capability_categories": ["location", "weather", "health"]
+    }
+  ]
+}

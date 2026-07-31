@@ -113,11 +113,21 @@ struct PersonalMemoryScreen: View {
                         title: result.chunk.title,
                         summary: result.chunk.summary,
                         source: "\(result.chunk.source.kind.rawValue)/\(result.chunk.source.identifier)",
-                        score: String(format: "%.2f %@", result.score, result.matchedBy.rawValue),
+                        score: String(format: "%.2f %@", result.score, matchLabel(result.matchedBy)),
                         sensitivity: result.chunk.sensitivity
                     )
                 }
             }
+        }
+    }
+
+    private func matchLabel(_ kind: LuminaMemoryMatchKind) -> String {
+        switch kind {
+        case .bm25: "BM25"
+        case .vector: "Vector"
+        case .hybrid: "Hybrid"
+        case .keyword: "Keyword"
+        case .metadata: "Metadata"
         }
     }
 }

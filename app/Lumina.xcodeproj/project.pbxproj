@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B20000000000000000000001 /* LuminaSearchEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* LuminaSearchEngine.swift */; };
+		B20000000000000000000002 /* LuminaKnowledgeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* LuminaKnowledgeModels.swift */; };
+		B20000000000000000000003 /* LuminaKnowledgeTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* LuminaKnowledgeTextExtractor.swift */; };
+		B20000000000000000000004 /* LuminaKnowledgeRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* LuminaKnowledgeRepository.swift */; };
+		B20000000000000000000005 /* LuminaKnowledgeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* LuminaKnowledgeStore.swift */; };
+		B20000000000000000000006 /* LuminaKnowledgeDisclosurePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* LuminaKnowledgeDisclosurePolicy.swift */; };
+		B20000000000000000000007 /* LuminaKnowledgeSearchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* LuminaKnowledgeSearchTool.swift */; };
+		B20000000000000000000008 /* KnowledgeBaseViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* KnowledgeBaseViewModel.swift */; };
+		B20000000000000000000009 /* KnowledgeBaseScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* KnowledgeBaseScreen.swift */; };
+		B2000000000000000000000A /* KnowledgeBases in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000A /* KnowledgeBases */; };
 		00412C84A90A898144939724 /* LuminaMemoryIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFE8D16C80DCA0BEE516FAD /* LuminaMemoryIndex.swift */; };
 		0093CFB091AE77FB1F5728AA /* LuminaLedgerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54D8A9146421346A2B90E643 /* LuminaLedgerStore.swift */; };
 		0153EF202E4FA21966C99704 /* LuminaEventKitManagementToolFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F639F38AEBA1B69B93E2B592 /* LuminaEventKitManagementToolFactory.swift */; };
@@ -385,6 +395,16 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B10000000000000000000001 /* LuminaSearchEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaSearchEngine.swift; sourceTree = "<group>"; };
+		B10000000000000000000002 /* LuminaKnowledgeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeModels.swift; sourceTree = "<group>"; };
+		B10000000000000000000003 /* LuminaKnowledgeTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeTextExtractor.swift; sourceTree = "<group>"; };
+		B10000000000000000000004 /* LuminaKnowledgeRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeRepository.swift; sourceTree = "<group>"; };
+		B10000000000000000000005 /* LuminaKnowledgeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000006 /* LuminaKnowledgeDisclosurePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeDisclosurePolicy.swift; sourceTree = "<group>"; };
+		B10000000000000000000007 /* LuminaKnowledgeSearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaKnowledgeSearchTool.swift; sourceTree = "<group>"; };
+		B10000000000000000000008 /* KnowledgeBaseViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeBaseViewModel.swift; sourceTree = "<group>"; };
+		B10000000000000000000009 /* KnowledgeBaseScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeBaseScreen.swift; sourceTree = "<group>"; };
+		B1000000000000000000000A /* KnowledgeBases */ = {isa = PBXFileReference; lastKnownFileType = folder; name = KnowledgeBases; path = Resources/KnowledgeBases; sourceTree = SOURCE_ROOT; };
 		028F7D9B24ED34B88B3C5DBB /* LuminaModelReadinessStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaModelReadinessStore.swift; sourceTree = "<group>"; };
 		02DABD85D5EB839CC464C1A0 /* LuminaRecordingConfirmationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LuminaRecordingConfirmationCoordinator.swift; sourceTree = "<group>"; };
 		031094A1B9266E48EF81BEB3 /* Application/Services/EKEventStore+LuminaSendable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Application/Services/EKEventStore+LuminaSendable.swift"; sourceTree = "<group>"; };
@@ -740,6 +760,7 @@
 				22F0E56895BF6E95A58C821C /* Activity */,
 				844F79F228515B3E896B2EE2 /* AgentRun */,
 				F799D691098F2B9472B3B757 /* AskUser */,
+				B30000000000000000000002 /* Knowledge */,
 				2B6989C0097D544643565E93 /* Memory */,
 				6AE126F4D4044DCEAF779BE3 /* Permissions */,
 				97603708FF4F538D0C3608A3 /* Shared */,
@@ -763,6 +784,7 @@
 			isa = PBXGroup;
 			children = (
 				7F965BA320DE4871600192F1 /* Models */,
+				B1000000000000000000000A /* KnowledgeBases */,
 				6575E71338A635C6EA6AC03E /* LuminaApp */,
 				6A97550F5653F60A0DA4BAF3 /* LuminaAppCore */,
 				C1A7B3F6C35C49DC8A6E21D1 /* LuminaBenchmarkMetrics */,
@@ -884,6 +906,7 @@
 			isa = PBXGroup;
 			children = (
 				5E5AE84B7F109FE085678094 /* AgentHomeViewModel.swift */,
+				B10000000000000000000008 /* KnowledgeBaseViewModel.swift */,
 				DECBCF95B5EE1FE0D488A84B /* MemoryDeletionRequest.swift */,
 				238E1BDFE2C4E0447A953B0A /* PersonalMemoryViewModel.swift */,
 			);
@@ -949,6 +972,7 @@
 			children = (
 				AF0B023BB39C70F6187F93AA /* Info.plist */,
 				9C45AC6160AF680DD6C8787B /* Activity */,
+				B30000000000000000000003 /* Context */,
 				F7A619254790B69A8021B4D2 /* Domain */,
 				F0E662B037F68C24CCB7BF9E /* Testing */,
 				BECFC3757478ADFF0A47AB3E /* Tools */,
@@ -958,6 +982,14 @@
 			);
 			name = LuminaAppCore;
 			path = Sources/LuminaAppCore;
+			sourceTree = "<group>";
+		};
+		B30000000000000000000003 /* Context */ = {
+			isa = PBXGroup;
+			children = (
+				86E97C4287E40FA66DAE0F01 /* LuminaAppContextProvider.swift */,
+			);
+			path = Context;
 			sourceTree = "<group>";
 		};
 		C1A7B3F6C35C49DC8A6E21D1 /* LuminaBenchmarkMetrics */ = {
@@ -1068,6 +1100,7 @@
 				39F0F7B72A7E5F8B2385C191 /* LuminaMemorySearchFilter.swift */,
 				C7300C13538D60DD298223C0 /* LuminaMemorySearchRanker.swift */,
 				6D720B9EDB7043B1FC26B5AA /* LuminaMemoryStore.swift */,
+				B10000000000000000000001 /* LuminaSearchEngine.swift */,
 			);
 			path = Search;
 			sourceTree = "<group>";
@@ -1099,7 +1132,7 @@
 				82B22DFC6A0659034575877E /* LuminaAgenticRLTrajectoryStep.swift */,
 				90EF048DF10EF299073FC2F5 /* LuminaAgentRunSummary.swift */,
 				0A02FF351E1F891F343E5326 /* LuminaAgentTool+EraseToAnyTool.swift */,
-				86E97C4287E40FA66DAE0F01 /* LuminaAppContextProvider.swift */,
+				B10000000000000000000006 /* LuminaKnowledgeDisclosurePolicy.swift */,
 				FDCBA71E36C42680D9FF38C9 /* LuminaAppMemoryPolicyRuntimeHook.swift */,
 				29AC69FF6A6A3611DD031297 /* LuminaAppPromptProfile.swift */,
 				C1B000000000000000000001 /* LuminaAppSystemInstructions.swift */,
@@ -1232,6 +1265,7 @@
 				A3716B829E5EEC8F7846E86F /* LuminaLedgerRecordTool.swift */,
 				A45928C7D8BE01DD157A3DC7 /* LuminaLedgerSearchTool.swift */,
 				1996A7E46CEBBF5EE3226156 /* LuminaLocalSearchTool.swift */,
+				B10000000000000000000007 /* LuminaKnowledgeSearchTool.swift */,
 				47CF7E05C305CF42F087AFB8 /* LuminaLocationCurrentTool.swift */,
 				D10B89405734978F8818DC93 /* LuminaLocationSnapshot.swift */,
 				71D888325DA0B2239EB7BFA5 /* LuminaMediaImportTool.swift */,
@@ -1270,12 +1304,32 @@
 				84DF508F16702B0256765299 /* Info.plist */,
 				B89262C25F4828F8DD15E142 /* Embeddings */,
 				71B14426D00F81D065AB417F /* Ingestion */,
+				B30000000000000000000001 /* Knowledge */,
 				64AC9CD6E38E83958A8461A6 /* Models */,
 				96B213541AC3EC74464D9C56 /* Search */,
 				8EE8F044C240F9ED25683F03 /* Storage */,
 			);
 			name = PersonalMemory;
 			path = Sources/PersonalMemory;
+			sourceTree = "<group>";
+		};
+		B30000000000000000000001 /* Knowledge */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000002 /* LuminaKnowledgeModels.swift */,
+				B10000000000000000000003 /* LuminaKnowledgeTextExtractor.swift */,
+				B10000000000000000000004 /* LuminaKnowledgeRepository.swift */,
+				B10000000000000000000005 /* LuminaKnowledgeStore.swift */,
+			);
+			path = Knowledge;
+			sourceTree = "<group>";
+		};
+		B30000000000000000000002 /* Knowledge */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000009 /* KnowledgeBaseScreen.swift */,
+			);
+			path = Knowledge;
 			sourceTree = "<group>";
 		};
 		E8CA6A23B1A88D402F9CADD6 /* Intents */ = {
@@ -1568,6 +1622,7 @@
 				E5D776FDEDD299237E952FCC /* Assets.xcassets in Resources */,
 				5698AB3DBF637C9AD59A51E3 /* LaunchScreen.storyboard in Resources */,
 				3118945630F92F92053C6559 /* Models in Resources */,
+				B2000000000000000000000A /* KnowledgeBases in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1604,6 +1659,11 @@
 				5F966A9241C6EF8F413A7483 /* LuminaMemoryStore.swift in Sources */,
 				74C822E0D48CF186BFA6B535 /* LuminaMemoryStoreConfiguration.swift in Sources */,
 				532CAE9295184635BBD47B2E /* LuminaVectorMath.swift in Sources */,
+				B20000000000000000000001 /* LuminaSearchEngine.swift in Sources */,
+				B20000000000000000000002 /* LuminaKnowledgeModels.swift in Sources */,
+				B20000000000000000000003 /* LuminaKnowledgeTextExtractor.swift in Sources */,
+				B20000000000000000000004 /* LuminaKnowledgeRepository.swift in Sources */,
+				B20000000000000000000005 /* LuminaKnowledgeStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1671,6 +1731,8 @@
 				9D276E81B0B2A7DC07836063 /* LuminaAgentLiveActivityAttributes.swift in Sources */,
 				3F79A6FD6DA61FA32D16BDA4 /* LuminaAgentTool+EraseToAnyTool.swift in Sources */,
 				950DFDD085D70FC6D514B258 /* LuminaAppCoreToolFactory.swift in Sources */,
+				B20000000000000000000007 /* LuminaKnowledgeSearchTool.swift in Sources */,
+				56B467CBEA7FAF166AA88630 /* LuminaAppContextProvider.swift in Sources */,
 				CFC152C71710240FD7A64F3D /* LuminaAppMemoryPermissionGate.swift in Sources */,
 				1BF38A3B71D87D41F9E106D0 /* LuminaAskUserAnswer.swift in Sources */,
 				1209B997D8728C26A84BBF71 /* LuminaAskUserChoice.swift in Sources */,
@@ -1798,7 +1860,7 @@
 				4302D817E2C29CCB8B4CFD44 /* LuminaAgenticRLTrajectoryStep.swift in Sources */,
 				FA7C2E088CF1E06C5A3A2D2B /* LuminaApp.swift in Sources */,
 				8B438EF86D7E1B64E0A1B12B /* LuminaAppBackground.swift in Sources */,
-				56B467CBEA7FAF166AA88630 /* LuminaAppContextProvider.swift in Sources */,
+				B20000000000000000000006 /* LuminaKnowledgeDisclosurePolicy.swift in Sources */,
 				8EA984B2EA4B7C5672904207 /* LuminaAppMemoryPolicyRuntimeHook.swift in Sources */,
 				B4F5074591006923D5EB617E /* LuminaAppPromptProfile.swift in Sources */,
 				288631E91CDBF98D87637678 /* LuminaAppReActPromptBuilder.swift in Sources */,
@@ -1860,6 +1922,8 @@
 				80E2E578F77C6DA852E3FD35 /* LuminaWeatherHealthExecutor.swift in Sources */,
 				3437AC50D340310C675C7079 /* MLComputeUnits+DescriptionForLumina.swift in Sources */,
 				3CCB348F360BF4A9C6F914FF /* MemoryDeletionRequest.swift in Sources */,
+				B20000000000000000000008 /* KnowledgeBaseViewModel.swift in Sources */,
+				B20000000000000000000009 /* KnowledgeBaseScreen.swift in Sources */,
 				5C5702EBD594D370844F57B8 /* MemoryDeletionSheet.swift in Sources */,
 				1B21CBC6D31AA6CBB4F82381 /* MemoryResultRow.swift in Sources */,
 				FD0B2666EE2908F5A5442AE9 /* MessageComposeSheet.swift in Sources */,
