@@ -628,19 +628,79 @@ final class LuminaAppCoreTests: XCTestCase {
         XCTAssertEqual(result.toolResults.first?.output.string("dayPeriod"), "晚上")
     }
 
-    func testMessageComposeOnlyPublishesDraft() async throws {
+    func testMessageComposeWaitsForUserToSend() async throws {
         let drafts = LuminaMessageDraftCenter()
+        let stream = await drafts.drafts()
         let tool = LuminaMessageComposeTool(messageDrafts: drafts)
-
-        let result = try await tool.call(arguments: [
-            "recipient": .string("Alex"),
-            "body": .string("Lunch?")
-        ], cancellation: LuminaCancellationToken())
-
-        let allDrafts = await drafts.allDrafts()
+        let call = Task {
+            try await tool.call(arguments: [
+                "recipient": .string("Alex"), "body": .string("Lunch?")
+            ], cancellation: LuminaCancellationToken())
+        }
+        var iterator = stream.makeAsyncIterator()
+        let published = await iterator.next()
+        let draft = try XCTUnwrap(published)
+        XCTAssertEqual(draft.recipients, ["Alex"])
+        XCTAssertEqual(draft.body, "Lunch?")
+        // The system message composer delegate supplies the terminal result.
+        await drafts.resolve(id: draft.id, outcome: .sent)
+        let result = try await call.value
         XCTAssertEqual(result.status, .succeeded)
-        XCTAssertEqual(allDrafts.first?.recipients, ["Alex"])
-        XCTAssertEqual(allDrafts.first?.body, "Lunch?")
+        XCTAssertEqual(result.output.string("outcome"), "sent")
+    }
+
+    func testMessageComposeUserCancellationDoesNotReportSent() async throws {
+        let drafts = LuminaMessageDraftCenter()
+        let stream = await drafts.drafts()
+        let tool = LuminaMessageComposeTool(messageDrafts: drafts)
+        let call = Task {
+            try await tool.call(arguments: ["body": .string("Draft")], cancellation: LuminaCancellationToken())
+        }
+        var iterator = stream.makeAsyncIterator()
+        let published = await iterator.next()
+        let draft = try XCTUnwrap(published)
+        await drafts.resolve(id: draft.id, outcome: .cancelled)
+        let result = try await call.value
+        XCTAssertEqual(result.status, .cancelled)
+        XCTAssertEqual(result.output.string("outcome"), "cancelled")
+    }
+
+    func testMessageComposeTaskCancellationDismissesPresentation() async throws {
+        let drafts = LuminaMessageDraftCenter()
+        var presentations = await drafts.presentationChanges().makeAsyncIterator()
+        _ = await presentations.next() // Initial empty presentation.
+        let tool = LuminaMessageComposeTool(messageDrafts: drafts)
+        let call = Task {
+            try await tool.call(arguments: ["body": .string("Draft")], cancellation: LuminaCancellationToken())
+        }
+        let presented = await presentations.next()
+        XCTAssertNotNil(presented ?? nil)
+        call.cancel()
+        do {
+            _ = try await call.value
+            XCTFail("Cancelled composer must cancel its tool")
+        } catch is CancellationError { }
+        let dismissed = await presentations.next()
+        XCTAssertNil(dismissed ?? nil)
+    }
+
+    func testMessageComposeFailureAndLateCallback() async throws {
+        let drafts = LuminaMessageDraftCenter()
+        let stream = await drafts.drafts()
+        let first = Task { await drafts.compose(LuminaMessageDraft(recipients: [], body: "First")) }
+        var iterator = stream.makeAsyncIterator()
+        let firstDraft = await iterator.next()
+        let firstID = try XCTUnwrap(firstDraft).id
+        await drafts.resolve(id: firstID, outcome: .failed("Cannot send text"))
+        let firstOutcome = await first.value
+        XCTAssertEqual(firstOutcome, .failed("Cannot send text"))
+        let second = Task { await drafts.compose(LuminaMessageDraft(recipients: [], body: "Second")) }
+        let secondDraft = await iterator.next()
+        let secondID = try XCTUnwrap(secondDraft).id
+        await drafts.resolve(id: firstID, outcome: .sent) // Late delegate cannot finish the next request.
+        await drafts.resolve(id: secondID, outcome: .cancelled)
+        let secondOutcome = await second.value
+        XCTAssertEqual(secondOutcome, .cancelled)
     }
 
     func testLedgerRollback() async throws {
@@ -794,7 +854,7 @@ final class LuminaAppCoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 
-    func testCalendarUpdateResolvesNonUUIDBenchmarkIDToMatchingEvent() async throws {
+    func testCalendarUpdateRejectsInventedBenchmarkIDAndAcceptsRealID() async throws {
         let start = Date().addingTimeInterval(86_400)
         let store = LuminaVolatileCalendarStore(events: [
             LuminaCalendarEvent(
@@ -822,8 +882,17 @@ final class LuminaAppCoreTests: XCTestCase {
         let events = await store.allEvents()
         let updated = try XCTUnwrap(events.first)
 
-        XCTAssertEqual(result.status, .succeeded)
-        XCTAssertEqual(updated.startDate.timeIntervalSince1970, newStart.timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(result.validationFailed, true)
+        XCTAssertEqual(updated.startDate.timeIntervalSince1970, start.timeIntervalSince1970, accuracy: 1)
+        let corrected = try await update.call(arguments: [
+            "id": .string(updated.id.uuidString),
+            "startDateISO": .string(ISO8601DateFormatter().string(from: newStart)),
+            "endDateISO": .string(ISO8601DateFormatter().string(from: newStart.addingTimeInterval(1_800)))
+        ], cancellation: LuminaCancellationToken())
+        XCTAssertEqual(corrected.status, .succeeded)
+        let correctedEvents = await store.allEvents()
+        XCTAssertEqual(try XCTUnwrap(correctedEvents.first).startDate.timeIntervalSince1970, newStart.timeIntervalSince1970, accuracy: 1)
     }
 
     func testReActAgentCalendarReminderFlow() async {

@@ -29,6 +29,8 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestCalendarAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let id = arguments.string("id"),
                   let event = store.event(withIdentifier: id) ?? store.calendarItem(withIdentifier: id) as? EKEvent else {
                 return failed("calendar.update", "没有找到要修改的日历事件。")
@@ -52,6 +54,8 @@ enum LuminaEventKitManagementToolFactory {
                 return failed("calendar.update", "endDateISO 必须晚于 startDateISO。")
             }
             if let notes = arguments.string("notes") { event.notes = notes }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             try store.save(event, span: .thisEvent, commit: true)
             return succeeded("calendar.update", "日程已更新：\(event.title ?? "Untitled")", [
                 "identifier": .string(event.eventIdentifier ?? event.calendarItemIdentifier),
@@ -66,10 +70,14 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestCalendarAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let id = arguments.string("id"),
                   let event = store.event(withIdentifier: id) ?? store.calendarItem(withIdentifier: id) as? EKEvent else {
                 return failed("calendar.delete", "没有找到要删除的日历事件。")
             }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             try store.remove(event, span: .thisEvent, commit: true)
             return succeeded("calendar.delete", "日历事件已删除：\(event.title ?? "Untitled")", ["identifier": .string(id)])
         }
@@ -82,6 +90,8 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestCalendarAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let start = date(arguments.string("startDateISO")) else {
                 return failed("calendar.availability", "missing required parameter startDateISO")
             }
@@ -113,6 +123,8 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestReminderAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             let query = arguments.string("query")?.lowercased() ?? ""
             let limit = max(1, min(20, Int(arguments.number("limit") ?? 10)))
             let reminders = try await fetchReminders(store: store)
@@ -133,9 +145,13 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestReminderAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let reminder = try await reminder(arguments, store: store) else {
                 return failed("reminder.update", "没有找到要修改的提醒。")
             }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             if let title = arguments.string("title"), !title.isEmpty { reminder.title = title }
             if let notes = arguments.string("notes") { reminder.notes = notes }
             if let rawDueDate = arguments.string("dueDateISO") {
@@ -145,6 +161,8 @@ enum LuminaEventKitManagementToolFactory {
                 }
                 reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
             }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             try store.save(reminder, commit: true)
             return succeeded("reminder.update", "提醒已更新：\(reminder.title ?? "Untitled")", ["identifier": .string(reminder.calendarItemIdentifier)])
         }
@@ -156,11 +174,17 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestReminderAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let reminder = try await reminder(arguments, store: store) else {
                 return failed("reminder.complete", "没有找到要完成的提醒。")
             }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             reminder.isCompleted = true
             reminder.completionDate = Date()
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             try store.save(reminder, commit: true)
             return succeeded("reminder.complete", "提醒已完成：\(reminder.title ?? "Untitled")", ["identifier": .string(reminder.calendarItemIdentifier)])
         }
@@ -172,9 +196,13 @@ enum LuminaEventKitManagementToolFactory {
         ]) { arguments, cancellation in
             try cancellation.checkCancellation()
             try await requestReminderAccess(store)
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             guard let reminder = try await reminder(arguments, store: store) else {
                 return failed("reminder.delete", "没有找到要删除的提醒。")
             }
+            try Task.checkCancellation()
+            try cancellation.checkCancellation()
             try store.remove(reminder, commit: true)
             return succeeded("reminder.delete", "提醒已删除：\(reminder.title ?? "Untitled")", ["identifier": .string(reminder.calendarItemIdentifier)])
         }
@@ -185,10 +213,8 @@ enum LuminaEventKitManagementToolFactory {
         case .fullAccess:
             return
         case .notDetermined:
-            guard try await LuminaSystemPermissionRequest.withTimeout(operation: {
-                try await LuminaPermissionTimingRecorder.shared.record({
-                    try await store.requestFullAccessToEvents()
-                })
+            guard try await LuminaSystemPermissionRequest.awaitDecision(operation: {
+                try await store.requestFullAccessToEvents()
             }) else {
                 throw AppToolError.permissionDenied("你没有授予日历完整访问权限。请允许 Lumina 访问日历后再试。")
             }
@@ -208,10 +234,8 @@ enum LuminaEventKitManagementToolFactory {
         case .fullAccess, .writeOnly:
             return
         case .notDetermined:
-            guard try await LuminaSystemPermissionRequest.withTimeout(operation: {
-                try await LuminaPermissionTimingRecorder.shared.record({
-                    try await store.requestFullAccessToReminders()
-                })
+            guard try await LuminaSystemPermissionRequest.awaitDecision(operation: {
+                try await store.requestFullAccessToReminders()
             }) else {
                 throw AppToolError.permissionDenied("你没有授予提醒事项访问权限。请允许 Lumina 访问提醒事项后再试。")
             }

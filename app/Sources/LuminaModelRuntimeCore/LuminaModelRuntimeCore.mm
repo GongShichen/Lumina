@@ -5,8 +5,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 #include <dlfcn.h>
@@ -75,10 +77,15 @@ using LuminaExternalGenerateFunction = char * (*)(
     int,
     int
 );
+using LuminaExternalGenerateCancellableFunction = char * (*)(
+    const char *, const char *, const char *, int, int, int,
+    LuminaModelCancellationCallback, void *
+);
 
 struct LuminaExternalEngine {
     void * handle = nullptr;
     LuminaExternalGenerateFunction generate = nullptr;
+    LuminaExternalGenerateCancellableFunction generateCancellable = nullptr;
     std::string path;
     std::string error;
 };
@@ -160,8 +167,17 @@ std::vector<std::string> externalEngineCandidates(const char *modelDirectory) {
 }
 
 LuminaExternalEngine loadExternalEngine(const char *modelDirectory) {
+    // Keep one reference per engine so its model cache survives requests without
+    // accumulating an unbalanced dlopen reference on every model iteration.
+    static std::mutex cacheMutex;
+    static std::unordered_map<std::string, LuminaExternalEngine> loadedEngines;
+    std::lock_guard<std::mutex> lock(cacheMutex);
     LuminaExternalEngine engine;
     for (const auto &candidate : externalEngineCandidates(modelDirectory)) {
+        const auto cached = loadedEngines.find(candidate);
+        if (cached != loadedEngines.end()) {
+            return cached->second;
+        }
         if (!fileExists(candidate)) {
             continue;
         }
@@ -180,8 +196,12 @@ LuminaExternalEngine loadExternalEngine(const char *modelDirectory) {
         }
         engine.handle = handle;
         engine.generate = generate;
+        engine.generateCancellable = reinterpret_cast<LuminaExternalGenerateCancellableFunction>(
+            dlsym(handle, "LuminaMiniCPMV46ExternalGenerateReActJSONCancellable")
+        );
         engine.path = candidate;
         engine.error.clear();
+        loadedEngines.emplace(candidate, engine);
         return engine;
     }
     if (engine.error.empty()) {
@@ -294,12 +314,47 @@ extern "C" char *LuminaMiniCPMV46GenerateReActJSON(
     int maxOutputTokens,
     int safetyMarginTokens
 ) {
+    return LuminaMiniCPMV46GenerateReActJSONCancellable(
+        modelDirectory, backendPreference, prompt, contextLength,
+        maxOutputTokens, safetyMarginTokens, nullptr, nullptr
+    );
+}
+
+extern "C" char *LuminaMiniCPMV46GenerateReActJSONCancellable(
+    const char *modelDirectory,
+    const char *backendPreference,
+    const char *prompt,
+    int contextLength,
+    int maxOutputTokens,
+    int safetyMarginTokens,
+    LuminaModelCancellationCallback isCancelled,
+    void *cancellationContext
+) {
     LuminaMiniCPMV46EnginePlan plan;
     plan.backend = parseBackend(backendPreference);
     plan.kvCache.contextLength = contextLength > 0 ? contextLength : 16000;
+    const auto failed = [&](const std::string &reason) {
+        return copyCString(unavailableResponse(plan, modelDirectory, prompt,
+            maxOutputTokens, safetyMarginTokens, reason));
+    };
+    if (isCancelled != nullptr && isCancelled(cancellationContext)) {
+        return failed("Generation cancelled.");
+    }
+    const auto backends = probeBackends();
+    if (plan.backend == LuminaMiniCPMV46Backend::ane && !backends.aneReady) {
+        return failed(backends.aneFailureReason);
+    }
+    if (plan.backend == LuminaMiniCPMV46Backend::mps && !backends.mpsReady) {
+        return failed(backends.mpsFailureReason);
+    }
     LuminaExternalEngine external = loadExternalEngine(modelDirectory);
     if (external.generate != nullptr) {
-        char *response = external.generate(
+        char *response = external.generateCancellable != nullptr
+            ? external.generateCancellable(
+                modelDirectory, backendPreference, prompt, plan.kvCache.contextLength,
+                maxOutputTokens, safetyMarginTokens, isCancelled, cancellationContext
+            )
+            : external.generate(
             modelDirectory,
             backendPreference,
             prompt,
@@ -307,6 +362,10 @@ extern "C" char *LuminaMiniCPMV46GenerateReActJSON(
             maxOutputTokens,
             safetyMarginTokens
         );
+        if (isCancelled != nullptr && isCancelled(cancellationContext)) {
+            std::free(response);
+            return failed("Generation cancelled; the result was discarded.");
+        }
         return response;
     }
     return copyCString(unavailableResponse(

@@ -212,6 +212,9 @@ struct AgentReplyPanel: View {
     }
 
     private func friendlySummary(for result: LuminaToolResult) -> String {
+        guard result.status == .succeeded else {
+            return result.errorMessage ?? (result.status == .cancelled ? "本次调用已取消。" : "本次尝试未完成，请查看具体原因。")
+        }
         switch result.toolName {
         case "local.search":
             if case let .array(values)? = result.output["results"] {

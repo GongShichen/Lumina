@@ -49,7 +49,8 @@ public actor LuminaToolRouter {
                 status: .failed,
                 output: ["summary": .string(validationError)],
                 content: [.text(validationError)],
-                errorMessage: validationError
+                errorMessage: validationError,
+                validationFailed: true
             )
             return (result, .denied(reason: validationError), false)
         }
@@ -138,7 +139,8 @@ public actor LuminaToolRouter {
             output: result.output,
             content: result.content,
             errorMessage: result.errorMessage,
-            rollbackToken: result.rollbackToken
+            rollbackToken: result.rollbackToken,
+            validationFailed: result.validationFailed
         )
     }
 

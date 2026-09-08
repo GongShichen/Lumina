@@ -21,7 +21,18 @@ namespace {
 std::mutex g_mutex;
 llama_model * g_model = nullptr;
 std::string g_loaded_model_path;
+std::string g_loaded_backend;
 bool g_backend_initialized = false;
+
+struct RequestCancellation {
+    bool (*callback)(void *);
+    void * context;
+
+    bool cancelled() const { return callback != nullptr && callback(context); }
+    static bool abort(void *value) {
+        return static_cast<RequestCancellation *>(value)->cancelled();
+    }
+};
 
 void cleanup_backend() {
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -29,11 +40,24 @@ void cleanup_backend() {
         llama_model_free(g_model);
         g_model = nullptr;
         g_loaded_model_path.clear();
+        g_loaded_backend.clear();
     }
     if (g_backend_initialized) {
         llama_backend_free();
         g_backend_initialized = false;
     }
+}
+
+void register_backend_cleanup() {
+    struct BackendLifetime {
+        ~BackendLifetime() { cleanup_backend(); }
+    };
+    // Construct only after llama has initialized its registry and the model's
+    // buffer types. Function statics are destroyed in reverse registration
+    // order, so cached Metal weights are released before their device/buffer
+    // registries. An early namespace-scope guard would have the wrong order.
+    static BackendLifetime lifetime;
+    (void) lifetime;
 }
 
 std::string escape_json(const std::string & value) {
@@ -114,10 +138,11 @@ std::string make_response(
 std::string model_path_for_directory(const char * model_directory) {
     std::filesystem::path root(model_directory == nullptr ? "" : model_directory);
     std::filesystem::path model = root / "model.gguf";
-    if (std::filesystem::exists(model)) {
+    std::error_code error;
+    if (std::filesystem::is_regular_file(model, error)) {
         return model.string();
     }
-    for (const auto & entry : std::filesystem::directory_iterator(root)) {
+    for (const auto & entry : std::filesystem::directory_iterator(root, error)) {
         if (entry.path().extension() == ".gguf" &&
             entry.path().filename().string().find("mmproj") == std::string::npos) {
             return entry.path().string();
@@ -133,7 +158,18 @@ void llama_log_callback(enum ggml_log_level level, const char * text, void * use
     fflush(stdout);
 }
 
-bool ensure_model_loaded(const std::string & model_path, std::string & error) {
+template <typename Params>
+auto configure_mmap(Params & params, int) -> decltype(params.use_mmap = true, params.use_mlock = false, void()) {
+    params.use_mmap = true;
+    params.use_mlock = false;
+}
+
+template <typename Params>
+void configure_mmap(Params &, long) {
+    // Recent llama.cpp versions select the loading strategy through their defaults.
+}
+
+bool ensure_model_loaded(const std::string & model_path, RequestCancellation & cancellation, std::string & error) {
     if (g_model != nullptr && g_loaded_model_path == model_path) {
         return true;
     }
@@ -150,17 +186,23 @@ bool ensure_model_loaded(const std::string & model_path, std::string & error) {
     }
 
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = 999;
-    model_params.use_mmap = true;
-    model_params.use_mlock = false;
+    const bool has_gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr;
+    model_params.n_gpu_layers = has_gpu ? 999 : 0;
+    model_params.progress_callback = [](float, void *state) {
+        return !static_cast<RequestCancellation *>(state)->cancelled();
+    };
+    model_params.progress_callback_user_data = &cancellation;
+    configure_mmap(model_params, 0);
     model_params.check_tensors = false;
 
     g_model = llama_model_load_from_file(model_path.c_str(), model_params);
+    register_backend_cleanup();
     if (g_model == nullptr) {
         error = "Failed to load MiniCPM-V GGUF model at " + model_path;
         return false;
     }
     g_loaded_model_path = model_path;
+    g_loaded_backend = has_gpu ? "mps" : "cpu";
     return true;
 }
 
@@ -195,7 +237,9 @@ std::string token_piece(const llama_vocab * vocab, llama_token token) {
     char buffer[512];
     int32_t n = llama_token_to_piece(vocab, token, buffer, sizeof(buffer), 0, false);
     if (n < 0) {
-        return "";
+        std::vector<char> piece(static_cast<size_t>(-n));
+        n = llama_token_to_piece(vocab, token, piece.data(), static_cast<int32_t>(piece.size()), 0, false);
+        return n < 0 ? "" : std::string(piece.data(), static_cast<size_t>(n));
     }
     return std::string(buffer, static_cast<size_t>(n));
 }
@@ -213,6 +257,182 @@ bool contains_complete_minicpm_tool_call(const std::string & text) {
 
 } // namespace
 
+extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSONCancellable(
+    const char * model_directory,
+    const char * backend_preference,
+    const char * prompt,
+    int context_length,
+    int max_output_tokens,
+    int safety_margin_tokens,
+    bool (*is_cancelled)(void *),
+    void * cancellation_context
+) {
+    auto start = std::chrono::steady_clock::now();
+    RequestCancellation cancellation{is_cancelled, cancellation_context};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const std::string preference = backend_preference == nullptr ? "automatic" : backend_preference;
+    std::string backend = "unavailable";
+    const std::string raw_prompt = prompt == nullptr ? "" : prompt;
+    const bool react_transport_step = is_minicpm_react_generation(raw_prompt);
+    int prompt_token_count = 0;
+    int output_tokens = 0;
+    int effective_max_output_tokens = 0;
+    double ttft_ms = -1;
+    const auto failure = [&](const std::string &error, double generation_ms = 0) {
+        const double total_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count();
+        return copy_c_string(make_response(false, backend, prompt_token_count,
+            output_tokens, effective_max_output_tokens, context_length, ttft_ms,
+            generation_ms, total_ms, "", error, react_transport_step));
+    };
+    if (cancellation.cancelled()) {
+        return failure("MiniCPM-V generation cancelled.");
+    }
+    if (preference == "ane") {
+        return failure("ANE is unavailable: this GGUF engine uses Metal or CPU and has no Core ML partition.");
+    }
+    if (context_length <= 0 || max_output_tokens <= 0 || safety_margin_tokens < 0) {
+        return failure("Context length and output budget must be positive; safety margin must be nonnegative.");
+    }
+    const std::string model_path = model_path_for_directory(model_directory);
+    if (model_path.empty()) {
+        return failure("MiniCPM-V model.gguf was not found.");
+    }
+    std::string error;
+    if (!ensure_model_loaded(model_path, cancellation, error)) {
+        return failure(cancellation.cancelled() ? "MiniCPM-V generation cancelled during model loading." : error);
+    }
+    backend = g_loaded_backend;
+    if ((preference == "mps" || preference == "metal") && backend != "mps") {
+        return failure("Metal was requested but no GPU backend is available.");
+    }
+    if (cancellation.cancelled()) {
+        return failure("MiniCPM-V generation cancelled.");
+    }
+    const llama_vocab * vocab = llama_model_get_vocab(g_model);
+    const std::string prompt_text = chat_wrapped_prompt(raw_prompt);
+    const bool prompt_has_chat_template = prompt_text.find("<|im_start|>") != std::string::npos;
+    std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, !prompt_has_chat_template, error);
+    if (prompt_tokens.empty()) {
+        return failure(error);
+    }
+    prompt_token_count = static_cast<int>(prompt_tokens.size());
+    // Use the actual tokenizer count, never an estimate or a minimum output
+    // allowance that can exceed the remaining context or caller's token cap.
+    const int64_t remaining = static_cast<int64_t>(context_length) - prompt_token_count - safety_margin_tokens;
+    if (remaining <= 0) {
+        return failure("MiniCPM-V context window exhausted: promptTokens=" + std::to_string(prompt_token_count)
+            + ", contextLength=" + std::to_string(context_length)
+            + ", safetyMarginTokens=" + std::to_string(safety_margin_tokens)
+            + ". Compact context before decoding.");
+    }
+    effective_max_output_tokens = static_cast<int>(std::min<int64_t>(max_output_tokens, remaining));
+    if (react_transport_step) {
+        effective_max_output_tokens = std::min(effective_max_output_tokens, 768);
+    }
+    const int active_context_length = static_cast<int>(std::min<int64_t>(context_length,
+        std::max<int64_t>(512, static_cast<int64_t>(prompt_token_count) + effective_max_output_tokens + safety_margin_tokens)));
+
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = static_cast<uint32_t>(active_context_length);
+    // Both the logical prefill batch and its scratch allocation stay bounded.
+    // Metal cannot abort a submitted graph, so checking between batches limits
+    // cancellation latency to one 256-token prefill or one decoding step.
+    ctx_params.n_batch = static_cast<uint32_t>(std::min(256, active_context_length));
+    ctx_params.n_ubatch = ctx_params.n_batch;
+    ctx_params.n_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
+    ctx_params.n_threads_batch = std::max(2u, std::thread::hardware_concurrency());
+    ctx_params.no_perf = false;
+    ctx_params.offload_kqv = true;
+    ctx_params.op_offload = true;
+    ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
+    ctx_params.abort_callback = RequestCancellation::abort;
+    ctx_params.abort_callback_data = &cancellation;
+
+    llama_context * ctx = llama_init_from_model(g_model, ctx_params);
+    if (ctx == nullptr) {
+        return failure("Failed to create MiniCPM-V llama context.");
+    }
+    llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
+    sampler_params.no_perf = false;
+    llama_sampler * sampler = llama_sampler_chain_init(sampler_params);
+    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    const auto release = [&] {
+        llama_sampler_free(sampler);
+        llama_free(ctx);
+    };
+
+    for (size_t offset = 0; offset < prompt_tokens.size(); offset += ctx_params.n_batch) {
+        if (cancellation.cancelled()) {
+            release();
+            return failure("MiniCPM-V generation cancelled during prompt decoding.");
+        }
+        const int32_t count = static_cast<int32_t>(std::min<size_t>(ctx_params.n_batch, prompt_tokens.size() - offset));
+        llama_batch batch = llama_batch_get_one(prompt_tokens.data() + offset, count);
+        const int32_t decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0 || cancellation.cancelled()) {
+            release();
+            return failure(cancellation.cancelled()
+                ? "MiniCPM-V generation cancelled during prompt decoding."
+                : "MiniCPM-V prompt decode failed with code " + std::to_string(decode_result) + ".");
+        }
+    }
+
+    std::string output;
+    bool completed = false;
+    auto generation_start = std::chrono::steady_clock::now();
+    for (int i = 0; i < effective_max_output_tokens; ++i) {
+        if (cancellation.cancelled()) {
+            error = "MiniCPM-V generation cancelled during decoding.";
+            break;
+        }
+        llama_token token = llama_sampler_sample(sampler, ctx, -1);
+        if (llama_vocab_is_eog(vocab, token)) {
+            completed = true;
+            break;
+        }
+        llama_sampler_accept(sampler, token);
+        if (output_tokens == 0) {
+            ttft_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        }
+        output += token_piece(vocab, token);
+        output_tokens += 1;
+        if ((react_transport_step && contains_complete_minicpm_tool_call(output)) ||
+            output.find("<|im_end|>") != std::string::npos) {
+            completed = true;
+            break;
+        }
+        // Do not decode the final token when no subsequent sample is allowed.
+        if (i + 1 == effective_max_output_tokens) {
+            break;
+        }
+        llama_batch batch = llama_batch_get_one(&token, 1);
+        const int32_t decode_result = llama_decode(ctx, batch);
+        if (decode_result != 0) {
+            error = cancellation.cancelled()
+                ? "MiniCPM-V generation cancelled during decoding."
+                : "MiniCPM-V token decode failed with code " + std::to_string(decode_result) + ".";
+            break;
+        }
+    }
+    auto end = std::chrono::steady_clock::now();
+    double generation_ms = std::chrono::duration<double, std::milli>(end - generation_start).count();
+    double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
+    release();
+    if (cancellation.cancelled()) {
+        return failure("MiniCPM-V generation cancelled; output discarded.", generation_ms);
+    }
+    if (!error.empty()) {
+        return failure(error, generation_ms);
+    }
+    if (!completed) {
+        return failure("MiniCPM-V output token budget exhausted before a complete response; partial output discarded.", generation_ms);
+    }
+    return copy_c_string(make_response(true, backend, prompt_token_count, output_tokens,
+        effective_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, "", react_transport_step));
+}
+
+// Keep the original six-argument ABI for older hosts and external integrations.
 extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     const char * model_directory,
     const char * backend_preference,
@@ -221,143 +441,18 @@ extern "C" char * LuminaMiniCPMV46ExternalGenerateReActJSON(
     int max_output_tokens,
     int safety_margin_tokens
 ) {
-    (void) safety_margin_tokens;
-    printf("[Lumina][C++] Starting generation request...\n"); fflush(stdout);
-    auto start = std::chrono::steady_clock::now();
-    std::lock_guard<std::mutex> lock(g_mutex);
-
-    const std::string backend = backend_preference == nullptr ? "automatic" : backend_preference;
-    const std::string raw_prompt = prompt == nullptr ? "" : prompt;
-    const std::string model_path = model_path_for_directory(model_directory);
-    printf("[Lumina][C++] Model path: %s\n", model_path.c_str());
-    if (model_path.empty()) {
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V model.gguf was not found.", false));
-    }
-
-    std::string error;
-    if (!ensure_model_loaded(model_path, error)) {
-        printf("[Lumina][C++] Model load FAILED: %s\n", error.c_str());
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
-    }
-    printf("[Lumina][C++] Model loaded successfully.\n"); fflush(stdout);
-
-    const llama_vocab * vocab = llama_model_get_vocab(g_model);
-    const std::string prompt_text = chat_wrapped_prompt(raw_prompt);
-    printf("[Lumina][C++] Tokenizing prompt (length: %zu)...\n", prompt_text.size());
-    const bool prompt_has_chat_template = prompt_text.find("<|im_start|>") != std::string::npos;
-    std::vector<llama_token> prompt_tokens = tokenize(vocab, prompt_text, !prompt_has_chat_template, error);
-    if (prompt_tokens.empty()) {
-        printf("[Lumina][C++] Tokenization FAILED.\n");
-        return copy_c_string(make_response(false, backend, 0, 0, max_output_tokens, context_length, -1, 0, 0, "", error, false));
-    }
-    printf("[Lumina][C++] Tokens count: %zu\n", prompt_tokens.size());
-
-    const bool react_transport_step = is_minicpm_react_generation(raw_prompt);
-    const int requested_max_output_tokens = max_output_tokens;
-    if (static_cast<int>(prompt_tokens.size()) >= context_length) {
-        return copy_c_string(make_response(
-            false,
-            backend,
-            static_cast<int>(prompt_tokens.size()),
-            0,
-            max_output_tokens,
-            context_length,
-            -1,
-            0,
-            0,
-            "",
-            "MiniCPM-V prompt tokens exceed the configured context window; compact context before decoding.",
-            react_transport_step
-        ));
-    }
-    const int effective_max_output_tokens = react_transport_step
-        ? std::min(std::max(max_output_tokens, 128), 768)
-        : std::min(max_output_tokens, std::max(256, context_length - static_cast<int>(prompt_tokens.size()) - safety_margin_tokens));
-    const int active_context_length = std::min(
-        context_length,
-        std::max(
-            512,
-            static_cast<int>(prompt_tokens.size()) + effective_max_output_tokens + std::max(64, safety_margin_tokens)
-        )
+    return LuminaMiniCPMV46ExternalGenerateReActJSONCancellable(
+        model_directory, backend_preference, prompt, context_length,
+        max_output_tokens, safety_margin_tokens, nullptr, nullptr
     );
-
-    llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = static_cast<uint32_t>(active_context_length);
-    ctx_params.n_batch = static_cast<uint32_t>(std::min<int>(
-        std::max<int>(static_cast<int>(prompt_tokens.size()), 512),
-        active_context_length
-    ));
-    ctx_params.n_ubatch = ctx_params.n_batch;
-    ctx_params.n_threads = std::max(2u, std::thread::hardware_concurrency() / 2);
-    ctx_params.n_threads_batch = std::max(2u, std::thread::hardware_concurrency());
-    ctx_params.no_perf = false;
-    ctx_params.offload_kqv = true;
-    ctx_params.op_offload = true;
-    ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_AUTO;
-
-    llama_context * ctx = llama_init_from_model(g_model, ctx_params);
-    if (ctx == nullptr) {
-        printf("[Lumina][C++] Failed to create llama context.\n");
-        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "Failed to create MiniCPM-V llama context.", react_transport_step));
-    }
-    printf("[Lumina][C++] Llama context created with n_ctx: %u\n", ctx_params.n_ctx);
-
-    llama_sampler_chain_params sampler_params = llama_sampler_chain_default_params();
-    sampler_params.no_perf = false;
-    llama_sampler * sampler = llama_sampler_chain_init(sampler_params);
-    llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
-
-    printf("[Lumina][C++] Decoding prompt batch (size: %zu)...\n", prompt_tokens.size()); fflush(stdout);
-    llama_batch batch = llama_batch_get_one(prompt_tokens.data(), static_cast<int32_t>(prompt_tokens.size()));
-    int32_t decode_result = llama_decode(ctx, batch);
-    if (decode_result != 0) {
-        printf("[Lumina][C++] Prompt decode FAILED with code: %d\n", decode_result);
-        llama_sampler_free(sampler);
-        llama_free(ctx);
-        return copy_c_string(make_response(false, backend, static_cast<int>(prompt_tokens.size()), 0, max_output_tokens, context_length, -1, 0, 0, "", "MiniCPM-V prompt decode failed with code " + std::to_string(decode_result) + ".", schema_step));
-    }
-    printf("[Lumina][C++] Prompt decoded. Starting generation loop...\n");
-
-    std::string output;
-    int output_tokens = 0;
-    double ttft_ms = -1;
-    auto generation_start = std::chrono::steady_clock::now();
-
-    for (int i = 0; i < effective_max_output_tokens; ++i) {
-        llama_token token = llama_sampler_sample(sampler, ctx, -1);
-        if (llama_vocab_is_eog(vocab, token)) {
-            break;
-        }
-        llama_sampler_accept(sampler, token);
-        if (output_tokens == 0) {
-            auto now = std::chrono::steady_clock::now();
-            ttft_ms = std::chrono::duration<double, std::milli>(now - start).count();
-        }
-        output += token_piece(vocab, token);
-        output_tokens += 1;
-        if (react_transport_step && contains_complete_minicpm_tool_call(output)) {
-            break;
-        }
-        if (output.find("<|im_end|>") != std::string::npos) {
-            break;
-        }
-        batch = llama_batch_get_one(&token, 1);
-        decode_result = llama_decode(ctx, batch);
-        if (decode_result != 0) {
-            break;
-        }
-    }
-
-    auto end = std::chrono::steady_clock::now();
-    double generation_ms = std::chrono::duration<double, std::milli>(end - generation_start).count();
-    double total_ms = std::chrono::duration<double, std::milli>(end - start).count();
-
-    llama_sampler_free(sampler);
-    llama_free(ctx);
-
-    return copy_c_string(make_response(true, backend, static_cast<int>(prompt_tokens.size()), output_tokens, requested_max_output_tokens, context_length, ttft_ms, generation_ms, total_ms, output, "", react_transport_step));
 }
 
 extern "C" void LuminaMiniCPMV46ExternalFreeCString(char * value) {
     std::free(value);
+}
+
+// Wait for an active request, release the model before the backend, and retain
+// the loaded library. This is idempotent; a subsequent request can load again.
+extern "C" void LuminaMiniCPMV46ExternalShutdown(void) {
+    cleanup_backend();
 }

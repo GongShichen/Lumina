@@ -1258,6 +1258,30 @@ final class LuminaRuntimeKernelTests: XCTestCase {
         XCTAssertTrue(snapshot.plannerInputs.dropFirst().joined(separator: "\n").contains(#""loaded_tool_set":["plugin.lazy"]"#))
     }
 
+    func testValidationReportsRequiredTypeAndEnumErrorsTogetherToNextModelStep() throws {
+        let runtime = try XCTUnwrap(LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)))
+        defer { LuminaAgentRuntimeDestroy(runtime) }
+        LuminaAgentRuntimeSetModelCallback(runtime, luminaRepeatedIdenticalToolThenFinalModelCallback, nil)
+        LuminaAgentRuntimeSetToolCallback(runtime, luminaToolCallback, nil)
+        let schemaPointer = LuminaAgentRuntimeRegisterToolSchema(
+            runtime,
+            #"{"name":"external.open","description":"Test all validation constraints.","sideEffect":"readOnly","parameters":[{"name":"target","type":"string","required":true,"enum":["allowed-only"]},{"name":"payload","type":"number","required":true},{"name":"id","type":"string","required":true}]}"#
+        )
+        if let schemaPointer { LuminaAgentRuntimeReleaseString(schemaPointer) }
+        if let result = LuminaAgentRuntimeRun(runtime, #"{"text":"Validate the supplied fields."}"#) {
+            LuminaAgentRuntimeReleaseString(result)
+        }
+        let capture = LuminaRuntimeCaptureStore.shared.snapshot()
+        let nextInput = try XCTUnwrap(capture.plannerInputs.dropFirst().first)
+        XCTAssertEqual(capture.toolCallCount, 0)
+        XCTAssertTrue(nextInput.contains("parameter target is not in the allowed enum"))
+        XCTAssertTrue(nextInput.contains("parameter payload has invalid type"))
+        XCTAssertTrue(nextInput.contains("missing required parameter id"))
+        for name in ["target", "payload", "id"] {
+            XCTAssertTrue(nextInput.contains("\"field\":\"\(name)\""), "Missing field-level correction for \(name)")
+        }
+    }
+
     func testIdenticalToolCallReplaysPreviousObservationWithoutExecutingAgain() throws {
         guard let runtime = LuminaAgentRuntimeCreate(luminaKernelRuntimeConfigurationJSON(maxIterations: 4)) else {
             XCTFail("Failed to create runtime")

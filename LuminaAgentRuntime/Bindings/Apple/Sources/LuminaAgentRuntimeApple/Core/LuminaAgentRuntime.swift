@@ -147,12 +147,21 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
 
     public nonisolated func runStream(request: LuminaAgentRequest) -> AsyncStream<LuminaAgentRunEvent> {
         AsyncStream { continuation in
-            Task {
-                let result = await self.run(request: request) { event in
-                    continuation.yield(event)
+            let producerTask = Task {
+                let result = await withTaskCancellationHandler {
+                    await self.run(request: request) { event in
+                        continuation.yield(event)
+                    }
+                } onCancel: {
+                    self.cancelCurrentRun()
                 }
                 continuation.yield(.finished(result))
                 continuation.finish()
+            }
+            continuation.onTermination = { termination in
+                if case .cancelled = termination {
+                    producerTask.cancel()
+                }
             }
         }
     }
@@ -161,6 +170,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         request: LuminaAgentRequest,
         eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     ) async -> LuminaAgentRunResult {
+        guard !Task.isCancelled else { return cancelledResult(request: request) }
         guard let runtimeHandle else {
             return LuminaAgentRunResult(
                 requestID: request.id,
@@ -174,6 +184,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.resetCancellation()
         box.trace = LuminaReActTrace()
         box.toolResults = []
+        box.runtimeCallIDs = [:]
+        box.toolResultIndices = [:]
         box.stepGenerationMilliseconds = 0
         box.toolExecutionMilliseconds = 0
         box.timingStartedAt = ContinuousClock.now
@@ -190,6 +202,7 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         replayJSON: String,
         eventSink: (@Sendable (LuminaAgentRunEvent) -> Void)?
     ) async -> LuminaAgentRunResult {
+        guard !Task.isCancelled else { return cancelledResult(request: request) }
         guard let runtimeHandle else {
             return LuminaAgentRunResult(
                 requestID: request.id,
@@ -203,6 +216,8 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
         box.resetCancellation()
         box.trace = LuminaReActTrace()
         box.toolResults = []
+        box.runtimeCallIDs = [:]
+        box.toolResultIndices = [:]
         box.stepGenerationMilliseconds = 0
         box.toolExecutionMilliseconds = 0
         box.timingStartedAt = ContinuousClock.now
@@ -217,6 +232,15 @@ public final class LuminaAgentRuntime: @unchecked Sendable {
     private nonisolated func cancelCurrentRun() {
         box.requestCancellation()
         runtimeHandle?.cancelCurrentRun()
+    }
+
+    private func cancelledResult(request: LuminaAgentRequest) -> LuminaAgentRunResult {
+        LuminaAgentRunResult(
+            requestID: request.id,
+            plan: LuminaAgentPlan(summary: "### 已取消", toolCalls: []),
+            toolResults: [], status: .cancelled,
+            reactTrace: LuminaReActTrace(terminationReason: "cancelled", consumedToolCallCount: 0)
+        )
     }
 
     private func configureRuntime() {
@@ -241,6 +265,27 @@ private func box(from context: UnsafeMutableRawPointer?) -> LuminaAgentRuntimeAd
 
 private func retainedCString(_ string: String) -> UnsafeMutablePointer<CChar>? {
     strdup(string)
+}
+
+/// A cancelled Swift task can finish after its synchronous C callback has returned.
+/// Serialize emissions with close so it can never use the C stack's emit context afterward.
+private final class LuminaAgentStreamEmissionLifetime: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+
+    func emit(_ operation: () -> Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        // Ignore late chunks without cancelling a newer run on the same runtime instance.
+        guard active else { return true }
+        return operation()
+    }
+
+    func close() {
+        lock.lock()
+        active = false
+        lock.unlock()
+    }
 }
 
 private func blockOn<T: Sendable>(
@@ -283,14 +328,18 @@ let luminaAgentSwiftAdapterStreamingModelCallback: LuminaAgentStreamingModelCall
     }
     let input = String(cString: plannerInput)
     let safeEmitContext = LuminaAgentUnsafeEmitContext(rawValue: emitContext)
+    let emissionLifetime = LuminaAgentStreamEmissionLifetime()
+    defer { emissionLifetime.close() }
     let response = blockOn(
         isCancelled: { box.isCancellationRequested() },
         cancellationValue: { #"{"type":"cannot_complete","thinking":"cancelled","reason":"cancelled"}"# }
     ) {
         await box.generateStepJSON(plannerInputJSON: input) { progress in
-            guard let emit else { return true }
-            let payload = LuminaAgentRuntimeAdapterBox.streamingDeltaJSON(from: progress)
-            return payload.withCString { emit($0, safeEmitContext.rawValue) }
+            emissionLifetime.emit {
+                guard let emit else { return true }
+                let payload = LuminaAgentRuntimeAdapterBox.streamingDeltaJSON(from: progress)
+                return payload.withCString { emit($0, safeEmitContext.rawValue) }
+            }
         }
     }
     return retainedCString(response)
@@ -386,7 +435,10 @@ let luminaAgentSwiftAdapterPermissionCallback: LuminaAgentPermissionCallback = {
         return retainedCString(#"{"decision":"denied","reason":"missing permission callback context"}"#)
     }
     let input = String(cString: permissionJSON)
-    let response = blockOn(cancellationValue: { #"{"decision":"denied","reason":"cancelled"}"# }) {
+    let response = blockOn(
+        isCancelled: { box.isCancellationRequested() },
+        cancellationValue: { #"{"decision":"denied","reason":"cancelled"}"# }
+    ) {
         await box.decidePermission(permissionJSON: input)
     }
     return retainedCString(response)
@@ -397,7 +449,10 @@ let luminaAgentSwiftAdapterConfirmationCallback: LuminaAgentConfirmationCallback
         return retainedCString(#"{"confirmed":false,"reason":"missing confirmation callback context"}"#)
     }
     let input = String(cString: confirmationJSON)
-    let response = blockOn(cancellationValue: { #"{"confirmed":false,"reason":"cancelled"}"# }) {
+    let response = blockOn(
+        isCancelled: { box.isCancellationRequested() },
+        cancellationValue: { #"{"confirmed":false,"reason":"cancelled"}"# }
+    ) {
         await box.confirm(confirmationJSON: input)
     }
     return retainedCString(response)

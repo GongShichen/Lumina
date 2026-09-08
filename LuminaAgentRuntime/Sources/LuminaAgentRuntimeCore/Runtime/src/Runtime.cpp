@@ -1220,6 +1220,17 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
         callbacks_.trace("step_recorded", "{\"session_id\":" + jsonString(session.sessionId()) + ",\"run_id\":" + jsonString(session.runId()) + ",\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
         callbacks_.recordHistory("step_recorded", "{\"step\":" + stepJson + ",\"record\":" + recordJson + "}");
         emitCheckpointIfNeeded(sessionConfig_, session, callbacks_, events, "on_step");
+        std::map<std::string, JsonField> recordFields;
+        if (!parseFieldsOrEmpty(recordJson, recordFields) || !boolField(recordFields, "ok", false)) {
+            if (session.actionCount() >= session.maximumToolCalls()) {
+                session.failWithResult("tool-budget", "### 已达到工具调用预算\n\n后续工具调用未执行。请根据已完成的结果继续处理。");
+            }
+            break;
+        }
+        if (type == "tool_use" || type == "ask_user") {
+            callbacks_.emitEvent("tool_call_budget_consumed", "{\"actionCount\":" + std::to_string(session.actionCount()) +
+                ",\"remainingToolCalls\":" + std::to_string(std::max(0, session.maximumToolCalls() - session.actionCount())) + "}");
+        }
 
         if (type == "result" || type == "cannot_complete") {
             break;
@@ -1314,7 +1325,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 callbacks_.recordHistory("observation_created", lastObservation);
                 continue;
             }
-            ToolExecutor(tools_, callbacks_, replayController).runToolCall(
+            ToolExecutor(tools_, callbacks_, replayController, &cancelled_).runToolCall(
                 session,
                 toolName,
                 rawField(fields, "parameters", "{}"),
@@ -1342,7 +1353,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 events.emitControl("ask_user_pending", session.pendingJson());
                 break;
             }
-            ToolExecutor(tools_, callbacks_, replayController).runToolCall(session, "ask_user", askParameters, false);
+            ToolExecutor(tools_, callbacks_, replayController, &cancelled_).runToolCall(session, "ask_user", askParameters, false);
             lastObservation = session.lastObservationJson();
             execution.setLastObservationJson(lastObservation);
             continue;
@@ -1355,7 +1366,7 @@ std::string Runtime::runSession(RuntimeSession &session, const char *requestJson
                 execution.setLastObservationJson(lastObservation);
                 continue;
             }
-            ToolExecutor(tools_, callbacks_, replayController).runMultiToolCall(session, rawField(fields, "tool_calls", "[]"));
+            ToolExecutor(tools_, callbacks_, replayController, &cancelled_).runMultiToolCall(session, rawField(fields, "tool_calls", "[]"));
             lastObservation = session.lastObservationJson();
             execution.setLastObservationJson(lastObservation);
             continue;

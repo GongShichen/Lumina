@@ -23,6 +23,8 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
         try cancellation.checkCancellation()
         let store = CNContactStore()
         try await requestContactsAccess(store: store)
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
         let query = arguments.string("query") ?? ""
         let limit = max(1, min(10, Int(arguments.number("limit") ?? 5)))
         let contacts = try search(query: query, limit: limit, store: store)
@@ -40,7 +42,7 @@ struct LuminaContactsSearchTool: LuminaAgentTool {
         case .authorized, .limited:
             return
         case .notDetermined:
-            let granted = try await LuminaPermissionTimingRecorder.shared.record {
+            let granted = try await LuminaSystemPermissionRequest.awaitDecision {
                 try await store.requestAccess(for: .contacts)
             }
             if !granted {

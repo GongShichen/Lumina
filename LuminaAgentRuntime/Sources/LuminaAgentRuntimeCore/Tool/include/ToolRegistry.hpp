@@ -35,6 +35,7 @@ public:
 
     // Returns raw schemas for debugging/export and compact schemas for model prompts.
     std::string schemasJson() const;
+    std::string schemaJson(const std::string &toolName) const;
     std::string modelFacingSchemasJson(const std::set<std::string> &loadedToolNames = {}) const;
     std::string capabilityListJson(const std::set<std::string> &loadedToolNames = {}) const;
     std::string nameOnlyListJson(const std::set<std::string> &loadedToolNames = {}) const;

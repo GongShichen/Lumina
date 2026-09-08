@@ -29,16 +29,36 @@ public struct LuminaMessageComposeTool: LuminaAgentTool {
 
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        await messageDrafts.publish(LuminaMessageDraft(
+        let draft = LuminaMessageDraft(
             recipients: arguments.string("recipient").map { [$0] } ?? [],
             body: arguments.string("body") ?? ""
-        ))
+        )
+        let outcome = await messageDrafts.compose(draft)
+        try cancellation.checkCancellation()
+        let status: LuminaToolResultStatus
+        let message: String
+        let outcomeName: String
+        switch outcome {
+        case .sent:
+            status = .succeeded
+            message = "用户已在系统短信编辑器中发送短信。"
+            outcomeName = "sent"
+        case .cancelled:
+            status = .cancelled
+            message = "用户已取消短信编辑，未发送短信。"
+            outcomeName = "cancelled"
+        case .failed(let reason):
+            status = .failed
+            message = reason
+            outcomeName = "failed"
+        }
         return LuminaToolResult(
-            callID: UUID(),
+            callID: draft.id,
             toolName: schema.name,
-            status: .succeeded,
-            output: ["draft": .string("Message composer opened.")],
-            content: [.text("短信编辑器已打开，等待用户发送或取消。")]
+            status: status,
+            output: ["draftID": .string(draft.id.uuidString), "outcome": .string(outcomeName)],
+            content: [.text(message)],
+            errorMessage: status == .failed ? message : nil
         )
     }
 }

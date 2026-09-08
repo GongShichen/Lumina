@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 import Foundation
 
 struct LuminaAppMemoryPolicyRuntimeHook: LuminaAgentRuntimeHook {
@@ -30,144 +31,12 @@ struct LuminaAppMemoryPolicyRuntimeHook: LuminaAgentRuntimeHook {
 }
 
 struct LuminaToolRecoveryRuntimeHook: LuminaMatchingAgentRuntimeHook {
-    let matcher = LuminaAgentRuntimeHookMatcher(events: [.stepContextReady])
+    let matcher = LuminaAgentRuntimeHookMatcher(events: [.beforeTool, .stepContextReady])
 
     func handle(
         event: LuminaAgentRuntimeHookEvent,
         context: LuminaAgentRuntimeHookContext
     ) async throws -> [LuminaAgentRuntimeHookDirective] {
-        guard event == .stepContextReady,
-              let observation = context.trace.steps.last?.observation,
-              observation.status == .failed || observation.status == .denied || observation.status == .cancelled
-        else {
-            return []
-        }
-
-        let failureText = [
-            observation.summary,
-            observation.errorMessage ?? ""
-        ]
-            .joined(separator: "\n")
-            .lowercased()
-        let availableTools = context.availableTools.sorted { $0.name < $1.name }
-
-        if isUnknownToolFailure(failureText) {
-            let content = """
-            Unknown Tool: \(observation.toolName).
-            All available tools:
-            \(toolCatalogJSON(for: availableTools))
-            Choose an exact tool name from the schema above and pass only parameters declared by that tool schema.
-            """
-            return directives(
-                id: "app.tool_recovery.unknown_tool.\(stableIDComponent(observation.toolName))",
-                title: "Tool recovery: unknown tool",
-                summary: "The previous tool name was invalid; full callable tool catalog is available.",
-                content: content,
-                annotation: "unknown_tool"
-            )
-        }
-
-        if isParameterFailure(failureText) {
-            let schemaTools: [LuminaToolSchema]
-            if let schema = availableTools.first(where: { $0.name == observation.toolName }) {
-                schemaTools = [schema]
-            } else {
-                schemaTools = availableTools
-            }
-            let content = """
-            Value Error. \(observation.toolName) parameters are:
-            \(toolCatalogJSON(for: schemaTools))
-            Fill missing or invalid parameters from the user request and previous observations, then retry with exactly the parameter names and JSON types shown above. Explain the blocker only when the needed value cannot be inferred. Use corrected parameters.
-            """
-            return directives(
-                id: "app.tool_recovery.value_error.\(stableIDComponent(observation.toolName))",
-                title: "Tool recovery: value error",
-                summary: "The previous tool parameters failed validation; matching schema is available.",
-                content: content,
-                annotation: "value_error"
-            )
-        }
-
-        return []
-    }
-
-    private func directives(
-        id: String,
-        title: String,
-        summary: String,
-        content: String,
-        annotation: String
-    ) -> [LuminaAgentRuntimeHookDirective] {
-        [
-            .appendContextSection(LuminaRuntimeContextSection(
-                id: id,
-                title: title,
-                summary: summary,
-                content: content,
-                source: "app/tool-recovery",
-                sensitivity: .normal,
-                disclosureLevel: 0
-            )),
-            .annotate(key: "app.toolRecovery", value: .string(annotation))
-        ]
-    }
-
-    private func isUnknownToolFailure(_ text: String) -> Bool {
-        text.contains("tool is not registered") ||
-            text.contains("unknown tool") ||
-            text.contains("unregistered tool") ||
-            text.contains("tool is deferred") ||
-            text.contains("tool is not callable")
-    }
-
-    private func isParameterFailure(_ text: String) -> Bool {
-        text.contains("missing required parameter") ||
-            text.contains("invalid type") ||
-            text.contains("allowed enum") ||
-            text.contains("parameters must be a json object") ||
-            text.contains("tool parameters must be a json object") ||
-            text.contains("failed validation") ||
-            text.contains("schema")
-    }
-
-    private func toolCatalogJSON(for schemas: [LuminaToolSchema]) -> String {
-        let payload = schemas.map(toolSchemaPayload(for:))
-        guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let json = String(data: data, encoding: .utf8)
-        else {
-            return schemas.map { schema in
-                "\(schema.name): \(schema.description)"
-            }.joined(separator: "\n")
-        }
-        return json
-    }
-
-    private func toolSchemaPayload(for schema: LuminaToolSchema) -> [String: Any] {
-        var properties: [String: Any] = [:]
-        for parameter in schema.parameters.sorted(by: { $0.name < $1.name }) {
-            properties[parameter.name] = [
-                "type": parameter.type.rawValue,
-                "description": parameter.description
-            ]
-        }
-        return [
-            "name": schema.name,
-            "description": schema.description,
-            "parameters": [
-                "type": "object",
-                "properties": properties,
-                "required": schema.parameters.filter(\.required).map(\.name).sorted()
-            ]
-        ] as [String: Any]
-    }
-
-    private func stableIDComponent(_ value: String) -> String {
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
-        let scalars = value.unicodeScalars.map { scalar in
-            allowed.contains(scalar) ? Character(scalar) : "_"
-        }
-        let sanitized = String(scalars)
-        return sanitized.isEmpty ? "tool" : sanitized
+        try await LuminaToolRecoveryRuntimePolicy().handle(event: event, context: context)
     }
 }

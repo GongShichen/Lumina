@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 @preconcurrency import EventKit
 import Foundation
 import PersonalMemory
@@ -25,23 +26,40 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
 
     func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        try await requestReminderAccess()
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        let dueDate = arguments.string("dueDateISO").flatMap(LuminaToolFailureFeedback.parseDate)
+        do {
+            try await requestReminderAccess()
+        } catch AppToolError.permissionDenied(let reason) {
+            return LuminaToolFailureFeedback.enrich(
+                LuminaToolResult(callID: UUID(), toolName: schema.name, status: .denied, errorMessage: reason),
+                arguments: arguments, schema: schema
+            )
+        }
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
+        // A permission sheet can stay open beyond the requested due time.
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
         let reminder = EKReminder(eventStore: eventStore)
         reminder.title = arguments.string("title") ?? "Agent Reminder"
         reminder.notes = arguments.string("notes")
-        if let dueDate = Self.date(from: arguments.string("dueDateISO")) {
-            guard dueDate >= Date().addingTimeInterval(-300) else {
-                return Self.failedResult("提醒时间在过去：\(Self.string(from: dueDate))。请先用 device.current_time 获取当前时间，再重新计算未来提醒时间。")
-            }
-            reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
+        if let dueDate {
+            reminder.dueDateComponents = Calendar.current.dateComponents([.calendar, .timeZone, .year, .month, .day, .hour, .minute, .second], from: dueDate)
         }
         reminder.calendar = eventStore.defaultCalendarForNewReminders()
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
         try eventStore.save(reminder, commit: true)
         return LuminaToolResult(
             callID: UUID(),
             toolName: schema.name,
             status: .succeeded,
-            output: ["identifier": .string(reminder.calendarItemIdentifier)],
+            output: [
+                "identifier": .string(reminder.calendarItemIdentifier),
+                "title": .string(reminder.title ?? "Agent Reminder"),
+                "dueDateISO": dueDate.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
+                "executedArguments": .object(arguments)
+            ],
             content: [.text("提醒已创建：\(reminder.title ?? "Agent Reminder")")],
             rollbackToken: reminder.calendarItemIdentifier
         )
@@ -65,10 +83,8 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await LuminaSystemPermissionRequest.withTimeout {
-                try await LuminaPermissionTimingRecorder.shared.record {
-                    try await self.eventStore.requestFullAccessToReminders()
-                }
+            let granted = try await LuminaSystemPermissionRequest.awaitDecision {
+                try await self.eventStore.requestFullAccessToReminders()
             }
             if granted {
                 return
@@ -85,23 +101,4 @@ final class LuminaReminderCreateTool: LuminaAgentTool, @unchecked Sendable {
         }
     }
 
-    private static func date(from value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
-    private static func string(from date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
-    }
-
-    private static func failedResult(_ message: String) -> LuminaToolResult {
-        LuminaToolResult(
-            callID: UUID(),
-            toolName: "reminder.create",
-            status: .failed,
-            output: ["reason": .string(message)],
-            content: [.markdown("### 提醒未创建\n\n\(message)")],
-            errorMessage: message
-        )
-    }
 }

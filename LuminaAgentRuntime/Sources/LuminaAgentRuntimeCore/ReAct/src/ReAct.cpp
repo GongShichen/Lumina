@@ -169,10 +169,59 @@ static std::string stripMiniCPMEndTokens(const std::string &text) {
     return trim(value);
 }
 
+// MiniCPM's generation prefix can already contain <think>, so its continuation
+// starts with reasoning and emits only the closing tag. Restrict that recovery
+// to a standalone transport marker outside Markdown code fences/indented code.
+static size_t standaloneMiniCPMThinkEnd(const std::string &text) {
+    char fenceCharacter = '\0';
+    size_t fenceLength = 0;
+    size_t lineStart = 0;
+    while (lineStart < text.size()) {
+        const size_t newline = text.find('\n', lineStart);
+        const size_t lineEnd = newline == std::string::npos ? text.size() : newline;
+        const std::string line = text.substr(lineStart, lineEnd - lineStart);
+        size_t indentation = 0;
+        while (indentation < line.size() && line[indentation] == ' ') {
+            ++indentation;
+        }
+        if (indentation <= 3 && indentation < line.size()) {
+            const char first = line[indentation];
+            size_t runLength = 0;
+            if (first == '`' || first == '~') {
+                while (indentation + runLength < line.size() && line[indentation + runLength] == first) {
+                    ++runLength;
+                }
+            }
+            if (fenceCharacter != '\0') {
+                if (first == fenceCharacter && runLength >= fenceLength &&
+                    trim(line.substr(indentation + runLength)).empty()) {
+                    fenceCharacter = '\0';
+                    fenceLength = 0;
+                }
+            } else if (runLength >= 3) {
+                fenceCharacter = first;
+                fenceLength = runLength;
+            } else if (trim(line) == "</think>") {
+                return lineStart + indentation;
+            }
+        }
+        if (newline == std::string::npos) {
+            break;
+        }
+        lineStart = newline + 1;
+    }
+    return std::string::npos;
+}
+
 static std::string removeMiniCPMThinkBlocks(const std::string &text, std::string &thinking) {
     std::string value = text;
     const size_t start = value.find("<think>");
     if (start == std::string::npos) {
+        const size_t end = standaloneMiniCPMThinkEnd(value);
+        if (end != std::string::npos) {
+            thinking = trim(value.substr(0, end));
+            return trim(value.substr(end + std::string("</think>").size()));
+        }
         return trim(value);
     }
     const size_t bodyStart = start + std::string("<think>").size();

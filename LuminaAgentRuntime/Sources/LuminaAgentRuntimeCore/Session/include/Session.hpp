@@ -53,6 +53,8 @@ public:
 
     // Validates and records one model-produced ReAct step.
     std::string recordStep(const std::string &stepJson);
+    // A multi-tool step consumes budget per attempted child, not per container.
+    bool consumeToolCallBudget();
 
     // Records a runtime-owned observation generated from tool/environment output.
     std::string recordObservation(
@@ -62,7 +64,10 @@ public:
         const std::string &errorMessage,
         bool confirmationRequired,
         bool confirmed,
-        const std::string &outputJson = ""
+        const std::string &outputJson = "",
+        const std::string &callId = "",
+        const std::string &logicalCallKey = "",
+        bool validationFailed = false
     );
 
     // Records a Markdown result and marks the session as complete.
@@ -165,7 +170,7 @@ public:
     void recordToolCallLedgerEntry(const ToolCallLedgerEntry &entry);
     std::string toolResultCandidatesJson(int maxItems, int minCharacters) const;
     std::string toolReplayObservationsJson() const;
-    std::string recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry);
+    std::string recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry, const std::string &callId = "", const std::string &logicalCallKey = "");
 
     // Terminal state helpers for cancellation and unrecoverable failures.
     void cancel();
@@ -187,6 +192,7 @@ private:
     bool cancelled_ = false;
     bool hasSucceededTool_ = false;
     bool hasFailedTool_ = false;
+    std::set<std::string> unresolvedValidationFailureKeys_;
     bool hasCancelledTool_ = false;
     bool paused_ = false;
     std::string requestJson_;

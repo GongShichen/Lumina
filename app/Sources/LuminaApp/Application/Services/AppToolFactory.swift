@@ -348,51 +348,9 @@ enum AppToolFactory {
     }
 
     private static func evaluationNotificationTool() -> AnyLuminaAgentTool {
-        AnyLuminaAgentTool(
-            schema: LuminaToolSchema(
-                name: "notification.schedule",
-                description: "安排本地通知。",
-                parameters: [
-                    LuminaToolParameterSchema(name: "title", type: .string, description: "通知标题。", required: false),
-                    LuminaToolParameterSchema(name: "body", type: .string, description: "通知正文。", required: false),
-                    LuminaToolParameterSchema(name: "dateISO", type: .dateISO8601, description: "通知时间。", required: false)
-                ],
-                sideEffect: .systemWrite,
-                sensitivity: .privateData,
-                idempotencyPolicy: "caller_keyed"
-            )
-        ) { arguments, cancellation in
-            try cancellation.checkCancellation()
-            if let iso = arguments.string("dateISO") {
-                guard let date = ISO8601DateFormatter().date(from: iso) else {
-                    return LuminaToolResult(
-                        callID: UUID(),
-                        toolName: "notification.schedule",
-                        status: .failed,
-                        output: ["summary": .string("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")],
-                        content: [.text("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")],
-                        errorMessage: "notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds."
-                    )
-                }
-                guard date >= Date().addingTimeInterval(-300) else {
-                    return LuminaToolResult(
-                        callID: UUID(),
-                        toolName: "notification.schedule",
-                        status: .failed,
-                        output: ["summary": .string("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")],
-                        content: [.text("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")],
-                        errorMessage: "notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds."
-                    )
-                }
-            }
-            return LuminaToolResult(
-                callID: UUID(),
-                toolName: "notification.schedule",
-                status: .succeeded,
-                output: arguments,
-                content: [.text("本地通知已安排。")]
-            )
-        }
+        // The in-memory implementation shares the production schema and pre-write
+        // validation, including validationFailed and actual execution output.
+        LuminaAppCore.LuminaNotificationScheduleTool().eraseToAnyTool()
     }
 
     private static func evaluationWebpageFetchTextTool() -> AnyLuminaAgentTool {

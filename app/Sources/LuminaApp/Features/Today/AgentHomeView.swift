@@ -106,7 +106,11 @@ struct AgentHomeView: View {
         }
         .sheet(item: Binding(
             get: { viewModel.pendingConfirmation },
-            set: { viewModel.pendingConfirmation = $0 }
+            set: { request in
+                if request == nil, let pending = viewModel.pendingConfirmation {
+                    viewModel.resolveConfirmation(id: pending.id, accepted: false)
+                }
+            }
         )) { request in
             ToolConfirmationSheet(request: request) { accepted in
                 viewModel.resolveConfirmation(id: request.id, accepted: accepted)
@@ -114,8 +118,17 @@ struct AgentHomeView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
-        .sheet(item: $viewModel.pendingMessage) { draft in
-            MessageComposeSheet(draft: draft)
+        .sheet(item: Binding(
+            get: { viewModel.pendingMessage },
+            set: { draft in
+                if draft == nil, let pending = viewModel.pendingMessage {
+                    viewModel.resolveMessage(id: pending.id, outcome: .cancelled)
+                }
+            }
+        )) { draft in
+            MessageComposeSheet(draft: draft) { outcome in
+                viewModel.resolveMessage(id: draft.id, outcome: outcome)
+            }
         }
         .fileImporter(
             isPresented: $viewModel.isFileImporterPresented,

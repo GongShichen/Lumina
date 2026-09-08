@@ -23,6 +23,7 @@ extension LuminaAgentRuntimeAdapterBox {
             let request = currentRequest ?? LuminaAgentRequest(text: "")
             let schema = tool.schema
             let call = LuminaToolCall(
+                id: runtimeCallID(parsed.callID),
                 toolName: parsed.toolName,
                 arguments: parsed.arguments,
                 requiresConfirmation: parsed.requiresConfirmation
@@ -37,18 +38,18 @@ extension LuminaAgentRuntimeAdapterBox {
                 rawResult = LuminaToolResult(
                     callID: call.id,
                     toolName: call.toolName,
-                    status: .failed,
+                    status: error is CancellationError || Task.isCancelled ? .cancelled : .failed,
                     output: ["summary": .string(error.localizedDescription)],
                     content: [.text(error.localizedDescription)],
                     errorMessage: error.localizedDescription
                 )
             }
-            let result = rawResult
-            toolExecutionMilliseconds += Self.milliseconds(since: startedAt)
-            toolResults.append(result)
-            currentEventSink?(.toolFinished(result))
-            let content = result.content.compactMap(\.textForModelInput).joined(separator: "\n")
-            return Self.toolResultJSON(status: result.status.rawValue, content: content, errorMessage: result.errorMessage)
+            if !Task.isCancelled {
+                toolExecutionMilliseconds += Self.milliseconds(since: startedAt)
+            }
+            // The core validates and sanitizes this result before publishing its completion event.
+            // Publishing here leaks the host's raw output when a tool-output guardrail rewrites it.
+            return Self.toolResultJSON(rawResult)
         } catch {
             return Self.toolResultJSON(status: "failed", content: "", errorMessage: error.localizedDescription)
         }
@@ -203,6 +204,9 @@ extension LuminaAgentRuntimeAdapterBox {
                 requiresConfirmation: parsed.requiresConfirmation
             )
             let decision = await permissionGate.decision(for: call, schema: tool.schema, request: request)
+            guard !Task.isCancelled, !isCancellationRequested() else {
+                return #"{"decision":"denied","reason":"cancelled"}"#
+            }
             currentEventSink?(.permissionChecked(call, decision))
             switch decision {
             case .allowed:
@@ -230,6 +234,9 @@ extension LuminaAgentRuntimeAdapterBox {
             )
             currentEventSink?(.confirmationRequired(call))
             let confirmed = await confirmationCoordinator.confirm(call: call, schema: tool.schema, reason: "Lumina 需要执行 \(tool.schema.name)")
+            guard !Task.isCancelled, !isCancellationRequested() else {
+                return #"{"confirmed":false,"reason":"cancelled"}"#
+            }
             currentEventSink?(.confirmationResolved(call, confirmed))
             return #"{"confirmed":\#(confirmed)}"#
         } catch {
@@ -305,6 +312,12 @@ extension LuminaAgentRuntimeAdapterBox {
                         ])
                     case let .rejectToolCall(reason):
                         directiveObjects.append(["type": "reject_tool_call", "reason": reason])
+                    case let .rejectToolCallForValidation(reason, failure):
+                        directiveObjects.append([
+                            "type": "reject_tool_call", "reason": reason,
+                            "validation_failed": true,
+                            "output": ["failure": Self.foundationObject(from: .object(failure))]
+                        ])
                     case let .rewriteToolCall(call):
                         directiveObjects.append([
                             "type": "rewrite_tool_call",
@@ -369,28 +382,42 @@ extension LuminaAgentRuntimeAdapterBox {
         else { return }
         let outerPayload = object["payload"] as? [String: Any]
         let runtimePayload = (outerPayload?["payload"] as? [String: Any]) ?? outerPayload
-        if type == "observation_created",
+        if type == "tool_execution_completed",
+           let payload = runtimePayload,
+           let resultObject = payload["result"] as? [String: Any] {
+            let callID = (payload["call_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            var result = Self.toolResultFromObject(resultObject, fallbackToolName: payload["tool_name"] as? String ?? "runtime")
+            result.callID = runtimeCallID(callID)
+            publishToolResult(result, runtimeCallID: callID)
+        } else if type == "tool_call_budget_consumed",
+                  let actionCount = runtimePayload?["actionCount"] as? Int {
+            trace.consumedToolCallCount = actionCount
+        } else if type == "observation_created",
            let payload = runtimePayload,
            let observation = Self.observationFromRuntimePayload(payload) {
             if trace.steps.last?.observation != observation {
                 trace.steps.append(.observation(observation))
             }
-            var output: [String: LuminaJSONValue] = [:]
+            var output = observation.output
             if observation.replayed {
                 output["replayed"] = .bool(true)
             }
             if let duplicateOf = observation.duplicateOf {
                 output["duplicate_of"] = .string(duplicateOf)
             }
-            if observation.replayed || !toolResults.contains(where: { $0.toolName == observation.toolName && $0.status == observation.status }) {
-                toolResults.append(LuminaToolResult(
-                    callID: UUID(),
+            let callID = (payload["call_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            // A completed host call already has its full sanitized result. Preflight errors and
+            // replayed calls only produce observations, and each has its own core call identity.
+            if callID.flatMap({ toolResultIndices[$0] }) == nil {
+                publishToolResult(LuminaToolResult(
+                    callID: runtimeCallID(callID),
                     toolName: observation.toolName,
                     status: observation.status,
                     output: output,
                     content: [.text(observation.summary)],
-                    errorMessage: observation.errorMessage
-                ))
+                    errorMessage: observation.errorMessage,
+                    validationFailed: payload["validation_failed"] as? Bool
+                ), runtimeCallID: callID)
             }
             currentEventSink?(.observationCreated(observation))
         } else if type == "step_produced",
@@ -412,6 +439,24 @@ extension LuminaAgentRuntimeAdapterBox {
         } else {
             currentEventSink?(.hookAnnotated("runtime_event.\(type)", .string(eventJSON)))
         }
+    }
+
+    private func runtimeCallID(_ value: String?) -> UUID {
+        guard let value, !value.isEmpty else { return UUID() }
+        if let id = runtimeCallIDs[value] { return id }
+        let id = UUID(uuidString: value) ?? UUID()
+        runtimeCallIDs[value] = id
+        return id
+    }
+
+    private func publishToolResult(_ result: LuminaToolResult, runtimeCallID: String?) {
+        if let runtimeCallID, let index = toolResultIndices[runtimeCallID] {
+            toolResults[index] = result
+            return
+        }
+        if let runtimeCallID { toolResultIndices[runtimeCallID] = toolResults.count }
+        toolResults.append(result)
+        currentEventSink?(.toolFinished(result))
     }
 
     func makeStepContext(
@@ -454,9 +499,11 @@ extension LuminaAgentRuntimeAdapterBox {
         let schemas = modelVisibleToolSchemas()
         let iteration = budget?["iteration"] as? Int ?? trace.steps.count
         let remainingToolCalls = (budget?["remaining_tool_calls"] as? Int) ?? (budget?["remainingToolCalls"] as? Int) ?? max(0, configuration.maximumToolCalls - trace.actionCount)
+        trace.consumedToolCallCount = max(0, configuration.maximumToolCalls - remainingToolCalls)
         let progressSink: (@Sendable (LuminaStepGenerationProgress) -> Void)?
         if let eventSink = currentEventSink {
             progressSink = { progress in
+                guard !Task.isCancelled else { return }
                 self.stepGenerationMilliseconds = max(self.stepGenerationMilliseconds, progress.elapsedMilliseconds)
                 eventSink(.stepGenerationProgress(progress))
                 if streamEmit?(progress) == false {
@@ -466,6 +513,7 @@ extension LuminaAgentRuntimeAdapterBox {
         } else {
             if let streamEmit {
                 progressSink = { progress in
+                    guard !Task.isCancelled else { return }
                     self.stepGenerationMilliseconds = max(self.stepGenerationMilliseconds, progress.elapsedMilliseconds)
                     if streamEmit(progress) == false {
                         self.requestCancellation()
@@ -578,7 +626,7 @@ extension LuminaAgentRuntimeAdapterBox {
         return try? JSONDecoder().decode(LuminaAgentRequest.self, from: data)
     }
 
-    static func parseToolCall(_ json: String) throws -> (toolName: String, arguments: [String: LuminaJSONValue], requiresConfirmation: Bool) {
+    static func parseToolCall(_ json: String) throws -> (toolName: String, arguments: [String: LuminaJSONValue], requiresConfirmation: Bool, callID: String?) {
         let object = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
         guard let toolName = object?["tool_name"] as? String ?? object?["toolName"] as? String else {
             throw NSError(domain: "LuminaAgentRuntimeApple", code: 1, userInfo: [NSLocalizedDescriptionKey: "missing tool_name"])
@@ -587,7 +635,7 @@ extension LuminaAgentRuntimeAdapterBox {
         let parameterData = try JSONSerialization.data(withJSONObject: parameters)
         let arguments = (try? JSONDecoder().decode([String: LuminaJSONValue].self, from: parameterData)) ?? [:]
         let requiresConfirmation = object?["requires_confirmation"] as? Bool ?? object?["requiresConfirmation"] as? Bool ?? false
-        return (toolName, arguments, requiresConfirmation)
+        return (toolName, arguments, requiresConfirmation, object?["call_id"] as? String)
     }
 
     static func stepFromRuntimePayload(_ payload: [String: Any]) -> LuminaReActStep? {
@@ -641,7 +689,8 @@ extension LuminaAgentRuntimeAdapterBox {
             output: output,
             errorMessage: payload["errorMessage"] as? String,
             replayed: payload["replayed"] as? Bool ?? false,
-            duplicateOf: payload["duplicate_of"] as? String
+            duplicateOf: payload["duplicate_of"] as? String,
+            callID: (payload["call_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
@@ -722,7 +771,9 @@ extension LuminaAgentRuntimeAdapterBox {
             status: status,
             output: output,
             content: (resultObject["content"] as? String).map { [.text($0)] } ?? [],
-            errorMessage: resultObject["errorMessage"] as? String
+            errorMessage: resultObject["errorMessage"] as? String,
+            rollbackToken: resultObject["rollbackToken"] as? String ?? resultObject["rollback_token"] as? String,
+            validationFailed: resultObject["validation_failed"] as? Bool
         )
     }
 
@@ -736,7 +787,9 @@ extension LuminaAgentRuntimeAdapterBox {
             status: status,
             output: output,
             content: (object["content"] as? String).map { [.text($0)] } ?? [],
-            errorMessage: object["errorMessage"] as? String
+            errorMessage: object["errorMessage"] as? String,
+            rollbackToken: object["rollbackToken"] as? String ?? object["rollback_token"] as? String,
+            validationFailed: object["validation_failed"] as? Bool
         )
     }
 
@@ -774,6 +827,12 @@ extension LuminaAgentRuntimeAdapterBox {
         ]
         if let errorMessage = result.errorMessage {
             object["errorMessage"] = errorMessage
+        }
+        if let rollbackToken = result.rollbackToken {
+            object["rollbackToken"] = rollbackToken
+        }
+        if let validationFailed = result.validationFailed {
+            object["validation_failed"] = validationFailed
         }
         return object
     }
@@ -836,6 +895,11 @@ extension LuminaAgentRuntimeAdapterBox {
         case .cancelled: return "cancelled"
         case .failed: return "failed"
         }
+    }
+
+    static func toolResultJSON(_ result: LuminaToolResult) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: foundationObject(from: result))
+        return data.flatMap { String(data: $0, encoding: .utf8) } ?? #"{"status":"failed","content":"","errorMessage":"failed to encode tool result"}"#
     }
 
     static func toolResultJSON(status: String, content: String, errorMessage: String?) -> String {

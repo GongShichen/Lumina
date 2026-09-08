@@ -1,11 +1,13 @@
 import SwiftUI
+import LuminaAppCore
 
 struct MessageComposeSheet: View {
     let draft: LuminaMessageDraft
+    let onComplete: (LuminaMessageComposeOutcome) -> Void
 
     var body: some View {
         #if canImport(MessageUI) && canImport(UIKit) && !targetEnvironment(macCatalyst)
-        MessageComposeController(draft: draft)
+        MessageComposeController(draft: draft, onComplete: onComplete)
         #else
         VStack(alignment: .leading, spacing: 12) {
             Text("短信编辑器不可用")
@@ -19,6 +21,7 @@ struct MessageComposeSheet: View {
             }
         }
         .padding()
+        .task { onComplete(.failed("当前平台不支持系统短信编辑器。")) }
         #endif
     }
 }

@@ -8,6 +8,8 @@ public struct LuminaToolResult: Codable, Hashable, Sendable {
     public var content: [LuminaAgentContentPart]
     public var errorMessage: String?
     public var rollbackToken: String?
+    /// True only when validation rejected the call before any side effect occurred.
+    public var validationFailed: Bool?
 
     public init(
         callID: UUID,
@@ -16,7 +18,8 @@ public struct LuminaToolResult: Codable, Hashable, Sendable {
         output: [String: LuminaJSONValue] = [:],
         content: [LuminaAgentContentPart] = [],
         errorMessage: String? = nil,
-        rollbackToken: String? = nil
+        rollbackToken: String? = nil,
+        validationFailed: Bool? = nil
     ) {
         self.callID = callID
         self.toolName = toolName
@@ -25,5 +28,6 @@ public struct LuminaToolResult: Codable, Hashable, Sendable {
         self.content = content
         self.errorMessage = errorMessage
         self.rollbackToken = rollbackToken
+        self.validationFailed = validationFailed
     }
 }

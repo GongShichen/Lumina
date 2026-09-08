@@ -77,7 +77,7 @@ RunStatus RuntimeSession::status() const {
     if (!hasResult_ && terminationReason_.empty()) {
         return RunStatus::running;
     }
-    if (hasFailedTool_) {
+    if (hasFailedTool_ || !unresolvedValidationFailureKeys_.empty()) {
         return hasSucceededTool_ ? RunStatus::partiallySucceeded : RunStatus::failed;
     }
     return RunStatus::succeeded;
@@ -379,7 +379,7 @@ std::string RuntimeSession::recordStep(const std::string &stepJson) {
             terminationReason_ = "tool-budget";
             return "{\"ok\":false,\"error\":\"maximum tool call budget reached.\"}";
         }
-        actionCount_ += 1;
+        if (type != "multi_tool_use") actionCount_ += 1;
     } else if (type == "result") {
         hasResult_ = true;
         terminationReason_ = "result";
@@ -405,6 +405,17 @@ std::string RuntimeSession::recordStep(const std::string &stepJson) {
     return output.str();
 }
 
+bool RuntimeSession::consumeToolCallBudget() {
+    if (actionCount_ >= config_.maximumToolCalls) {
+        terminationReason_ = "tool-budget";
+        return false;
+    }
+    actionCount_ += 1;
+    appendTrace("tool_call_budget_consumed", "{\"actionCount\":" + std::to_string(actionCount_) +
+        ",\"remainingToolCalls\":" + std::to_string(std::max(0, config_.maximumToolCalls - actionCount_)) + "}");
+    return true;
+}
+
 std::string RuntimeSession::recordObservation(
     const std::string &toolName,
     const std::string &status,
@@ -412,13 +423,19 @@ std::string RuntimeSession::recordObservation(
     const std::string &errorMessage,
     bool confirmationRequired,
     bool confirmed,
-    const std::string &outputJson
+    const std::string &outputJson,
+    const std::string &callId,
+    const std::string &logicalCallKey,
+    bool validationFailed
 ) {
     const std::string resultStatus = lowercased(status.empty() ? "failed" : status);
     if (resultStatus == "succeeded") {
         hasSucceededTool_ = true;
+        if (!logicalCallKey.empty()) unresolvedValidationFailureKeys_.erase(logicalCallKey);
     } else if (resultStatus == "cancelled") {
         hasCancelledTool_ = true;
+    } else if (resultStatus == "failed" && validationFailed && !logicalCallKey.empty()) {
+        unresolvedValidationFailureKeys_.insert(logicalCallKey);
     } else {
         hasFailedTool_ = true;
     }
@@ -443,6 +460,7 @@ std::string RuntimeSession::recordObservation(
 
     std::ostringstream output;
     output << "{\"ok\":true,"
+           << "\"call_id\":" << jsonString(callId) << ","
            << "\"toolName\":" << jsonString(toolName) << ","
            << "\"status\":" << jsonString(resultStatus) << ","
            << "\"summary\":" << jsonString(summary) << ","
@@ -920,12 +938,17 @@ std::string RuntimeSession::toolReplayObservationsJson() const {
     return output.str();
 }
 
-std::string RuntimeSession::recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry) {
+std::string RuntimeSession::recordReplayObservation(const std::string &toolName, const ToolCallLedgerEntry &entry, const std::string &callId, const std::string &logicalCallKey) {
+    std::map<std::string, JsonField> resultFields;
+    parseFieldsOrEmpty(entry.rawResultJson, resultFields);
     const std::string resultStatus = lowercased(entry.status.empty() ? "succeeded" : entry.status);
     if (resultStatus == "succeeded") {
         hasSucceededTool_ = true;
+        if (!logicalCallKey.empty()) unresolvedValidationFailureKeys_.erase(logicalCallKey);
     } else if (resultStatus == "cancelled") {
         hasCancelledTool_ = true;
+    } else if (resultStatus == "failed" && boolField(resultFields, "validation_failed", false) && !logicalCallKey.empty()) {
+        unresolvedValidationFailureKeys_.insert(logicalCallKey);
     } else {
         hasFailedTool_ = true;
     }
@@ -960,10 +983,12 @@ std::string RuntimeSession::recordReplayObservation(const std::string &toolName,
 
     std::ostringstream output;
     output << "{\"ok\":true,"
+           << "\"call_id\":" << jsonString(callId) << ","
            << "\"toolName\":" << jsonString(toolName) << ","
            << "\"status\":" << jsonString(resultStatus) << ","
            << "\"summary\":" << jsonString(summary) << ","
-           << "\"errorMessage\":\"\","
+           << "\"output\":" << rawField(resultFields, "output", "{}") << ","
+           << "\"errorMessage\":" << jsonString(stringField(resultFields, "errorMessage")) << ","
            << "\"replayed\":true,"
            << "\"replay_count\":" << consecutiveReplayObservationCount_ << ","
            << "\"duplicate_of\":" << jsonString(entry.callId) << ","

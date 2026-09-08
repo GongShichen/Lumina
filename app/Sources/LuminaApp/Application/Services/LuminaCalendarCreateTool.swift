@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 @preconcurrency import EventKit
 import Foundation
 import PersonalMemory
@@ -26,23 +27,28 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
 
     func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        try await requestCalendarAccess()
-        guard let startDate = Self.date(from: arguments.string("startDateISO")) else {
-            return Self.failedResult("日程缺少有效的 startDateISO。请先用 device.current_time 获取当前时间，再基于用户的相对时间生成 ISO8601 开始时间。")
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        guard let startDate = arguments.string("startDateISO").flatMap(LuminaToolFailureFeedback.parseDate) else { preconditionFailure("Validated startDateISO is required") }
+        let endDate = arguments.string("endDateISO").flatMap(LuminaToolFailureFeedback.parseDate) ?? startDate.addingTimeInterval(1_800)
+        do {
+            try await requestCalendarAccess()
+        } catch AppToolError.permissionDenied(let reason) {
+            return LuminaToolFailureFeedback.enrich(
+                LuminaToolResult(callID: UUID(), toolName: schema.name, status: .denied, errorMessage: reason),
+                arguments: arguments, schema: schema
+            )
         }
-        let endDate = Self.date(from: arguments.string("endDateISO")) ?? startDate.addingTimeInterval(1_800)
-        guard startDate >= Date().addingTimeInterval(-300) else {
-            return Self.failedResult("日程开始时间在过去：\(Self.string(from: startDate))。请基于当前设备时间重新计算未来时间。")
-        }
-        guard endDate > startDate else {
-            return Self.failedResult("日程结束时间必须晚于开始时间。")
-        }
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
         let event = EKEvent(eventStore: eventStore)
         event.title = arguments.string("title") ?? "Lumina 日程"
         event.notes = arguments.string("notes")
         event.startDate = startDate
         event.endDate = endDate
         event.calendar = eventStore.defaultCalendarForNewEvents
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
         try eventStore.save(event, span: .thisEvent, commit: true)
         let identifier = event.eventIdentifier ?? event.calendarItemIdentifier
         return LuminaToolResult(
@@ -52,7 +58,9 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
             output: [
                 "identifier": .string(identifier),
                 "title": .string(event.title ?? "Lumina 日程"),
-                "startDateISO": .string(Self.string(from: startDate))
+                "startDateISO": .string(Self.string(from: startDate)),
+                "endDateISO": .string(Self.string(from: endDate)),
+                "executedArguments": .object(arguments)
             ],
             content: [.markdown("### 日程已创建\n\n- **\(event.title ?? "Lumina 日程")**\n- \(startDate.formatted(date: .abbreviated, time: .shortened))")],
             rollbackToken: identifier
@@ -77,10 +85,8 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
         case .fullAccess:
             return
         case .notDetermined:
-            let granted = try await LuminaSystemPermissionRequest.withTimeout {
-                try await LuminaPermissionTimingRecorder.shared.record {
-                    try await self.eventStore.requestFullAccessToEvents()
-                }
+            let granted = try await LuminaSystemPermissionRequest.awaitDecision {
+                try await self.eventStore.requestFullAccessToEvents()
             }
             if granted {
                 return
@@ -97,23 +103,8 @@ final class LuminaCalendarCreateTool: LuminaAgentTool, @unchecked Sendable {
         }
     }
 
-    private static func date(from value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
     private static func string(from date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
     }
 
-    private static func failedResult(_ message: String) -> LuminaToolResult {
-        LuminaToolResult(
-            callID: UUID(),
-            toolName: "calendar.create",
-            status: .failed,
-            output: ["reason": .string(message)],
-            content: [.markdown("### 日程未创建\n\n\(message)")],
-            errorMessage: message
-        )
-    }
 }

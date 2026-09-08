@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <atomic>
 
 #include "Callbacks.hpp"
 #include "Hooks.hpp"
@@ -78,7 +79,7 @@ public:
 private:
     RuntimeSessionConfig sessionConfig_;
     std::string configurationError_;
-    bool cancelled_ = false;
+    std::atomic_bool cancelled_{false};
     ToolRegistry tools_;
     SkillRegistry skills_;
     RuntimeCallbacks callbacks_;

@@ -99,7 +99,9 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
             try Task.checkCancellation()
             let startedAt = ContinuousClock.now
             let promptTokens = Self.approximateTokenCount(prompt)
-            let maxNewTokens = try maximumNewTokens(forInputTokenCount: promptTokens, override: maxOutputTokens)
+            // UTF-8 estimates are useful for progress only. The native tokenizer
+            // enforces the real context budget, including the chat template.
+            let maxNewTokens = max(1, min(maxOutputTokens ?? configuration.maxNewTokens, configuration.maxNewTokens))
 
             progress?(LuminaStructuredInferenceProgress(
                 phase: "prompt_encoded",
@@ -116,7 +118,7 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
                 partialOutput: nil
             ))
 
-            let response = try LuminaMiniCPMV46CxxEngineBridge.generate(
+            let response = try await LuminaMiniCPMV46CxxEngineBridge.generate(
                 modelDirectory: bundleInfo.directory,
                 backendPreference: configuration.backendPreference,
                 prompt: prompt,
@@ -166,19 +168,6 @@ public final class LuminaMiniCPMV46ReActModel: LuminaLocalDynamicOutputStreaming
                 partialOutput: output.truncatedForLuminaMiniCPMProgress(to: 320)
             ))
             return output.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        private func maximumNewTokens(forInputTokenCount inputTokenCount: Int, override: Int?) throws -> Int {
-            let remainingContext = bundleInfo.contextLength - inputTokenCount - configuration.outputSafetyMarginTokens
-            guard remainingContext > 0 else {
-                throw LuminaMiniCPMV46ReActModelError.contextWindowExhausted(
-                    inputTokens: inputTokenCount,
-                    contextLength: bundleInfo.contextLength,
-                    safetyMargin: configuration.outputSafetyMarginTokens
-                )
-            }
-            let requested = override.map { max(1, min($0, configuration.maxNewTokens)) } ?? configuration.maxNewTokens
-            return min(requested, remainingContext)
         }
 
         private nonisolated static func approximateTokenCount(_ text: String) -> Int {

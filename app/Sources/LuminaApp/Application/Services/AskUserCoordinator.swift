@@ -9,8 +9,17 @@ final class AskUserCoordinator: ObservableObject {
     private var continuations: [UUID: CheckedContinuation<LuminaAskUserResponse, Never>] = [:]
 
     nonisolated func ask(_ request: LuminaAskUserRequest) async -> LuminaAskUserResponse {
-        await withCheckedContinuation { continuation in
-            Task { @MainActor in
+        await waitForAnswer(request)
+    }
+
+    private func waitForAnswer(_ request: LuminaAskUserRequest) async -> LuminaAskUserResponse {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: LuminaAskUserResponse(requestID: request.id, answers: [], cancelled: true))
+                    return
+                }
+                if let pending { cancel(requestID: pending.id) }
                 continuations[request.id] = continuation
                 pending = request
                 lastStatus = AskUserStatus(
@@ -18,6 +27,10 @@ final class AskUserCoordinator: ObservableObject {
                     detail: request.reason,
                     isWaiting: true
                 )
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.cancel(requestID: request.id)
             }
         }
     }
@@ -40,12 +53,13 @@ final class AskUserCoordinator: ObservableObject {
     }
 
     private func resolve(_ response: LuminaAskUserResponse) {
-        pending = nil
+        guard let continuation = continuations.removeValue(forKey: response.requestID) else { return }
+        if pending?.id == response.requestID { pending = nil }
         lastStatus = AskUserStatus(
             title: response.cancelled ? "已暂停执行" : "已收到回答",
             detail: response.cancelled ? "Lumina 不会继续执行后续动作" : "继续执行本地 agent loop",
             isWaiting: false
         )
-        continuations.removeValue(forKey: response.requestID)?.resume(returning: response)
+        continuation.resume(returning: response)
     }
 }

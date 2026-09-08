@@ -85,7 +85,8 @@ public struct LuminaMCPToolProvider: Sendable {
                 output: result.output,
                 content: result.content,
                 errorMessage: result.errorMessage,
-                rollbackToken: result.rollbackToken
+                rollbackToken: result.rollbackToken,
+                validationFailed: result.validationFailed
             )
             return result
         }

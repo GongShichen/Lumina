@@ -29,16 +29,9 @@ public struct LuminaCalendarCreateTool: LuminaAgentTool {
 
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        guard let startDate = Self.date(from: arguments.string("startDateISO")) else {
-            return Self.failedResult("missing required parameter startDateISO")
-        }
-        let endDate = Self.date(from: arguments.string("endDateISO")) ?? startDate.addingTimeInterval(1_800)
-        guard startDate >= Date().addingTimeInterval(-300) else {
-            return Self.failedResult("calendar.create startDateISO is in the past; call device.current_time and recompute a future ISO8601 time.")
-        }
-        guard endDate > startDate else {
-            return Self.failedResult("calendar.create endDateISO must be later than startDateISO.")
-        }
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        guard let startDate = arguments.string("startDateISO").flatMap(LuminaToolFailureFeedback.parseDate) else { preconditionFailure("Validated startDateISO is required") }
+        let endDate = arguments.string("endDateISO").flatMap(LuminaToolFailureFeedback.parseDate) ?? startDate.addingTimeInterval(1_800)
         let event = LuminaCalendarEvent(
             title: arguments.string("title") ?? "Lumina 日程",
             startDate: startDate,
@@ -53,7 +46,9 @@ public struct LuminaCalendarCreateTool: LuminaAgentTool {
             output: [
                 "identifier": .string(id),
                 "title": .string(event.title),
-                "startDateISO": .string(Self.string(from: startDate))
+                "startDateISO": .string(Self.string(from: startDate)),
+                "endDateISO": .string(Self.string(from: endDate)),
+                "executedArguments": .object(arguments)
             ],
             content: [.markdown("### 日程已创建\n\n- **\(event.title)**\n- \(startDate.formatted(date: .abbreviated, time: .shortened))")],
             rollbackToken: id
@@ -65,23 +60,8 @@ public struct LuminaCalendarCreateTool: LuminaAgentTool {
         return await store.removeEvent(id: token)
     }
 
-    private static func date(from value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
     private static func string(from date: Date) -> String {
         ISO8601DateFormatter().string(from: date)
     }
 
-    private static func failedResult(_ message: String) -> LuminaToolResult {
-        LuminaToolResult(
-            callID: UUID(),
-            toolName: "calendar.create",
-            status: .failed,
-            output: ["summary": .string(message)],
-            content: [.text(message)],
-            errorMessage: message
-        )
-    }
 }

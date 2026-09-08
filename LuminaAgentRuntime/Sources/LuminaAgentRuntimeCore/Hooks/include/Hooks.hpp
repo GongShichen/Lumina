@@ -10,6 +10,8 @@ struct RuntimeHookDirectives {
     bool hasFail = false;
     bool hasPause = false;
     bool hasRejectToolCall = false;
+    bool rejectionValidationFailed = false;
+    std::string rejectionOutputJson;
     bool hasRewriteToolCall = false;
     bool requiresConfirmation = false;
     bool hasAppendContext = false;

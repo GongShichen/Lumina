@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <atomic>
 
 #include "Callbacks.hpp"
 #include "Replay.hpp"
@@ -12,7 +13,8 @@ namespace LuminaAgent {
 class ToolExecutor {
 public:
     // Binds one execution pass to the immutable tool registry and callback set.
-    ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks, RuntimeReplayController *replay = nullptr);
+    ToolExecutor(const ToolRegistry &tools, const RuntimeCallbacks &callbacks, RuntimeReplayController *replay = nullptr,
+                 const std::atomic_bool *cancelled = nullptr);
 
     // Executes one validated tool call, including permission, confirmation, audit, and observation.
     std::string runToolCall(
@@ -30,6 +32,8 @@ private:
     const ToolRegistry &tools_;
     const RuntimeCallbacks &callbacks_;
     RuntimeReplayController *replay_;
+    const std::atomic_bool *cancelled_;
+    bool cancellationRequested() const;
 };
 
 } // namespace LuminaAgent

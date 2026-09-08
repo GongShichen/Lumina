@@ -85,7 +85,14 @@ static void mergeDirective(RuntimeHookDirectives &target, const std::string &jso
         return;
     }
     if (type == "reject_tool_call") {
+        // A policy rejection takes precedence over a recoverable validation rejection.
+        const bool validationFailed = boolField(fields, "validation_failed", false);
+        if (target.hasRejectToolCall && !target.rejectionValidationFailed && validationFailed) {
+            return;
+        }
         target.hasRejectToolCall = true;
+        target.rejectionValidationFailed = validationFailed;
+        target.rejectionOutputJson = rawField(fields, "output", "{}");
         target.reason = stringField(fields, "reason", stringField(fields, "message", "tool call rejected by hook"));
         return;
     }

@@ -23,7 +23,8 @@ public struct LuminaAskUserTool: LuminaAgentTool {
             sideEffect: .readOnly,
             sensitivity: .privateData,
             acceptedInputModalities: [.text, .structuredData],
-            outputModalities: [.text, .structuredData]
+            outputModalities: [.text, .structuredData],
+            requiresUserInteraction: true
         )
     }
 

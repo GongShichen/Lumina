@@ -19,7 +19,10 @@ struct LuminaAgentRunSummary: Equatable, Sendable {
             return status == .succeeded ? "没有需要执行的工具。" : "本次执行未完成。"
         }
         let succeeded = toolResults.filter { $0.status == .succeeded }.count
-        return "\(succeeded)/\(toolResults.count) 个工具已完成。"
+        if status == .succeeded {
+            return "任务已完成，\(succeeded) 次工具调用成功。" + (succeeded < toolResults.count ? "纠正前的失败尝试保留在下方记录中。" : "")
+        }
+        return "\(succeeded) 次工具调用成功，\(toolResults.count - succeeded) 次尝试未完成。"
     }
 
     var sourceCount: Int {

@@ -28,12 +28,13 @@ public struct LuminaSummarizingReActContextCompactor: LuminaReActContextCompacto
             summary: summary
         )
         let compactedStep = LuminaReActStep.observation(compactedObservation)
-        let compactedActions = dropped.filter { $0.kind == .action }.count
+        let compactedActions = LuminaReActTrace(steps: dropped).actionCount
         let compactedTrace = LuminaReActTrace(
             steps: [compactedStep] + preserved,
             terminationReason: request.trace.terminationReason,
             compactedActionCount: request.trace.compactedActionCount + compactedActions,
-            compactionCount: request.trace.compactionCount + 1
+            compactionCount: request.trace.compactionCount + 1,
+            consumedToolCallCount: request.trace.consumedToolCallCount
         )
         let estimatedAfter = LuminaReActContextWindowEstimator.estimateCharacters(
             request: request.agentRequest,
@@ -74,7 +75,7 @@ public struct LuminaSummarizingReActContextCompactor: LuminaReActContextCompacto
             }
         }
 
-        let actions = steps.compactMap(\.action)
+        let actions = steps.flatMap { $0.kind == .multiAction ? $0.toolCalls : $0.action.map { [$0] } ?? [] }
         if !actions.isEmpty {
             lines.append("")
             lines.append("#### Compacted tool calls")

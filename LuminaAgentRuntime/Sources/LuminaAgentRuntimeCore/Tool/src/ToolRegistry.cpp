@@ -557,6 +557,11 @@ int ToolRegistry::estimatedDeferredSchemaTokens() const {
     return std::max(0, characters / 4);
 }
 
+std::string ToolRegistry::schemaJson(const std::string &toolName) const {
+    const auto record = records_.find(resolveName(toolName));
+    return record == records_.end() ? "null" : record->second.raw;
+}
+
 std::string ToolRegistry::validateCallJson(const std::string &toolName, const std::string &parametersJson) const {
     auto recordIt = records_.find(resolveName(toolName));
     if (recordIt == records_.end()) {
@@ -567,20 +572,42 @@ std::string ToolRegistry::validateCallJson(const std::string &toolName, const st
     if (!parseTopLevelObject(parametersJson.empty() ? "{}" : parametersJson, parameters, error)) {
         return "{\"ok\":false,\"error\":\"tool parameters must be a JSON object: " + escapeJson(error) + "\"}";
     }
+    std::string reasons;
+    std::string fieldErrors = "[";
+    std::string missingInformation = "[";
     for (const Parameter &parameter : recordIt->second.parameters) {
+        auto appendFailure = [&](const std::string &reason, bool missing) {
+            if (!reasons.empty()) reasons += "; ";
+            reasons += reason;
+            if (fieldErrors != "[") fieldErrors += ",";
+            fieldErrors += "{\"field\":" + jsonString(parameter.name) +
+                ",\"reason\":" + jsonString(reason) +
+                ",\"expectedType\":" + jsonString(parameter.type) +
+                ",\"allowedValues\":" + (parameter.enumJson.empty() ? "null" : parameter.enumJson) +
+                "}";
+            if (missing) {
+                if (missingInformation != "[") missingInformation += ",";
+                missingInformation += jsonString(parameter.name);
+            }
+        };
         auto valueIt = parameters.find(parameter.name);
         if (valueIt == parameters.end()) {
             if (parameter.required) {
-                return "{\"ok\":false,\"error\":\"missing required parameter " + escapeJson(parameter.name) + "\"}";
+                appendFailure("missing required parameter " + parameter.name, true);
             }
             continue;
         }
         if (!parameterTypeMatches(parameter, valueIt->second)) {
-            return "{\"ok\":false,\"error\":\"parameter " + escapeJson(parameter.name) + " has invalid type\"}";
+            appendFailure("parameter " + parameter.name + " has invalid type", false);
+            continue;
         }
         if (!parameterEnumMatches(parameter, valueIt->second)) {
-            return "{\"ok\":false,\"error\":\"parameter " + escapeJson(parameter.name) + " is not in the allowed enum\"}";
+            appendFailure("parameter " + parameter.name + " is not in the allowed enum", false);
         }
+    }
+    if (!reasons.empty()) {
+        return "{\"ok\":false,\"error\":" + jsonString(reasons) + ",\"fieldErrors\":" + fieldErrors +
+            "],\"missingInformation\":" + missingInformation + "]}";
     }
     return "{\"ok\":true}";
 }

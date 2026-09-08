@@ -21,6 +21,9 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
     var currentRequest: LuminaAgentRequest?
     var trace = LuminaReActTrace()
     var toolResults: [LuminaToolResult] = []
+    // C++ call IDs are authoritative and need not be UUID strings.
+    var runtimeCallIDs: [String: UUID] = [:]
+    var toolResultIndices: [String: Int] = [:]
     var timingStartedAt: ContinuousClock.Instant?
     var stepGenerationMilliseconds: Double = 0
     var toolExecutionMilliseconds: Double = 0
@@ -142,6 +145,9 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         let status = LuminaAgentRunStatus(rawValue: statusText ?? "") ?? ((object?["ok"] as? Bool) == false ? .failed : .succeeded)
         let resultMarkdown = (object?["resultMarkdown"] as? String) ?? trace.steps.last?.resultMarkdown ?? "### 执行结束"
         var finalTrace = trace
+        if let actionCount = object?["actionCount"] as? Int {
+            finalTrace.consumedToolCallCount = actionCount
+        }
         if finalTrace.terminationReason == nil,
            let terminationReason = object?["terminationReason"] as? String,
            !terminationReason.isEmpty {
@@ -154,7 +160,9 @@ final class LuminaAgentRuntimeAdapterBox: @unchecked Sendable {
         )
         return LuminaAgentRunResult(
             requestID: request.id,
-            plan: LuminaAgentPlan(summary: resultMarkdown, toolCalls: trace.steps.compactMap(\.action)),
+            plan: LuminaAgentPlan(summary: resultMarkdown, toolCalls: trace.steps.flatMap { step in
+                step.kind == .multiAction ? step.toolCalls : step.action.map { [$0] } ?? []
+            }),
             toolResults: toolResults,
             status: status,
             timing: timing,

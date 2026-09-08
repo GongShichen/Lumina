@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 import Foundation
 import UserNotifications
 
@@ -23,15 +24,22 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
 
     func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        try await requestNotificationAccess()
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        do {
+            try await requestNotificationAccess()
+        } catch AppToolError.permissionDenied(let reason) {
+            return LuminaToolFailureFeedback.enrich(
+                LuminaToolResult(callID: UUID(), toolName: schema.name, status: .denied, errorMessage: reason),
+                arguments: arguments, schema: schema
+            )
+        }
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        let fireDate = arguments.string("dateISO").flatMap(LuminaToolFailureFeedback.parseDate)
+            ?? Date().addingTimeInterval(arguments.number("timeIntervalSeconds")!)
         let title = arguments.string("title") ?? "Lumina 提醒"
         let body = arguments.string("body") ?? title
-        guard let fireDate = Self.fireDate(arguments: arguments) else {
-            return Self.failedResult("notification.schedule dateISO is invalid; provide a valid future ISO8601 date or timeIntervalSeconds.")
-        }
-        guard fireDate >= Date().addingTimeInterval(-300) else {
-            return Self.failedResult("notification.schedule dateISO is in the past; call device.current_time and recompute a future time, or use timeIntervalSeconds.")
-        }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -39,6 +47,8 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, fireDate.timeIntervalSinceNow), repeats: false)
         let identifier = UUID().uuidString
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        try Task.checkCancellation()
+        try cancellation.checkCancellation()
         try await UNUserNotificationCenter.current().add(request)
         return LuminaToolResult(
             callID: UUID(),
@@ -47,7 +57,8 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
             output: [
                 "identifier": .string(identifier),
                 "title": .string(title),
-                "fireDate": .string(ISO8601DateFormatter().string(from: fireDate))
+                "fireDate": .string(ISO8601DateFormatter().string(from: fireDate)),
+                "executedArguments": .object(arguments)
             ],
             content: [.markdown("## 通知已安排\n\n\(title)")]
         )
@@ -60,7 +71,7 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
         case .authorized, .ephemeral, .provisional:
             return
         case .notDetermined:
-            let granted = try await LuminaPermissionTimingRecorder.shared.record {
+            let granted = try await LuminaSystemPermissionRequest.awaitDecision {
                 try await center.requestAuthorization(options: [.alert, .sound])
             }
             if !granted {
@@ -73,24 +84,4 @@ struct LuminaNotificationScheduleTool: LuminaAgentTool {
         }
     }
 
-    private static func fireDate(arguments: [String: LuminaJSONValue]) -> Date? {
-        if let iso = arguments.string("dateISO") {
-            return ISO8601DateFormatter().date(from: iso)
-        }
-        if let interval = arguments.number("timeIntervalSeconds") {
-            return Date().addingTimeInterval(max(1, interval))
-        }
-        return Date().addingTimeInterval(1_800)
-    }
-
-    private static func failedResult(_ message: String) -> LuminaToolResult {
-        LuminaToolResult(
-            callID: UUID(),
-            toolName: "notification.schedule",
-            status: .failed,
-            output: ["summary": .string(message)],
-            content: [.text(message)],
-            errorMessage: message
-        )
-    }
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,6 +14,19 @@ char *LuminaMiniCPMV46GenerateReActJSON(
     int contextLength,
     int maxOutputTokens,
     int safetyMarginTokens
+);
+
+// The callback/context are scoped to this synchronous request and never retained.
+typedef bool (*LuminaModelCancellationCallback)(void *context);
+char *LuminaMiniCPMV46GenerateReActJSONCancellable(
+    const char *modelDirectory,
+    const char *backendPreference,
+    const char *prompt,
+    int contextLength,
+    int maxOutputTokens,
+    int safetyMarginTokens,
+    LuminaModelCancellationCallback isCancelled,
+    void *cancellationContext
 );
 
 void LuminaModelRuntimeFreeCString(char *value);

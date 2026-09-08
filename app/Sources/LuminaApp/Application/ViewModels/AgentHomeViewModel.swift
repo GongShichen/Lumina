@@ -70,6 +70,7 @@ final class AgentHomeViewModel: ObservableObject {
 
     func stop() {
         runTask?.cancel()
+        cancelPendingInteractions()
         runTask = nil
         benchmarkTask?.cancel()
         benchmarkTask = nil
@@ -88,6 +89,22 @@ final class AgentHomeViewModel: ObservableObject {
 
     func resolveConfirmation(id: UUID, accepted: Bool) {
         services?.confirmation.resolve(id: id, accepted: accepted)
+    }
+
+    func resolveMessage(id: UUID, outcome: LuminaMessageComposeOutcome) {
+        if pendingMessage?.id == id { pendingMessage = nil }
+        guard let services else { return }
+        Task { await services.messageDrafts.resolve(id: id, outcome: outcome) }
+    }
+
+    private func cancelPendingInteractions() {
+        if let pendingConfirmation {
+            services?.confirmation.resolve(id: pendingConfirmation.id, accepted: false)
+        }
+        if let pendingAskUser {
+            services?.askUser.cancel(requestID: pendingAskUser.id)
+        }
+        if let pendingMessage { resolveMessage(id: pendingMessage.id, outcome: .cancelled) }
     }
 
     func submitAskUser(requestID: UUID, answers: [LuminaAskUserAnswer]) {
@@ -258,7 +275,7 @@ final class AgentHomeViewModel: ObservableObject {
 
     private func startMessageDraftStream(services: AgentAppServices) {
         messageDraftTask = Task { [weak self] in
-            for await draft in await services.messageDrafts.drafts() {
+            for await draft in await services.messageDrafts.presentationChanges() {
                 guard !Task.isCancelled else { break }
                 self?.pendingMessage = draft
             }
@@ -317,10 +334,8 @@ final class AgentHomeViewModel: ObservableObject {
     }
 
     private func cancelRun() {
-        if let pendingAskUser {
-            services?.askUser.cancel(requestID: pendingAskUser.id)
-        }
         runTask?.cancel()
+        cancelPendingInteractions()
         runTask = nil
         isRunning = false
         timelineItems.append(AgentRunTimelineItem(
@@ -510,8 +525,9 @@ final class AgentHomeViewModel: ObservableObject {
             snapshot = runningSnapshot(title: "读取执行结果", detail: observation.summary, toolName: observation.toolName, progress: baseProgress)
         case .resultGenerated:
             snapshot = runningSnapshot(title: "正在整理回复", detail: "生成可读 Markdown 结果", progress: 0.94)
-        case let .hookAnnotated(key, _):
-            snapshot = runningSnapshot(title: "运行标注", detail: key, progress: baseProgress)
+        case .hookAnnotated:
+            // Internal diagnostics remain in the trace; do not replace user-facing progress.
+            return
         case let .contextUpdated(context):
             snapshot = runningSnapshot(title: "上下文已更新", detail: "\(context.sections.count) 个片段", progress: baseProgress)
         case let .permissionChecked(call, decision):
@@ -560,7 +576,7 @@ final class AgentHomeViewModel: ObservableObject {
             snapshot = LuminaAgentActivitySnapshot(
                 state: state,
                 title: result.status == .succeeded ? "执行已完成" : "执行未完成",
-                detail: result.toolResults.isEmpty ? "结果已准备好" : "\(result.toolResults.filter { $0.status == .succeeded }.count)/\(result.toolResults.count) 个工具完成",
+                detail: LuminaAgentRunSummary(result: result).userSummary,
                 toolName: nil,
                 progress: 1,
                 isLocalOnly: true

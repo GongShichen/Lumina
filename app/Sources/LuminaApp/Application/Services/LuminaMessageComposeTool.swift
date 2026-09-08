@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 @preconcurrency import EventKit
 import Foundation
 import PersonalMemory
@@ -39,16 +40,8 @@ struct LuminaMessageComposeTool: LuminaAgentTool {
             errorMessage: "macOS 版本不支持系统短信编辑器。"
         )
         #else
-        let recipient = arguments.string("recipient").map { [$0] } ?? []
-        let body = arguments.string("body") ?? ""
-        await messageDrafts.publish(LuminaMessageDraft(recipients: recipient, body: body))
-        return LuminaToolResult(
-            callID: UUID(),
-            toolName: schema.name,
-            status: .succeeded,
-            output: ["draft": .string("Message composer opened.")],
-            content: [.text("短信编辑器已打开，等待用户发送或取消。")]
-        )
+        return try await LuminaAppCore.LuminaMessageComposeTool(messageDrafts: messageDrafts)
+            .call(arguments: arguments, cancellation: cancellation)
         #endif
     }
 }

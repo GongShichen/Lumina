@@ -16,44 +16,63 @@ import Vision
 
 extension LuminaExtendedToolCatalog {
     static func pimTools(calendarStore: LuminaVolatileCalendarStore) -> [LuminaConfiguredTool] {
-        [
-            tool(name: "calendar.update", description: "修改日历事件标题、时间或备注。", params: [
+        let updateSchema = LuminaToolSchema(
+            name: "calendar.update", description: "修改日历事件标题、时间或备注。", parameters: [
                 param("id", "事件 identifier。"),
                 param("title", "新标题。", required: false),
                 param("startDateISO", "新的开始时间。", type: .dateISO8601, required: false),
                 param("endDateISO", "新的结束时间。", type: .dateISO8601, required: false),
                 param("notes", "备注。", required: false, sensitive: true)
-            ], sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
+            ], sideEffect: .systemWrite, sensitivity: .privateData
+        )
+        return [
+            tool(name: updateSchema.name, description: updateSchema.description, params: updateSchema.parameters,
+                 sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
                 try cancellation.checkCancellation()
-                guard let id = await calendarID(arguments: arguments, store: calendarStore) else { return failed("calendar.update", "缺少事件 identifier。") }
-                if let rawStart = arguments.string("startDateISO") {
-                    guard let parsedStart = date(rawStart) else {
-                        return failed("calendar.update", "startDateISO 不是有效 ISO8601 时间。")
-                    }
-                    guard parsedStart >= Date().addingTimeInterval(-300) else {
-                        return failed("calendar.update", "startDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
-                    }
+                if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: updateSchema, arguments: arguments) {
+                    return failure
                 }
-                if let rawEnd = arguments.string("endDateISO") {
-                    guard let parsedEnd = date(rawEnd) else {
-                        return failed("calendar.update", "endDateISO 不是有效 ISO8601 时间。")
-                    }
-                    guard parsedEnd >= Date().addingTimeInterval(-300) else {
-                        return failed("calendar.update", "endDateISO 在过去；请先读取 device.current_time 并重新计算未来时间。")
-                    }
+                guard let id = await calendarID(arguments: arguments, store: calendarStore),
+                      let existing = await calendarStore.allEvents().first(where: { $0.id.uuidString == id }) else {
+                    let reason = "id must be the real identifier of an existing calendar event, not its title. No write was performed."
+                    return LuminaToolResult(
+                        callID: UUID(), toolName: updateSchema.name, status: .failed,
+                        output: ["failure": LuminaToolFailureFeedback.payload(
+                            code: "missing_identifier", reason: reason, toolName: updateSchema.name,
+                            arguments: arguments, schema: updateSchema,
+                            fieldErrors: [.object(["field": .string("id"), "reason": .string(reason)])],
+                            suggestedCall: .object(["toolName": .string("calendar.search"), "arguments": .object([:])]),
+                            missingInformation: ["id from a successful calendar.search observation"], retryPolicy: "prerequisite",
+                            guidance: "Call calendar.search, select the event matching the user's request and use its exact returned id. Do not put a title, query or invented identifier in id."
+                        )], content: [.text(reason)], errorMessage: reason, validationFailed: true
+                    )
+                }
+                let newStart = arguments.string("startDateISO").flatMap(LuminaToolFailureFeedback.parseDate)
+                let newEnd = arguments.string("endDateISO").flatMap(LuminaToolFailureFeedback.parseDate)
+                let effectiveStart = newStart ?? existing.startDate
+                let effectiveEnd = newEnd ?? existing.endDate
+                guard let effectiveEnd, effectiveEnd > effectiveStart else {
+                    return LuminaToolFailureFeedback.validationFailure(
+                        schema: updateSchema, arguments: arguments, code: "invalid_date_range",
+                        reason: "The updated endDateISO must be later than startDateISO. Omitting endDateISO preserves the existing end; no write was performed.",
+                        field: "endDateISO",
+                        guidance: "Use calendar.search to read the event's actual start and end. Supply an endDateISO after the requested new start, based on the user's requested duration or end time; do not invent a duration."
+                    )
                 }
                 let event = await calendarStore.updateEvent(
                     id: id,
                     title: arguments.string("title"),
-                    startDate: date(arguments.string("startDateISO")),
-                    endDate: date(arguments.string("endDateISO")),
+                    startDate: newStart,
+                    endDate: newEnd,
                     notes: arguments.string("notes")
                 )
                 guard let event else { return failed("calendar.update", "没有找到要修改的日历事件。") }
                 return succeeded("calendar.update", "日程已更新：\(event.title)", [
                     "id": .string(event.id.uuidString),
                     "title": .string(event.title),
-                    "startDateISO": .string(iso(event.startDate))
+                    "startDateISO": .string(iso(event.startDate)),
+                    "endDateISO": .string(iso(effectiveEnd)),
+                    "executedArguments": .object(arguments)
                 ])
             },
             tool(name: "calendar.delete", description: "删除指定日历事件。", params: [param("id", "事件 identifier。")], sideEffect: .systemWrite, sensitivity: .privateData) { arguments, cancellation in
@@ -651,36 +670,9 @@ private func calendarID(
     arguments: [String: LuminaJSONValue],
     store: LuminaVolatileCalendarStore
 ) async -> String? {
-    if let id = arguments.string("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
-       UUID(uuidString: id) != nil {
-        return id
-    }
-    let query = [
-        arguments.string("id"),
-        arguments.string("query"),
-        arguments.string("title"),
-        arguments.string("name"),
-        arguments.string("notes")
-    ]
-        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        .first { !$0.isEmpty }
-    guard let query else { return nil }
-    let queryTokens = Set(query.split { character in
-        !(character.isLetter || character.isNumber)
-    }.map(String.init).filter { !$0.isEmpty })
-    let events = await store.allEvents()
-        .sorted { $0.startDate < $1.startDate }
-    return events.first { event in
-        let haystack = [event.title, event.notes ?? ""]
-            .joined(separator: " ")
-            .lowercased()
-        if haystack.contains(query) || query.contains(haystack) {
-            return true
-        }
-        return !queryTokens.isEmpty && queryTokens.contains { token in
-            token.count >= 4 && haystack.contains(token)
-        }
-    }?.id.uuidString
+    guard let rawID = arguments.string("id")?.trimmingCharacters(in: .whitespacesAndNewlines),
+          let id = UUID(uuidString: rawID) else { return nil }
+    return await store.allEvents().first(where: { $0.id == id })?.id.uuidString
 }
 
 private func subscriptionID(

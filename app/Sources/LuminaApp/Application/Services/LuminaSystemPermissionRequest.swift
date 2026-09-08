@@ -1,24 +1,23 @@
 import Foundation
+import LuminaAppCore
 
 enum LuminaSystemPermissionRequest {
-    static func withTimeout(
-        seconds: UInt64 = 15,
-        operation: @escaping @Sendable () async throws -> Bool
+    static func awaitDecision(
+        operation: @escaping @MainActor @Sendable () async throws -> Bool
     ) async throws -> Bool {
-        try await withCheckedThrowingContinuation { continuation in
-            let gate = LuminaSystemPermissionResumeGate()
-            Task {
-                do {
-                    let result = try await operation()
-                    gate.resume(.success(result), continuation: continuation)
-                } catch {
-                    gate.resume(.failure(error), continuation: continuation)
-                }
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                gate.resume(.failure(AppToolError.permissionDenied("系统权限请求没有及时返回。请在系统设置中检查权限后再试。")), continuation: continuation)
+        try await LuminaPermissionTimingRecorder.shared.record {
+            try await LuminaPermissionDecisionAwaiter.wait {
+                try await requestOnMainActor(operation)
             }
         }
+    }
+
+    @MainActor
+    private static func requestOnMainActor(
+        _ operation: @MainActor @Sendable () async throws -> Bool
+    ) async throws -> Bool {
+        // Cancellation may arrive while this request waits for the main actor.
+        try Task.checkCancellation()
+        return try await operation()
     }
 }

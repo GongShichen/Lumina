@@ -1,4 +1,5 @@
 import LuminaAgentRuntime
+import LuminaAppCore
 import Combine
 import Foundation
 import LuminaModelRuntime
@@ -35,13 +36,13 @@ enum LocalModelBootstrap {
                 }
             }
         )
-        guard let remoteSettings else { return local }
-        return LuminaRemoteFallbackReActStepGenerator(
+        guard let remoteSettings else { return LuminaToolOutcomeCheckedStepGenerator(underlying: local) }
+        return LuminaToolOutcomeCheckedStepGenerator(underlying: LuminaRemoteFallbackReActStepGenerator(
             settings: remoteSettings,
             local: local,
             readinessStore: readinessStore,
             metricsStore: metricsStore
-        )
+        ))
     }
 
     static func makeEmbeddingProvider(readinessStore: LuminaModelReadinessStore? = nil) -> any LuminaEmbeddingProvider {

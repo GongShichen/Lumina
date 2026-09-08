@@ -28,10 +28,8 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
 
     public func call(arguments: [String: LuminaJSONValue], cancellation: LuminaCancellationToken) async throws -> LuminaToolResult {
         try cancellation.checkCancellation()
-        let dueDate = Self.date(from: arguments.string("dueDateISO"))
-        if let dueDate, dueDate < Date().addingTimeInterval(-300) {
-            return Self.failedResult("reminder.create dueDateISO is in the past; call device.current_time and recompute a future ISO8601 time.")
-        }
+        if let failure = LuminaToolFailureFeedback.validateScheduledWrite(schema: schema, arguments: arguments) { return failure }
+        let dueDate = arguments.string("dueDateISO").flatMap(LuminaToolFailureFeedback.parseDate)
         let reminder = LuminaReminderItem(
             title: arguments.string("title") ?? "Agent Reminder",
             notes: arguments.string("notes"),
@@ -42,7 +40,11 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
             callID: UUID(),
             toolName: schema.name,
             status: .succeeded,
-            output: ["identifier": .string(id)],
+            output: [
+                "identifier": .string(id), "title": .string(reminder.title),
+                "dueDateISO": dueDate.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
+                "executedArguments": .object(arguments)
+            ],
             content: [.text("提醒已创建：\(reminder.title)")],
             rollbackToken: id
         )
@@ -53,19 +55,4 @@ public struct LuminaReminderCreateTool: LuminaAgentTool {
         return await store.removeReminder(id: token)
     }
 
-    private static func date(from value: String?) -> Date? {
-        guard let value else { return nil }
-        return ISO8601DateFormatter().date(from: value)
-    }
-
-    private static func failedResult(_ message: String) -> LuminaToolResult {
-        LuminaToolResult(
-            callID: UUID(),
-            toolName: "reminder.create",
-            status: .failed,
-            output: ["summary": .string(message)],
-            content: [.text(message)],
-            errorMessage: message
-        )
-    }
 }
